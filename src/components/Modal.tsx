@@ -6,12 +6,14 @@ export default function Modal({
   title,
   children,
   footer,
+  wide = false,
 }: {
   open: boolean;
   onClose: () => void;
   title?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
+  wide?: boolean;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -23,7 +25,7 @@ export default function Modal({
   if (!open) return null;
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+      <div className={`modal-card${wide ? " wide" : ""}`} onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <div className="modal-title">{title}</div>
           <button className="modal-close" onClick={onClose} aria-label="Close">

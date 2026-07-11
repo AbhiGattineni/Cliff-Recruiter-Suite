@@ -50,6 +50,36 @@ export interface LlmConfig {
   model: string;
 }
 
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  cost: number; // estimated USD (0 when the model has no known price)
+  priced: boolean; // false = no price for this model, cost is not meaningful
+}
+
+// Approximate USD per 1M tokens (input / output). Extend as models are added.
+const PRICES: Record<string, { in: number; out: number }> = {
+  "gpt-4o-mini": { in: 0.15, out: 0.6 },
+  "gpt-4o": { in: 2.5, out: 10 },
+  "gpt-4.1-mini": { in: 0.4, out: 1.6 },
+  "gpt-4.1": { in: 2, out: 8 },
+  "gpt-4.1-nano": { in: 0.1, out: 0.4 },
+  "o4-mini": { in: 1.1, out: 4.4 },
+};
+
+function priceFor(model: string): { in: number; out: number } | null {
+  const key = model.toLowerCase().trim();
+  return PRICES[key] ?? null;
+}
+
+function computeUsage(model: string, prompt: number, completion: number): TokenUsage {
+  const total = prompt + completion || prompt + completion;
+  const p = priceFor(model);
+  const cost = p ? (prompt / 1e6) * p.in + (completion / 1e6) * p.out : 0;
+  return { promptTokens: prompt, completionTokens: completion, totalTokens: total, cost, priced: !!p };
+}
+
 /** Pull the first balanced JSON object out of the model's reply. */
 function extractJson(text: string): unknown {
   const cleaned = text.replace(/```(?:json)?/gi, "").trim();
@@ -65,7 +95,7 @@ export async function assessResume(
   resumeText: string,
   jobDescription: string,
   config: LlmConfig
-): Promise<ResumeAssessment> {
+): Promise<{ assessment: ResumeAssessment; usage: TokenUsage }> {
   const { apiKey, model } = config;
   const url = `${config.baseUrl.replace(/\/+$/, "")}/chat/completions`;
   const headers: Record<string, string> = { "content-type": "application/json" };
@@ -96,15 +126,23 @@ export async function assessResume(
   const data = (await res.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
     message?: { content?: string };
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+    prompt_eval_count?: number; // native Ollama
+    eval_count?: number; // native Ollama
   };
   // OpenAI-compatible shape: choices[0].message.content. (Native Ollama: message.content.)
   const text = data.choices?.[0]?.message?.content ?? data.message?.content ?? "";
   if (!text) throw new Error("The model returned an empty response.");
 
+  const promptTokens = data.usage?.prompt_tokens ?? data.prompt_eval_count ?? 0;
+  const completionTokens = data.usage?.completion_tokens ?? data.eval_count ?? 0;
+  const usage = computeUsage(model, Number(promptTokens) || 0, Number(completionTokens) || 0);
+  if (data.usage?.total_tokens) usage.totalTokens = Number(data.usage.total_tokens);
+
   const parsed = extractJson(text) as ResumeAssessment;
 
   // Light normalisation so the UI never crashes on a missing field.
-  return {
+  const assessment: ResumeAssessment = {
     candidateName: parsed.candidateName ?? "",
     fitScore: Number(parsed.fitScore ?? 0),
     rating: parsed.rating ?? "Moderate",
@@ -117,4 +155,5 @@ export async function assessResume(
     aiGeneratedLines: Array.isArray(parsed.aiGeneratedLines) ? parsed.aiGeneratedLines : [],
     extracted: parsed.extracted ?? {},
   };
+  return { assessment, usage };
 }

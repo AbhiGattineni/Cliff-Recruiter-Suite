@@ -29,10 +29,10 @@ secret, calls the upstream API, and returns only the data.
 ## Folder map (frontend — `src/`)
 | Path | Purpose |
 |------|---------|
-| `pages/` | Route screens: `Home`, `ResumeParsing`, `ResumeReports`, `ReportGeneration`, `SavedReports`, `Login`, `Signup` |
-| `components/` | `Layout` (collapsible sidebar), `MultiSelect`, `ColumnPicker`, `PieChart`, `Modal`, `AssessmentDetail`, `ProtectedRoute` |
+| `pages/` | Route screens: `Home`, `ResumeParsing`, `ResumeReports`, `ReportGeneration`, `SavedReports`, `RecruiterPerformance`, `Login`, `Signup` |
+| `components/` | `Layout` (collapsible sidebar), `MultiSelect`, `ColumnPicker`, `PieChart`, `StageBar`, `Modal`, `AssessmentDetail`, `ProtectedRoute` |
 | `lib/report/` | The report engine (see [REPORT-GENERATION.md](REPORT-GENERATION.md)) |
-| `lib/` | `ceipal.ts`, `reportConfigs.ts`, `resumeReports.ts`, `resumeReportPdf.ts`, `dashboard.ts`, `errors.ts`, `auth.ts`, `resumeFile.ts` |
+| `lib/` | `ceipal.ts`, `reportConfigs.ts`, `recruiterStats.ts`, `resumeReports.ts`, `resumeReportPdf.ts`, `dashboard.ts`, `errors.ts`, `auth.ts`, `resumeFile.ts` |
 | `context/` | `AuthContext` |
 | `firebase.ts` | Firebase app + Auth/Firestore/Functions init (reads `VITE_*` env) |
 

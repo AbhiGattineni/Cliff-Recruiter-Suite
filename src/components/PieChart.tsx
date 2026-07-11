@@ -9,7 +9,15 @@ function polar(cx: number, cy: number, r: number, deg: number) {
   return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
 }
 
-export default function PieChart({ title, data }: { title: string; data: PieSlice[] }) {
+export default function PieChart({
+  title,
+  data,
+  showLegend = true,
+}: {
+  title: string;
+  data: PieSlice[];
+  showLegend?: boolean;
+}) {
   const total = data.reduce((s, d) => s + d.value, 0);
   const size = 150;
   const r = 62;
@@ -49,15 +57,17 @@ export default function PieChart({ title, data }: { title: string; data: PieSlic
               slices.map((s, i) => <path key={i} d={arc(s.start, s.end)} fill={s.color} stroke="#fff" strokeWidth={1} />)
             )}
           </svg>
-          <div style={{ fontSize: "0.8rem" }}>
-            {data.map((d) => (
-              <div key={d.label} style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginBottom: 2 }}>
-                <span style={{ width: 10, height: 10, background: d.color, borderRadius: 2, flexShrink: 0 }} />
-                <span style={{ color: "var(--muted)" }}>{d.label}</span>
-                <span style={{ fontWeight: 600, marginLeft: "auto" }}>{d.value}</span>
-              </div>
-            ))}
-          </div>
+          {showLegend && (
+            <div style={{ fontSize: "0.8rem" }}>
+              {data.map((d) => (
+                <div key={d.label} style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginBottom: 2 }}>
+                  <span style={{ width: 10, height: 10, background: d.color, borderRadius: 2, flexShrink: 0 }} />
+                  <span style={{ color: "var(--muted)" }}>{d.label}</span>
+                  <span style={{ fontWeight: 600, marginLeft: "auto" }}>{d.value}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

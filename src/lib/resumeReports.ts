@@ -11,6 +11,10 @@ export interface ResumeReport extends ResumeAssessment {
   model: string;
   jobDescriptionPreview?: string;
   createdAt: number | null; // epoch ms
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  cost?: number; // estimated USD
 }
 
 interface ListResponse {

@@ -101,6 +101,7 @@ function toJobRecord(o: Record<string, string>): JobRecord | null {
     experience: str(o.experience),
     mandateSkills: str(o.mandateSkills),
     comments: str(o.comments),
+    assignedTo: str(o.assignedTo),
   };
 }
 

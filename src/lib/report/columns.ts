@@ -35,6 +35,7 @@ export const JOB_FIELD_ALIASES: Record<string, string[]> = {
   experience: ["experience", "experiencerequired", "requiredexperience", "yearsofexperience", "totalexperience", "minexperience", "exp"],
   mandateSkills: ["mandateskills", "mandatoryskills", "mandatoryskill", "primaryskills", "keyskills", "requiredskills", "skillset", "skills", "musthaveskills"],
   comments: ["comments", "comment", "remarks", "additionalcomments", "concerns", "challenges", "notes"],
+  assignedTo: ["assignedto", "assignedrecruiter", "assignedrecruiters", "assignto", "assignee", "recruiterassigned"],
 };
 
 // Canonical submission-activity field -> accepted header spellings (normalised).

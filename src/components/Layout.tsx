@@ -9,6 +9,7 @@ const NAV = [
   { to: "/resume-reports", icon: "🗂️", label: "Resume Reports" },
   { to: "/reports", icon: "📊", label: "Report Generation" },
   { to: "/saved-reports", icon: "📁", label: "Saved Reports" },
+  { to: "/recruiters", icon: "🏆", label: "Recruiter Performance" },
 ];
 
 export default function Layout() {

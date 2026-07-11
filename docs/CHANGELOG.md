@@ -2,6 +2,43 @@
 
 Chronological record of notable changes. Newest first.
 
+## LLM token/cost tracking + index reweight + modal explainer
+- **Resume Parsing token & cost tracking**: `assessResume` now captures the LLM `usage` (prompt /
+  completion / total tokens) and estimates cost from a per-model price table (`llm.ts`). The page
+  shows per-resume tokens + est. cost, and a cumulative **"LLM usage to date"** banner (total
+  tokens, est. cost, and an optional **balance** = `LLM_BUDGET_USD` − spend). New `llmUsageSummary`
+  callable; usage is stored on each `resumeReports` doc. (Provider credit balance isn't exposed via
+  API — the balance is budget-based.)
+- **Performance Index reweighted**: the dominant metric (45%) is now **client/vendor submissions vs
+  a target of 2 per assigned requirement** (`TARGET_PER_ASSIGNED`), then client rate (20%),
+  interview+ (15%), volume (12%), coverage (8%).
+- **Index explainer in the recruiter modal**: a collapsible per-recruiter breakdown table
+  (metric · weight · achieved · points → index); the leaderboard shows the same explainer.
+
+## Fix: Ceipal reports timing out ("deadline-exceeded")
+- Raised the **client** callable timeout from the 70s SDK default to **300s** (`lib/ceipal.ts`) —
+  this was the actual source of the `deadline-exceeded` error.
+- Raised the `ceipalReport` **function** timeout 120s → **300s** and memory to **512MiB**.
+- **Faster paging**: `functions/src/ceipal.ts` now fetches page 1 to learn the total, then pulls
+  the remaining pages in parallel (concurrency 5), with a safe sequential `has_next_page` fallback
+  when the reported total looks unreliable. Cuts a ~11-round-trip submissions fetch to ~3 batches.
+
+## Recruiter Performance tab
+- New **Recruiter Performance** tab (`/recruiters`, `pages/RecruiterPerformance.tsx`, nav 🏆) for
+  management: per-recruiter requirements worked, profiles submitted, and a current-status stage
+  bar (`components/StageBar.tsx`).
+- **Recruiter dropdown** → focused per-recruiter card with a plain-English status summary,
+  headline stats, pipeline bar, and a per-status breakdown table. "All recruiters" shows a
+  ranked leaderboard (row click drills in).
+- **Final-status model**: each profile is counted once by its latest status. **"Submitted"
+  (to account manager) is a distinct state from "Client/Vendor Submission"** (AM forwarded to
+  client/vendor) — earlier code wrongly merged them. Seven buckets classified by `classifyStatus`;
+  unmapped raw statuses surface in an "Unmapped statuses" note for correction.
+- **Performance Index (0–100)** composite (client/vendor rate + interview+ rate + volume +
+  coverage) with a transparent in-page weights explainer; rank-by controls; medals for the top 3.
+- Aggregation in `lib/recruiterStats.ts` (pure, 6 unit tests) — works off raw `SubmissionEvent`s,
+  folding events into one current status per profile (latest by "Status Changed On").
+
 ## Report Generation — column control, charts, and Saved Reports
 - **Column picker** (`components/ColumnPicker.tsx`, `lib/report/columnMeta.ts`): users choose which
   of the 35 columns appear in the preview and the Excel export. Five labelled groups with a

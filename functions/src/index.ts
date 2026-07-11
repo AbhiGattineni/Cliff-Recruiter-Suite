@@ -263,7 +263,7 @@ export const verifySignupOtp = onCall(
 );
 
 export const ceipalReport = onCall(
-  { ...commonOpts, secrets: [CEIPAL_PASSWORD], timeoutSeconds: 120 },
+  { ...commonOpts, secrets: [CEIPAL_PASSWORD], timeoutSeconds: 300, memory: "512MiB" },
   async (request) => {
     // AUTH ON HOLD: app runs in open mode. Re-enable requireAuth(request.auth)
     // once authentication is turned back on.
@@ -306,12 +306,12 @@ export const parseResume = onCall(
     }
     const config = resolveLlm(provider, model); // throws failed-precondition if not configured
     try {
-      const assessment = await assessResume(resumeText, jobDescription, config);
+      const { assessment, usage } = await assessResume(resumeText, jobDescription, config);
       // Duplicate check by email/phone — flag before saving; the client decides.
       const emailNorm = normEmail(assessment.extracted?.email);
       const phoneNorm = normPhone(assessment.extracted?.phone);
       const duplicate = await findDuplicate(emailNorm, phoneNorm);
-      return { ok: true, assessment, provider, model: config.model, duplicate };
+      return { ok: true, assessment, usage, provider, model: config.model, duplicate };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return { ok: false, error: msg };
@@ -328,6 +328,9 @@ export const saveResumeReport = onCall(
     const provider: string = request.data?.provider ?? "";
     const model: string = request.data?.model ?? "";
     const jobDescription: string = request.data?.jobDescription ?? "";
+    const usage = request.data?.usage as
+      | { promptTokens?: number; completionTokens?: number; totalTokens?: number; cost?: number; priced?: boolean }
+      | undefined;
     if (!assessment || typeof assessment !== "object") {
       throw new HttpsError("invalid-argument", "assessment is required.");
     }
@@ -340,6 +343,10 @@ export const saveResumeReport = onCall(
       jobDescriptionPreview: jobDescription.slice(0, 600),
       emailNorm,
       phoneNorm,
+      promptTokens: Number(usage?.promptTokens) || 0,
+      completionTokens: Number(usage?.completionTokens) || 0,
+      totalTokens: Number(usage?.totalTokens) || 0,
+      cost: Number(usage?.cost) || 0,
       createdAt: FieldValue.serverTimestamp(),
     });
     return { ok: true, reportId: doc.id };
@@ -377,6 +384,33 @@ export const llmAvailability = onCall(
         ollama: keyConfigured(LLM_API_KEY.value()),
         openai: keyConfigured(OPENAI_API_KEY.value()),
       },
+    };
+  }
+);
+
+// Cumulative LLM token usage & cost across all saved resume assessments, with an
+// optional monthly budget (LLM_BUDGET_USD env) to show the remaining balance.
+// Note: LLM providers don't expose live credit balance via a simple API, so the
+// "balance" here is budget − spent, not the provider's actual account credit.
+export const llmUsageSummary = onCall(
+  { ...commonOpts, timeoutSeconds: 30 },
+  async () => {
+    const snap = await getFirestore().collection("resumeReports").select("totalTokens", "cost").get();
+    let totalTokens = 0;
+    let totalCost = 0;
+    snap.docs.forEach((d) => {
+      const x = d.data() as { totalTokens?: number; cost?: number };
+      totalTokens += Number(x.totalTokens) || 0;
+      totalCost += Number(x.cost) || 0;
+    });
+    const budget = Number(process.env.LLM_BUDGET_USD) || 0;
+    return {
+      ok: true,
+      count: snap.size,
+      totalTokens,
+      totalCost,
+      budget,
+      balance: budget > 0 ? Math.max(0, budget - totalCost) : null,
     };
   }
 );

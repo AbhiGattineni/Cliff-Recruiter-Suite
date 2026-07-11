@@ -25,7 +25,9 @@ export async function fetchCeipalReport(
   ensureConfigured();
   const callable = httpsCallable<{ report: CeipalReportKey; maxRecords: number }, CeipalResponse>(
     functions,
-    "ceipalReport"
+    "ceipalReport",
+    // Pulling every page from Ceipal can take well over the 70s SDK default.
+    { timeout: 300_000 }
   );
   const res = await callable({ report, maxRecords });
   const payload = res.data;

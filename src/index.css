@@ -246,6 +246,7 @@ table.data tr:hover td { background: #f0f6fc; }
   background: var(--card); border-radius: 12px; width: 100%; max-width: 720px;
   box-shadow: 0 20px 60px rgba(0,0,0,0.3); display: flex; flex-direction: column; max-height: 88vh;
 }
+.modal-card.wide { max-width: 1240px; max-height: 92vh; }
 .modal-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 1rem 1.25rem; border-bottom: 1px solid var(--line);

@@ -9,6 +9,7 @@ import ResumeParsing from "./pages/ResumeParsing";
 import ResumeReports from "./pages/ResumeReports";
 import ReportGeneration from "./pages/ReportGeneration";
 import SavedReports from "./pages/SavedReports";
+import RecruiterPerformance from "./pages/RecruiterPerformance";
 
 export default function App() {
   const { loading } = useAuth();
@@ -37,6 +38,7 @@ export default function App() {
         <Route path="/resume-reports" element={<ResumeReports />} />
         <Route path="/reports" element={<ReportGeneration />} />
         <Route path="/saved-reports" element={<SavedReports />} />
+        <Route path="/recruiters" element={<RecruiterPerformance />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

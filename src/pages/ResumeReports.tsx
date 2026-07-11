@@ -6,6 +6,9 @@ import { friendlyError } from "../lib/errors";
 import AssessmentDetail from "../components/AssessmentDetail";
 import Modal from "../components/Modal";
 
+const fmtCost = (n?: number) => (n && n > 0 ? `$${n < 1 ? n.toFixed(4) : n.toFixed(2)}` : "—");
+const fmtTok = (n?: number) => (n && n > 0 ? n.toLocaleString() : "—");
+
 export default function ResumeReports() {
   const [reports, setReports] = useState<ResumeReport[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -59,6 +62,20 @@ export default function ResumeReports() {
 
       {error && <div className="alert error">{error}</div>}
 
+      {reports && reports.length > 0 && (() => {
+        const tok = reports.reduce((a, r) => a + (r.totalTokens || 0), 0);
+        const cost = reports.reduce((a, r) => a + (r.cost || 0), 0);
+        return (
+          <div className="card">
+            <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", alignItems: "baseline" }}>
+              <strong>LLM usage (these {reports.length} reports)</strong>
+              <span className="muted">{fmtTok(tok)} tokens</span>
+              <span className="muted">Est. cost {fmtCost(cost)}</span>
+            </div>
+          </div>
+        );
+      })()}
+
       <div className="card">
         {loading && !reports ? (
           <div className="center-load" style={{ minHeight: "30vh" }}>
@@ -75,6 +92,8 @@ export default function ResumeReports() {
                   <th>Rating</th>
                   <th>AI-generated</th>
                   <th>Model</th>
+                  <th style={{ textAlign: "right" }}>Tokens</th>
+                  <th style={{ textAlign: "right" }}>Est. cost</th>
                   <th>Report</th>
                 </tr>
               </thead>
@@ -87,6 +106,8 @@ export default function ResumeReports() {
                     <td><span className={`pill ${ratingPill(r.rating)}`}>{r.rating}</span></td>
                     <td><span className={`pill ${aiPill(r.aiGeneratedLikelihood)}`}>{r.aiGeneratedLikelihood}</span></td>
                     <td className="muted" style={{ fontSize: "0.8rem" }}>{r.provider} / {r.model}</td>
+                    <td style={{ textAlign: "right" }}>{fmtTok(r.totalTokens)}</td>
+                    <td style={{ textAlign: "right" }}>{fmtCost(r.cost)}</td>
                     <td onClick={(e) => e.stopPropagation()}>
                       <button
                         className="btn secondary"
@@ -130,6 +151,13 @@ export default function ResumeReports() {
           <>
             <p className="muted" style={{ fontSize: "0.82rem", marginTop: 0 }}>
               {selected.createdAt ? new Date(selected.createdAt).toLocaleString() : "—"} · {selected.provider} / {selected.model}
+              {(selected.totalTokens ?? 0) > 0 && (
+                <>
+                  {" · "}
+                  {fmtTok(selected.promptTokens)} in + {fmtTok(selected.completionTokens)} out ={" "}
+                  {fmtTok(selected.totalTokens)} tokens · Est. cost {fmtCost(selected.cost)}
+                </>
+              )}
             </p>
             <AssessmentDetail a={selected} />
           </>

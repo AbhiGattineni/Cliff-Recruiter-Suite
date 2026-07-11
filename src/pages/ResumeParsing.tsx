@@ -4,10 +4,13 @@ import {
   assessResume,
   saveResumeReport,
   getLlmAvailability,
+  getLlmUsageSummary,
   MODEL_CATALOG,
   ProviderId,
   ResumeAssessment,
   DuplicateInfo,
+  TokenUsage,
+  LlmUsageSummary,
 } from "../lib/resume";
 import { friendlyError } from "../lib/errors";
 import { extractResumeText, ACCEPTED_RESUME_TYPES } from "../lib/resumeFile";
@@ -15,6 +18,9 @@ import AssessmentDetail from "../components/AssessmentDetail";
 import Modal from "../components/Modal";
 
 const PROVIDER_ORDER: ProviderId[] = ["ollama", "openai"];
+
+const fmtCost = (n: number) => `$${n < 1 ? n.toFixed(4) : n.toFixed(2)}`;
+const fmtNum = (n: number) => n.toLocaleString();
 
 export default function ResumeParsing() {
   const navigate = useNavigate();
@@ -27,7 +33,16 @@ export default function ResumeParsing() {
   const [result, setResult] = useState<ResumeAssessment | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState<DuplicateInfo | null>(null);
+  const [usage, setUsage] = useState<TokenUsage | null>(null);
+  const [summary, setSummary] = useState<LlmUsageSummary | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  const refreshSummary = () => {
+    getLlmUsageSummary().then(setSummary).catch(() => {});
+  };
+  useEffect(() => {
+    refreshSummary();
+  }, []);
 
   // Model selection.
   const [provider, setProvider] = useState<ProviderId>("ollama");
@@ -80,10 +95,11 @@ export default function ResumeParsing() {
     }
   };
 
-  const doSave = async (assessment: ResumeAssessment) => {
+  const doSave = async (assessment: ResumeAssessment, u: TokenUsage | null) => {
     try {
-      const id = await saveResumeReport(assessment, provider, model, jd);
+      const id = await saveResumeReport(assessment, provider, model, jd, u);
       setSavedId(id);
+      refreshSummary();
     } catch (err) {
       setError(friendlyError(err));
     }
@@ -94,6 +110,7 @@ export default function ResumeParsing() {
     setResult(null);
     setSavedId(null);
     setDuplicate(null);
+    setUsage(null);
     if (resumeText.trim().length < 30) {
       setError("Please add the resume — paste the text or upload a .txt / .docx file.");
       return;
@@ -104,13 +121,14 @@ export default function ResumeParsing() {
     }
     setBusy(true);
     try {
-      const { assessment, duplicate } = await assessResume(resumeText, jd, provider, model);
+      const { assessment, usage, duplicate } = await assessResume(resumeText, jd, provider, model);
       setResult(assessment);
+      setUsage(usage);
       if (duplicate) {
         // Flag first — ask the user what to do before saving.
         setDuplicate(duplicate);
       } else {
-        await doSave(assessment);
+        await doSave(assessment, usage);
       }
     } catch (err: unknown) {
       setError(friendlyError(err));
@@ -201,6 +219,26 @@ export default function ResumeParsing() {
         )}
       </div>
 
+      {summary && summary.count > 0 && (
+        <div className="card">
+          <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", alignItems: "baseline" }}>
+            <strong>LLM usage to date</strong>
+            <span className="muted">{fmtNum(summary.count)} resumes assessed</span>
+            <span className="muted">{fmtNum(summary.totalTokens)} tokens used</span>
+            <span className="muted">Est. cost {fmtCost(summary.totalCost)}</span>
+            {summary.balance != null ? (
+              <span className="muted">
+                Balance <strong>{fmtCost(summary.balance)}</strong> of {fmtCost(summary.budget)} budget
+              </span>
+            ) : (
+              <span className="muted" style={{ fontStyle: "italic" }}>
+                Provider credit balance isn&#39;t exposed via API — set an LLM_BUDGET_USD to track a balance.
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       {error && <div className="alert error">{error}</div>}
 
       {result && (
@@ -214,11 +252,29 @@ export default function ResumeParsing() {
                 Duplicate found — choose an action
               </button>
             ) : (
-              <button className="btn secondary" onClick={() => doSave(result)}>
+              <button className="btn secondary" onClick={() => doSave(result, usage)}>
                 Save to reports
               </button>
             )}
           </div>
+          {usage && (
+            <div
+              style={{
+                marginTop: "0.75rem", padding: "0.6rem 0.8rem", background: "var(--brand-light)",
+                borderRadius: 8, fontSize: "0.85rem", display: "flex", flexWrap: "wrap", gap: "1rem", alignItems: "baseline",
+              }}
+            >
+              <strong>This resume</strong>
+              <span className="muted">
+                Tokens: {fmtNum(usage.promptTokens)} in + {fmtNum(usage.completionTokens)} out ={" "}
+                <strong>{fmtNum(usage.totalTokens)}</strong>
+              </span>
+              <span className="muted">
+                {usage.priced ? `Est. cost ${fmtCost(usage.cost)}` : "Cost not priced for this model"}
+              </span>
+              <span className="muted">{provider} / {model}</span>
+            </div>
+          )}
           <div style={{ marginTop: "1rem" }}>
             <AssessmentDetail a={result} />
           </div>
@@ -248,7 +304,7 @@ export default function ResumeParsing() {
             <button
               className="btn"
               onClick={async () => {
-                if (result) await doSave(result);
+                if (result) await doSave(result, usage);
                 setDuplicate(null);
               }}
             >

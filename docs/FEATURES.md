@@ -31,11 +31,41 @@ See [REPORT-GENERATION.md](REPORT-GENERATION.md) for the full pipeline. Highligh
 - Dedicated tab listing saved report configurations (name, saved date, source, filter summary).
 - **Open** loads the config on the Report Generation tab (`/reports?config=<id>`); **Delete** removes it.
 
-## 5. Dashboard (`/`)
+## 5. Recruiter Performance (`/recruiters`)
+Management view built from the live submissions data. **Each profile is counted once, by its
+latest status** (the current/final state of its flow).
+
+**Status model** — statuses are taken **verbatim from Ceipal**; each distinct status keeps its own
+name (there is **no catch-all "Other" bucket**). The status list is built dynamically from the data.
+An internal funnel classification (`funnelOf` in `lib/recruiterStats.ts`) is used only to colour and
+order the statuses and to score the index — it never replaces a real status name. "Submitted" (to
+the account manager) and "Client/Vendor Submission" (AM forwarded to client/vendor) are recognised
+as distinct stages.
+
+- **Submitted-on date range** — From/To filter that scopes every stat to profiles submitted in
+  that period (a profile's event rows all share one SubmittedOn, so it filters cleanly per profile).
+- **Leaderboard** — rank, recruiter, requirements, profiles, a current-status bar, client/vendor
+  count + rate, and the Performance Index. Row click (or the recruiter dropdown) opens a **detail
+  modal** — the leaderboard stays behind it.
+- **Recruiter detail modal** (large) — headline stats, a **pie chart** of profiles by current
+  status with a share table, and **submissions grouped by requirement**: each row shows Req ID,
+  requirement, client, job-posted time, **first-submission time**, **time to first submission**, and
+  this recruiter's submission count; clicking a row expands it to the candidates under that job
+  (consultant, current status, submitted-on).
+- **Assigned-but-no-submission requirements** — using the job-posting **"Assigned To"** column,
+  requirements assigned to a recruiter with zero submissions appear as rows labelled **"No
+  submissions"** (parsed from the job-duration report; `assignedTo` alias in `columns.ts`).
+- **Performance Index (0–100)** — composite of client/vendor-submission rate, interview+ rate,
+  volume, and requirement coverage; weights shown in an in-page explainer. Rank by index / client
+  rate / interview+ rate / profiles / requirements. Top 3 get 🥇🥈🥉 (medal = true index standing).
+- Logic in `lib/recruiterStats.ts` (pure, unit-tested); pipeline bar in `components/StageBar.tsx`.
+  Reuses the Ceipal submissions report, aggregated client-side.
+
+## 6. Dashboard (`/`)
 - Live stat cards: resumes assessed, reports generated, distinct candidates, strong-fit count,
   average fit score, AI-High count, plus a fit-rating breakdown (`dashboardStats` callable).
 
-## 6. Layout
+## 7. Layout
 - Collapsible sidebar (☰), state persisted in `localStorage.sidebarCollapsed`.
 - Content is full-width when the sidebar is collapsed.
 

@@ -18,6 +18,7 @@ export interface JobRecord {
   experience: string;
   mandateSkills: string;
   comments: string;
+  assignedTo: string; // recruiter(s) assigned to the requirement
 }
 
 // One raw submission-activity event (a single status change for a candidate).

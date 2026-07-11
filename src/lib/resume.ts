@@ -76,16 +76,34 @@ export interface DuplicateInfo {
   createdAt: number | null;
 }
 
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  cost: number; // estimated USD (0 when the model has no known price)
+  priced: boolean;
+}
+
 interface ParseResponse {
   ok: boolean;
   assessment?: ResumeAssessment;
+  usage?: TokenUsage;
   duplicate?: DuplicateInfo | null;
   error?: string;
 }
 
 export interface AssessResult {
   assessment: ResumeAssessment;
+  usage: TokenUsage | null;
   duplicate: DuplicateInfo | null;
+}
+
+export interface LlmUsageSummary {
+  count: number;
+  totalTokens: number;
+  totalCost: number;
+  budget: number;
+  balance: number | null; // budget − spent, or null if no budget configured
 }
 
 interface AvailabilityResponse {
@@ -124,7 +142,7 @@ export async function assessResume(
   if (!payload?.ok || !payload.assessment) {
     throw new Error(payload?.error || "Resume parsing failed.");
   }
-  return { assessment: payload.assessment, duplicate: payload.duplicate ?? null };
+  return { assessment: payload.assessment, usage: payload.usage ?? null, duplicate: payload.duplicate ?? null };
 }
 
 /** Save an already-computed assessment to the reports history. Returns the id. */
@@ -132,13 +150,32 @@ export async function saveResumeReport(
   assessment: ResumeAssessment,
   provider: ProviderId,
   model: string,
-  jobDescription: string
+  jobDescription: string,
+  usage: TokenUsage | null
 ): Promise<string> {
   ensureConfigured();
   const callable = httpsCallable<
-    { assessment: ResumeAssessment; provider: ProviderId; model: string; jobDescription: string },
+    { assessment: ResumeAssessment; provider: ProviderId; model: string; jobDescription: string; usage: TokenUsage | null },
     { ok: boolean; reportId?: string }
   >(functions, "saveResumeReport");
-  const res = await callable({ assessment, provider, model, jobDescription });
+  const res = await callable({ assessment, provider, model, jobDescription, usage });
   return res.data?.reportId ?? "";
+}
+
+/** Cumulative token/cost usage across all saved assessments (+ optional budget). */
+export async function getLlmUsageSummary(): Promise<LlmUsageSummary> {
+  ensureConfigured();
+  const callable = httpsCallable<Record<string, never>, { ok: boolean } & LlmUsageSummary>(
+    functions,
+    "llmUsageSummary"
+  );
+  const res = await callable({});
+  const d = res.data;
+  return {
+    count: d?.count ?? 0,
+    totalTokens: d?.totalTokens ?? 0,
+    totalCost: d?.totalCost ?? 0,
+    budget: d?.budget ?? 0,
+    balance: d?.balance ?? null,
+  };
 }

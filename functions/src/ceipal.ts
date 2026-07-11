@@ -75,6 +75,16 @@ function extractToken(data: unknown): string | null {
 
 const PAGE_SIZE = 100; // Ceipal caps the page size at 100 rows
 const MAX_PAGES = 500; // safety stop (= up to 50,000 rows)
+const CONCURRENCY = 5; // parallel page fetches (kept modest to avoid Ceipal rate limits)
+
+function hasNextPage(json: Record<string, unknown>): boolean {
+  const v = json.has_next_page;
+  return v === 1 || v === true || v === "1";
+}
+
+function rowsOf(json: Record<string, unknown>): unknown[] {
+  return Array.isArray(json.result) ? (json.result as unknown[]) : [];
+}
 
 // Fetch ONE page, handling a mid-flight 401 by re-authenticating once.
 async function fetchPage(url: string, password: string): Promise<Record<string, unknown>> {
@@ -105,32 +115,60 @@ export async function fetchReport(
   const base = reportUrl(report);
   if (!base) throw new Error(`No endpoint configured for report "${report}".`);
 
-  const allRows: unknown[] = [];
-  let envelope: Record<string, unknown> = {};
-  let totalAvailable = 0;
+  const sep = base.includes("?") ? "&" : "?";
+  const pageUrl = (page: number) => `${base}${sep}limit=${PAGE_SIZE}&page=${page}`;
 
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const sep = base.includes("?") ? "&" : "?";
-    const url = `${base}${sep}limit=${PAGE_SIZE}&page=${page}`;
-    const json = await fetchPage(url, password);
-    if (page === 1) {
-      envelope = json;
-      totalAvailable = Number(json.record_count) || 0;
+  // Page 1 (sequential): warms the auth-token cache and tells us the total.
+  const first = await fetchPage(pageUrl(1), password);
+  const totalAvailable = Number(first.record_count) || 0;
+  const firstRows = rowsOf(first);
+
+  // Only trust the total for parallel paging when it clearly spans many pages;
+  // otherwise fall back to the safe sequential has_next_page walk.
+  const reliableTotal = totalAvailable > PAGE_SIZE || (totalAvailable > 0 && !hasNextPage(first));
+
+  const pageRows: unknown[][] = [firstRows];
+
+  if (reliableTotal) {
+    let lastPage = Math.ceil(totalAvailable / PAGE_SIZE);
+    if (maxRecords > 0) lastPage = Math.min(lastPage, Math.ceil(maxRecords / PAGE_SIZE));
+    lastPage = Math.min(lastPage, MAX_PAGES);
+
+    const queue: number[] = [];
+    for (let p = 2; p <= lastPage; p++) queue.push(p);
+    const results = new Array<unknown[]>(lastPage + 1);
+    let next = 0;
+    const worker = async () => {
+      while (next < queue.length) {
+        const p = queue[next++];
+        results[p] = rowsOf(await fetchPage(pageUrl(p), password));
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
+    for (let p = 2; p <= lastPage; p++) pageRows.push(results[p] ?? []);
+  } else {
+    // Unknown/small total — walk sequentially until has_next_page is false.
+    let hasNext = hasNextPage(first);
+    let collected = firstRows.length;
+    for (let page = 2; hasNext && page <= MAX_PAGES; page++) {
+      if (maxRecords > 0 && collected >= maxRecords) break;
+      const json = await fetchPage(pageUrl(page), password);
+      const rows = rowsOf(json);
+      pageRows.push(rows);
+      collected += rows.length;
+      if (rows.length === 0) break;
+      hasNext = hasNextPage(json);
     }
-    const rows = Array.isArray(json.result) ? (json.result as unknown[]) : [];
-    allRows.push(...rows);
-    const hasNext = json.has_next_page === 1 || json.has_next_page === true || json.has_next_page === "1";
-    if (!hasNext || rows.length === 0) break;
-    if (maxRecords > 0 && allRows.length >= maxRecords) break;
   }
 
+  const allRows = pageRows.flat();
   const trimmed = maxRecords > 0 ? allRows.slice(0, maxRecords) : allRows;
   return {
-    ...envelope,
+    ...first,
     result: trimmed,
     record_count: trimmed.length,
     total_available: totalAvailable,
-    pages_fetched: Math.ceil(allRows.length / PAGE_SIZE),
+    pages_fetched: pageRows.length,
   };
 }
 
