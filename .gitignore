@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+functions/node_modules/
+
+# Build output
+dist/
+functions/lib/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
+# Env & secrets  (NEVER commit real credentials)
+.env
+.env.local
+.env.*.local
+functions/.env
+functions/.env.*
+.runtimeconfig.json
+serviceAccountKey.json
+
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*

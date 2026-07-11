@@ -1,0 +1,28 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Signed-in users may read/write their own activity records only.
+    match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Shared report/resume run history: any signed-in user of this org may read;
+    // writes go through Cloud Functions (admin) only.
+    match /runs/{runId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    // Signup OTP records — written/read only by Cloud Functions (the admin SDK
+    // bypasses these rules). Clients must never touch them.
+    match /signupOtps/{emailKey} {
+      allow read, write: if false;
+    }
+
+    // Default deny.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
