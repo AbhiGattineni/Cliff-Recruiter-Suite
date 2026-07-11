@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, ReactNode, useEffect, useMemo, useState } from "react";
 import { DateTime } from "luxon";
 import { fetchCeipalReport, reportMeta } from "../lib/ceipal";
 import { parseSubmissionsFromApi, parseJobsFromApi } from "../lib/report/parseSource";
@@ -7,12 +7,15 @@ import { friendlyError } from "../lib/errors";
 import {
   computeRecruiterStats,
   sortStats,
+  screeningOf,
   RecruiterStat,
   StatusMeta,
   SortKey,
   INDEX_WEIGHTS,
   TARGET_PER_ASSIGNED,
 } from "../lib/recruiterStats";
+import { getRecruiterActivity, RecruiterActivity, ActivityCounts, activityNameKey } from "../lib/recruiterActivity";
+import { extensionFor } from "../lib/extensions";
 import StageBar, { StageLegend } from "../components/StageBar";
 import PieChart from "../components/PieChart";
 import Modal from "../components/Modal";
@@ -109,23 +112,47 @@ export default function RecruiterPerformance() {
   const [sortKey, setSortKey] = useState<SortKey>("index");
   const [submittedFrom, setSubmittedFrom] = useState("");
   const [submittedTo, setSubmittedTo] = useState("");
+  // Weekly activity (job-board / pipeline / mail-merge counts) — loaded on demand,
+  // held in memory for the session and reused across recruiters (nothing stored).
+  const [activity, setActivity] = useState<{ from: string; to: string; data: RecruiterActivity } | null>(null);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityError, setActivityError] = useState<string | null>(null);
+  const [activityAttempt, setActivityAttempt] = useState<{ from: string; to: string } | null>(null);
 
-  const load = async () => {
+  const loadActivity = async () => {
+    const range = { from: submittedFrom, to: submittedTo };
+    setActivityAttempt(range);
+    setActivityLoading(true);
+    setActivityError(null);
+    try {
+      const data = await getRecruiterActivity(range.from, range.to);
+      setActivity({ ...range, data });
+    } catch (e) {
+      setActivityError(friendlyError(e));
+    } finally {
+      setActivityLoading(false);
+    }
+  };
+
+  const load = async (refresh = false) => {
     setLoading(true);
     setError(null);
     setFetchInfo(null);
     try {
       // Submissions are required; job postings (for "Assigned To") are best-effort.
       const [subRes, jobRes] = await Promise.allSettled([
-        fetchCeipalReport("submissions", 0),
-        fetchCeipalReport("job_duration", 0),
+        fetchCeipalReport("submissions", { refresh }),
+        fetchCeipalReport("job_duration", { refresh }),
       ]);
       if (subRes.status === "rejected") throw subRes.reason;
       const subJson = subRes.value;
       const meta = reportMeta(subJson);
       setSubs(parseSubmissionsFromApi(subJson));
       setJobs(jobRes.status === "fulfilled" ? parseJobsFromApi(jobRes.value) : []);
-      setFetchInfo(`Based on ${meta.fetched} of ${meta.total} submissions pulled from Ceipal.`);
+      setFetchInfo(
+        `${meta.fetched} submissions` +
+          (meta.cachedAt ? ` · data as of ${new Date(meta.cachedAt).toLocaleString()} (cached)` : " · freshly pulled from Ceipal")
+      );
     } catch (err) {
       setError(friendlyError(err));
     } finally {
@@ -171,6 +198,19 @@ export default function RecruiterPerformance() {
   const names = useMemo(() => allStats.map((s) => s.name).sort((a, b) => a.localeCompare(b)), [allStats]);
   const picked = selected ? allStats.find((s) => s.name === selected) ?? null : null;
   const pickedRank = picked ? rankByName.get(picked.name) ?? 0 : 0;
+  // Activity is valid only if it was loaded for the current date range.
+  const activityMatches = !!activity && activity.from === submittedFrom && activity.to === submittedTo;
+  const activityData = activityMatches ? activity!.data : null;
+
+  // Auto-fetch activity when a recruiter modal is open — once per date range
+  // (tracked by activityAttempt so an error doesn't loop).
+  useEffect(() => {
+    if (!picked || activityLoading) return;
+    if (activityMatches) return;
+    if (activityAttempt && activityAttempt.from === submittedFrom && activityAttempt.to === submittedTo) return;
+    loadActivity();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [picked, submittedFrom, submittedTo, activityMatches, activityLoading]);
 
   const totals = useMemo(() => {
     const reqs = new Set<string>();
@@ -194,9 +234,14 @@ export default function RecruiterPerformance() {
             full leaderboard. Each profile is counted once, by its latest status.
           </p>
         </div>
-        <button className="btn secondary" onClick={load} disabled={loading}>
-          {loading ? <span className="spinner dark" /> : "⟳"} Refresh
-        </button>
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          <button className="btn secondary" onClick={() => load(false)} disabled={loading}>
+            {loading ? <span className="spinner dark" /> : "⟳"} Refresh
+          </button>
+          <button className="btn ghost" onClick={() => load(true)} disabled={loading} title="Pull the latest data directly from Ceipal (slower)">
+            ↻ From Ceipal
+          </button>
+        </div>
       </div>
 
       {error && <div className="alert error">{error}</div>}
@@ -333,7 +378,20 @@ export default function RecruiterPerformance() {
             title={picked ? `${pickedRank < 3 ? medal[pickedRank] + " " : ""}${picked.name}` : ""}
             footer={<button className="btn ghost" onClick={() => setSelected("")}>Close</button>}
           >
-            {picked && <RecruiterModal stat={picked} statuses={statuses} />}
+            {picked && (
+              <RecruiterModal
+                stat={picked}
+                statuses={statuses}
+                from={submittedFrom}
+                to={submittedTo}
+                activity={activityData ? activityData.byRecruiter[activityNameKey(picked.name)] ?? null : null}
+                activityFetchedAt={activityData?.fetchedAt ?? null}
+                activityLoaded={!!activityData}
+                activityLoading={activityLoading}
+                activityError={activityError}
+                onLoadActivity={loadActivity}
+              />
+            )}
           </Modal>
         </>
       ) : (
@@ -348,13 +406,60 @@ export default function RecruiterPerformance() {
   );
 }
 
-function RecruiterModal({ stat, statuses }: { stat: RecruiterStat; statuses: StatusMeta[] }) {
+function RecruiterModal({
+  stat,
+  statuses,
+  from,
+  to,
+  activity,
+  activityFetchedAt,
+  activityLoaded,
+  activityLoading,
+  activityError,
+  onLoadActivity,
+}: {
+  stat: RecruiterStat;
+  statuses: StatusMeta[];
+  from: string;
+  to: string;
+  activity: ActivityCounts | null;
+  activityFetchedAt: number | null;
+  activityLoaded: boolean;
+  activityLoading: boolean;
+  activityError: string | null;
+  onLoadActivity: () => void;
+}) {
   const present = statuses.filter((st) => (stat.counts[st.label] ?? 0) > 0);
   const pieData = present.map((st) => ({ label: st.label, value: stat.counts[st.label], color: st.color }));
   const colorByStatus = new Map(statuses.map((s) => [s.label, s.color]));
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const jobs = stat.jobGroups;
   const submittedReqs = jobs.length - stat.noSubCount;
+
+  // Screening pass/fail over this recruiter's profiles in the selected range.
+  let passed = 0;
+  let failed = 0;
+  for (const r of stat.rows) {
+    const s = screeningOf(r.status);
+    if (s === "passed") passed++;
+    else if (s === "failed") failed++;
+  }
+  const rangeLabel = from || to ? `${from || "start"} → ${to || "today"}` : "all time";
+  const ext = extensionFor(stat.name);
+  const extLabel = ext ? `Ext ${ext.ext}` : "Ext n/a";
+  // Server-metric cell: the number once loaded, a small spinner in its place while
+  // loading (or before the auto-fetch kicks in), or a dash if the fetch failed.
+  const srv = (v: number | undefined): ReactNode =>
+    activity ? (
+      v ?? 0
+    ) : activityError ? (
+      "—"
+    ) : (
+      <span
+        className="spinner dark"
+        style={{ width: 13, height: 13, borderWidth: "2px", display: "inline-block", verticalAlign: "middle" }}
+      />
+    );
 
   const toggle = (key: string) =>
     setExpanded((cur) => {
@@ -379,6 +484,46 @@ function RecruiterModal({ stat, statuses }: { stat: RecruiterStat; statuses: Sta
         <Stat label="Requirements worked" value={stat.requirements} />
         <Stat label="Client/vendor submissions" value={`${stat.clientCount} of ${stat.clientTarget} target`} />
         <Stat label="Reached interview+" value={pct(stat.progressRate)} />
+      </div>
+
+      {/* Weekly activity — the numbers tracked from Ceipal (+ coming-soon sources) */}
+      <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "0.9rem 1rem", marginBottom: "1.25rem" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: "0.5rem" }}>
+          <h3 style={{ margin: 0, display: "inline-flex", alignItems: "center", gap: "0.5rem" }}>
+            Activity · {rangeLabel}
+            {activityLoading && <span className="spinner dark" style={{ width: 14, height: 14, borderWidth: "2px" }} />}
+          </h3>
+          <span className="muted" style={{ fontSize: "0.82rem" }}>
+            {from || to ? "based on selected dates" : "all dates — pick a range on the tab"}
+          </span>
+        </div>
+        <div className="activity-grid">
+          <ActRow label="Positions worked on" value={stat.requirements} />
+          <ActRow label="Submissions" value={stat.profiles} />
+          <ActRow label="Passed screening" value={passed} />
+          <ActRow label="Failed / rejected screening" value={failed} />
+          <ActRow label="Pipeline status updates" value={srv(activity?.pipelineUpdates)} />
+          <ActRow label="Bulk emails (mail merge)" value={srv(activity?.bulkEmails)} />
+          <ActRow label="Dice credits used" value={srv(activity?.diceCredits)} />
+          <ActRow label="Monster credits used" value={srv(activity?.monsterCredits)} />
+          <ActRow label="Advanced search (internal DB) *" value={srv(activity?.advSearchInternalDb)} />
+          <ActRow label="LinkedIn reach-outs (+ replied)" soon />
+          <ActRow label={`Phone calls — outbound (${extLabel})`} soon />
+          <ActRow label={`Phone calls — inbound (${extLabel})`} soon />
+          <ActRow label="Profiles added to daily excel" soon />
+        </div>
+        <div style={{ marginTop: "0.6rem" }}>
+          <span className="muted" style={{ fontSize: "0.76rem" }}>
+            * Advanced search is a running total (Ceipal provides no date breakdown).
+            {activityLoaded && activityFetchedAt ? ` Counts as of ${new Date(activityFetchedAt).toLocaleTimeString()}.` : ""}
+          </span>
+          {activityError && (
+            <div className="alert error" style={{ marginTop: "0.5rem" }}>
+              {activityError}{" "}
+              <button className="btn ghost" style={{ padding: "0.15rem 0.5rem" }} onClick={onLoadActivity}>Retry</button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Status distribution: pie + share table */}
@@ -499,6 +644,19 @@ function Stat({ label, value }: { label: string; value: number | string }) {
     <div className="stat">
       <div className="num">{value}</div>
       <div className="lbl">{label}</div>
+    </div>
+  );
+}
+
+function ActRow({ label, value, soon }: { label: string; value?: ReactNode; soon?: boolean }) {
+  return (
+    <div className="activity-row">
+      <span style={{ fontSize: "0.88rem" }}>{label}</span>
+      {soon ? (
+        <span className="pill grey" style={{ fontSize: "0.68rem" }}>Coming soon</span>
+      ) : (
+        <strong>{value}</strong>
+      )}
     </div>
   );
 }

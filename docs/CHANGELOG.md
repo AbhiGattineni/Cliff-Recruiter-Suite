@@ -2,6 +2,35 @@
 
 Chronological record of notable changes. Newest first.
 
+## Weekly recruiter activity in the modal (Ceipal usage reports)
+- New **Weekly activity** section in the recruiter modal, scoped to the tab's selected date range.
+- **Computed from existing submissions** (client-side): positions worked on, submissions, passed
+  screening, failed/rejected screening (rule: Selected-or-later = passed, any Rejected = failed —
+  `screeningOf`).
+- **From 3 new Ceipal usage reports** (`recruiterActivity` callable): pipeline status updates
+  (pipeline_logs), bulk emails (mail_merge), Dice/Monster credits (job_board). These reports are
+  large (mail merge ~19k rows) so they are **pulled, counted per recruiter/date, and discarded —
+  nothing is stored.** One pull warms all recruiters for the session (held in page memory); a
+  "Load Ceipal counts" button triggers it (~25–30s) with a Reload option.
+- **Coming soon** (need other integrations): advanced-search/internal-DB, LinkedIn reach-outs,
+  phone in/outbound (Ext 108), daily-excel profiles.
+- Report keys/URLs added to `ceipal.ts` `ReportKey` + `functions/.env`. Verified live: 18–24 Jun
+  returns real per-recruiter counts.
+
+## Ceipal data caching (fixes 504 timeouts / slow loads)
+- **Why the 504:** `ceipalReport` did the full Ceipal pull (all pages) inside the request; when
+  Ceipal was slow it exceeded the function timeout and Google's frontend returned 504.
+- Rows are cached in Firestore (`ceipalCache/{report}` meta + chunked `chunks` sub-docs, 100
+  rows/chunk, `ceipalCache.ts`).
+- **On-request conditional refresh (no batch job):** each read does one cheap **probe** of Ceipal's
+  current `record_count` (`probeTotal`, page 1 only) and compares it to the stored count. Unchanged →
+  serve cache (~2s incl. probe, vs 20–45s full pull). Changed / empty / `{ refresh: true }` → full
+  pull + re-cache. Probe failure or live-fetch error → serve stale cache so the app never breaks.
+- UI: "Refresh from Ceipal" button on Report Generation and Recruiter Performance forces a fresh
+  pull; the info line shows "data as of <time> (cached)". Client `fetchCeipalReport(report, { refresh })`.
+- Limitation: `record_count` catches added/removed rows, not in-place status edits on existing rows —
+  use "Refresh from Ceipal" to force-refresh those.
+
 ## LLM token/cost tracking + index reweight + modal explainer
 - **Resume Parsing token & cost tracking**: `assessResume` now captures the LLM `usage` (prompt /
   completion / total tokens) and estimates cost from a per-model price table (`llm.ts`). The page

@@ -14,10 +14,25 @@ function env(name: string, fallback = ""): string {
   return process.env[name] ?? fallback;
 }
 
-export function reportUrl(report: "job_duration" | "submissions"): string {
-  return report === "job_duration"
-    ? env("CEIPAL_JOB_DURATION_URL")
-    : env("CEIPAL_SUBMISSIONS_URL");
+export type ReportKey =
+  | "job_duration"
+  | "submissions"
+  | "job_board"
+  | "pipeline_logs"
+  | "mail_merge"
+  | "advanced_search";
+
+const REPORT_ENV: Record<ReportKey, string> = {
+  job_duration: "CEIPAL_JOB_DURATION_URL",
+  submissions: "CEIPAL_SUBMISSIONS_URL",
+  job_board: "CEIPAL_JOB_BOARD_URL",
+  pipeline_logs: "CEIPAL_PIPELINE_LOGS_URL",
+  mail_merge: "CEIPAL_MAIL_MERGE_URL",
+  advanced_search: "CEIPAL_ADV_SEARCH_URL",
+};
+
+export function reportUrl(report: ReportKey): string {
+  return env(REPORT_ENV[report]);
 }
 
 async function authenticate(password: string): Promise<AuthResult> {
@@ -103,12 +118,24 @@ async function fetchPage(url: string, password: string): Promise<Record<string, 
 }
 
 /**
+ * Cheap freshness probe: fetch only page 1 (limit=1) and return Ceipal's current
+ * record_count (the report's total available). One fast request, no full pull.
+ */
+export async function probeTotal(report: ReportKey, password: string): Promise<number> {
+  const base = reportUrl(report);
+  if (!base) throw new Error(`No endpoint configured for report "${report}".`);
+  const sep = base.includes("?") ? "&" : "?";
+  const json = await fetchPage(`${base}${sep}limit=1&page=1`, password);
+  return Number(json.record_count) || 0;
+}
+
+/**
  * Fetch a Ceipal report, following pagination (?limit=100&page=N).
  * Stops after `maxRecords` rows (0/undefined = fetch everything). Returns one
  * envelope with the accumulated rows in `result`.
  */
 export async function fetchReport(
-  report: "job_duration" | "submissions",
+  report: ReportKey,
   password: string,
   maxRecords = 0
 ): Promise<unknown> {

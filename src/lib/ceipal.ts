@@ -15,21 +15,22 @@ interface CeipalResponse {
 
 /**
  * Fetch one of the two Ceipal custom reports through the Cloud Function.
- * `maxRecords` caps how many rows are pulled (0 = fetch everything).
- * Returns the raw JSON payload from Ceipal (shape is normalised downstream).
+ * By default this reads the server-side cache (fast). Pass `{ refresh: true }`
+ * to force a fresh pull from Ceipal (slower — repopulates the cache).
+ * Returns the raw JSON payload (shape is normalised downstream).
  */
 export async function fetchCeipalReport(
   report: CeipalReportKey,
-  maxRecords = 0
+  opts: { refresh?: boolean } = {}
 ): Promise<unknown> {
   ensureConfigured();
-  const callable = httpsCallable<{ report: CeipalReportKey; maxRecords: number }, CeipalResponse>(
+  const callable = httpsCallable<{ report: CeipalReportKey; refresh: boolean }, CeipalResponse>(
     functions,
     "ceipalReport",
-    // Pulling every page from Ceipal can take well over the 70s SDK default.
-    { timeout: 300_000 }
+    // A forced refresh pulls every page from Ceipal — can take minutes.
+    { timeout: 540_000 }
   );
-  const res = await callable({ report, maxRecords });
+  const res = await callable({ report, refresh: opts.refresh === true });
   const payload = res.data;
   if (!payload?.ok) {
     throw new Error(payload?.error || "Ceipal request failed.");
@@ -37,8 +38,12 @@ export async function fetchCeipalReport(
   return payload.data;
 }
 
-/** Read the total_available / record_count fields from a report envelope. */
-export function reportMeta(data: unknown): { fetched: number; total: number } {
-  const o = (data ?? {}) as { record_count?: number; total_available?: number };
-  return { fetched: Number(o.record_count) || 0, total: Number(o.total_available) || 0 };
+/** Read record_count / total_available / cache timestamp from a report envelope. */
+export function reportMeta(data: unknown): { fetched: number; total: number; cachedAt: number | null } {
+  const o = (data ?? {}) as { record_count?: number; total_available?: number; cachedAt?: number };
+  return {
+    fetched: Number(o.record_count) || 0,
+    total: Number(o.total_available) || 0,
+    cachedAt: o.cachedAt ?? null,
+  };
 }

@@ -421,6 +421,18 @@ export function sortStats(stats: RecruiterStat[], key: SortKey): RecruiterStat[]
   return [...stats].sort((a, b) => val(b) - val(a) || b.index - a.index);
 }
 
+/**
+ * Screening outcome for a submission status (rule: Selected-or-later = passed,
+ * any Rejected = failed, otherwise pending). Works on the merged display labels.
+ */
+export function screeningOf(raw: string): "passed" | "failed" | "pending" {
+  const n = String(raw ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!n) return "pending";
+  if (n.includes("reject")) return "failed";
+  if (n.includes("select") || n.includes("interview") || n.includes("submission")) return "passed";
+  return "pending";
+}
+
 /** A plain-English summary of a recruiter's current pipeline, using real status names. */
 export function statusSentence(s: RecruiterStat, statuses: StatusMeta[]): string {
   const parts = statuses

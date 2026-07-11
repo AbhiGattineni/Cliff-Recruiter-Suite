@@ -11,7 +11,8 @@ import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
-import { fetchReport } from "./ceipal.js";
+import { fetchReport, probeTotal } from "./ceipal.js";
+import { readCache, readCacheMeta, writeCache, cacheEnvelope } from "./ceipalCache.js";
 import { assessResume } from "./llm.js";
 import {
   isAllowedEmail,
@@ -262,8 +263,19 @@ export const verifySignupOtp = onCall(
   }
 );
 
+// Live-fetch both reports from Ceipal and store them in the cache.
+async function refreshCeipalReport(report: "job_duration" | "submissions", password: string) {
+  const data = (await fetchReport(report, password, 0)) as {
+    result?: unknown[];
+    total_available?: number;
+  };
+  const rows = Array.isArray(data.result) ? data.result : [];
+  await writeCache(report, rows, Number(data.total_available) || rows.length);
+  return data;
+}
+
 export const ceipalReport = onCall(
-  { ...commonOpts, secrets: [CEIPAL_PASSWORD], timeoutSeconds: 300, memory: "512MiB" },
+  { ...commonOpts, secrets: [CEIPAL_PASSWORD], timeoutSeconds: 540, memory: "512MiB" },
   async (request) => {
     // AUTH ON HOLD: app runs in open mode. Re-enable requireAuth(request.auth)
     // once authentication is turned back on.
@@ -272,22 +284,146 @@ export const ceipalReport = onCall(
     if (report !== "job_duration" && report !== "submissions") {
       throw new HttpsError("invalid-argument", "report must be 'job_duration' or 'submissions'.");
     }
+    const refresh = request.data?.refresh === true;
     const password = CEIPAL_PASSWORD.value();
-    if (!password || password.startsWith("PLACEHOLDER")) {
+    const configured = !!password && !password.startsWith("PLACEHOLDER");
+
+    const meta = await readCacheMeta(report);
+
+    // Serve the cache when it exists and Ceipal hasn't changed. Freshness check is
+    // a single cheap probe of Ceipal's current record_count vs the stored count.
+    if (!refresh && meta && meta.recordCount > 0) {
+      let unchanged = true;
+      if (configured) {
+        try {
+          const currentTotal = await probeTotal(report, password);
+          unchanged = currentTotal === (meta.totalAvailable || meta.recordCount);
+        } catch {
+          unchanged = true; // probe failed → keep serving cache rather than break
+        }
+      }
+      if (unchanged) {
+        const cached = await readCache(report);
+        if (cached && cached.rows.length > 0) return { ok: true, data: cacheEnvelope(cached) };
+      }
+    }
+
+    // Cache missing / stale / forced refresh → do the full pull and re-cache.
+    if (!configured) {
       throw new HttpsError(
         "failed-precondition",
         "Ceipal password is not configured. Set the CEIPAL_PASSWORD secret."
       );
     }
-    // maxRecords: 0 = fetch everything (paginate all); otherwise cap the fetch.
-    const maxRecords = Math.max(0, Math.min(Number(request.data?.maxRecords) || 0, 50000));
     try {
-      const data = await fetchReport(report, password, maxRecords);
-      return { ok: true, data };
+      const data = await refreshCeipalReport(report, password);
+      return { ok: true, data: { ...data, cachedAt: Date.now(), cached: false } };
     } catch (err) {
+      // On failure, fall back to any stale cache so the app still works.
+      const cached = await readCache(report);
+      if (cached && cached.rows.length > 0) {
+        return { ok: true, data: { ...cacheEnvelope(cached), stale: true } };
+      }
       const msg = err instanceof Error ? err.message : String(err);
       return { ok: false, data: null, error: msg };
     }
+  }
+);
+
+// ---- Recruiter activity (job-board credits, pipeline updates, mail merge) ----
+// These reports are large; we pull them, COUNT per recruiter/date, and discard —
+// nothing is stored. Dates in the reports are MM/DD/YYYY [HH:mm:ss]; the client
+// passes from/to as ISO yyyy-mm-dd (inclusive).
+const activityNameKey = (s: unknown) => String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+
+function parseCeipalDay(s: string): number | null {
+  const part = String(s ?? "").trim().split(/\s+/)[0];
+  const p = part.split("/");
+  if (p.length !== 3) return null;
+  const mm = Number(p[0]), dd = Number(p[1]), yyyy = Number(p[2]);
+  if (!yyyy || !mm || !dd) return null;
+  return Date.UTC(yyyy, mm - 1, dd);
+}
+function parseIsoDay(s: string): number | null {
+  const p = String(s ?? "").split("-");
+  if (p.length !== 3) return null;
+  const y = Number(p[0]), m = Number(p[1]), d = Number(p[2]);
+  if (!y || !m || !d) return null;
+  return Date.UTC(y, m - 1, d);
+}
+function rowsOfReport(d: unknown): Record<string, unknown>[] {
+  const r = (d as { result?: unknown })?.result;
+  return Array.isArray(r) ? (r as Record<string, unknown>[]) : [];
+}
+
+interface ActivityAcc {
+  pipelineUpdates: number;
+  bulkEmails: number;
+  diceCredits: number;
+  monsterCredits: number;
+  advSearchInternalDb: number; // NOT date-filtered — the report has no date column
+}
+
+export const recruiterActivity = onCall(
+  { ...commonOpts, secrets: [CEIPAL_PASSWORD], timeoutSeconds: 540, memory: "512MiB" },
+  async (request) => {
+    void request; // auth on hold (open mode)
+    const password = CEIPAL_PASSWORD.value();
+    if (!password || password.startsWith("PLACEHOLDER")) {
+      throw new HttpsError("failed-precondition", "Ceipal password is not configured.");
+    }
+    const fromMs = parseIsoDay(String(request.data?.from ?? ""));
+    const toMs = parseIsoDay(String(request.data?.to ?? ""));
+    const inRange = (dayMs: number | null) =>
+      dayMs != null && (fromMs == null || dayMs >= fromMs) && (toMs == null || dayMs <= toMs);
+
+    const [pipe, mail, board, adv] = await Promise.all([
+      fetchReport("pipeline_logs", password, 0),
+      fetchReport("mail_merge", password, 0),
+      fetchReport("job_board", password, 0),
+      fetchReport("advanced_search", password, 0),
+    ]);
+
+    const by = new Map<string, ActivityAcc>();
+    const acc = (name: unknown): ActivityAcc | null => {
+      const k = activityNameKey(name);
+      if (!k) return null;
+      let a = by.get(k);
+      if (!a) {
+        a = { pipelineUpdates: 0, bulkEmails: 0, diceCredits: 0, monsterCredits: 0, advSearchInternalDb: 0 };
+        by.set(k, a);
+      }
+      return a;
+    };
+
+    for (const r of rowsOfReport(pipe)) {
+      if (!inRange(parseCeipalDay(String(r.StatusChangedOn ?? "")))) continue;
+      const a = acc(r.StatusChangedBy);
+      if (a) a.pipelineUpdates++;
+    }
+    for (const r of rowsOfReport(mail)) {
+      if (!inRange(parseCeipalDay(String(r.MailsSentOn ?? "")))) continue;
+      const a = acc(r.MemberName);
+      if (a) a.bulkEmails += Number(r.MailsSent) || 0;
+    }
+    for (const r of rowsOfReport(board)) {
+      if (!inRange(parseCeipalDay(String(r.ImportedOn ?? "")))) continue;
+      const a = acc(r.UserName);
+      if (!a) continue;
+      const cnt = Number(r.Count) || 0;
+      const jb = String(r.JobBoardName ?? "").toLowerCase();
+      if (jb.includes("dice")) a.diceCredits += cnt;
+      else if (jb.includes("monster")) a.monsterCredits += cnt;
+    }
+    // Advanced search report has no date column — running per-user InternalDB total.
+    for (const r of rowsOfReport(adv)) {
+      const a = acc(r.UserName);
+      if (a) a.advSearchInternalDb += Number(r.InternalDB) || 0;
+    }
+
+    const byRecruiter: Record<string, ActivityAcc> = {};
+    for (const [k, v] of by) byRecruiter[k] = v;
+    return { ok: true, from: request.data?.from ?? null, to: request.data?.to ?? null, byRecruiter, fetchedAt: Date.now() };
   }
 );
 

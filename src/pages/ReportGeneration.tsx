@@ -237,7 +237,7 @@ export default function ReportGeneration() {
     }
   };
 
-  const run = async () => {
+  const run = async (refresh = false) => {
     setError(null);
     setResult(null);
     setFetchInfo(null);
@@ -246,15 +246,17 @@ export default function ReportGeneration() {
     try {
       let jobs, subs;
       if (source === "api") {
-        setStatus("Fetching all records from Ceipal…");
+        setStatus(refresh ? "Refreshing from Ceipal (this can take a minute)…" : "Loading report…");
         const [jobJson, subJson] = await Promise.all([
-          fetchCeipalReport("job_duration", maxRecords),
-          fetchCeipalReport("submissions", maxRecords),
+          fetchCeipalReport("job_duration", { refresh }),
+          fetchCeipalReport("submissions", { refresh }),
         ]);
         const jm = reportMeta(jobJson);
         const sm = reportMeta(subJson);
+        const asOf = sm.cachedAt || jm.cachedAt;
         setFetchInfo(
-          `Pulled ${sm.fetched} of ${sm.total} submissions and ${jm.fetched} of ${jm.total} jobs from Ceipal.`
+          `${sm.fetched} submissions and ${jm.fetched} jobs` +
+            (asOf ? ` · data as of ${new Date(asOf).toLocaleString()} (cached)` : " · freshly pulled from Ceipal")
         );
         jobs = parseJobsFromApi(jobJson);
         subs = parseSubmissionsFromApi(subJson);
@@ -400,10 +402,15 @@ export default function ReportGeneration() {
           </div>
         )}
 
-        <div style={{ marginTop: "1rem", display: "flex", gap: "0.75rem", alignItems: "center" }}>
-          <button className="btn" onClick={run} disabled={busy}>
+        <div style={{ marginTop: "1rem", display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
+          <button className="btn" onClick={() => run(false)} disabled={busy}>
             {busy && status ? <span className="spinner" /> : "📊"} Generate report
           </button>
+          {source === "api" && (
+            <button className="btn secondary" onClick={() => run(true)} disabled={busy} title="Pull the latest data directly from Ceipal (slower)">
+              ↻ Refresh from Ceipal
+            </button>
+          )}
           {status && <span className="muted">{status}</span>}
         </div>
       </div>
