@@ -56,6 +56,7 @@ export const COLUMNS: string[] = [
   "Job Status",
   "Job Created On",
   "Job Age",
+  "# Submissions to Vendor/Client",
   "# Submitted Profiles",
   "# Waiting for Evaluation",
   "# Internal Interview",

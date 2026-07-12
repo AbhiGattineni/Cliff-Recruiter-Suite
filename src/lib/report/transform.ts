@@ -204,7 +204,7 @@ export function buildReport(jobs: JobRecord[], subs: SubmissionEvent[]): ReportR
       } else {
         // True zero-submission job.
         cells["# Submitted Profiles"] = "0";
-        setStageCounts(cells, { WAITING: 0, INTERNAL_INTERVIEW: 0, SELECTED: 0, REJECTED: 0, SUBMITTED: 0, OTHER: 0 });
+        setStageCounts(cells, { WAITING: 0, INTERNAL_INTERVIEW: 0, SELECTED: 0, REJECTED: 0, SUBMITTED: 0, CLIENT_VENDOR: 0, OTHER: 0 });
         red = isOverdue(jobCreatedOn, now);
         cells["Note"] = red
           ? "No submissions — Overdue (no submission by office deadline)"
@@ -247,7 +247,9 @@ export function buildReport(jobs: JobRecord[], subs: SubmissionEvent[]): ReportR
       const interview = ts.INTERNAL_INTERVIEW ?? null;
       const selected = ts.SELECTED ?? null;
       const rejected = ts.REJECTED ?? null;
-      const submitted = ts.SUBMITTED ?? null;
+      // The "Submitted (→ Client/Vendor)" stage is the client/vendor submission,
+      // not the bare "submitted to account manager".
+      const clientVendor = ts.CLIENT_VENDOR ?? null;
 
       const decisionTs = maxDt([selected, rejected]); // whichever exists (later if both)
       const decisionAnchor = interview ?? waiting; // fall back to waiting if no interview
@@ -262,8 +264,8 @@ export function buildReport(jobs: JobRecord[], subs: SubmissionEvent[]): ReportR
       cells["→ time to Internal Decision"] = decisionTs ? fmtDuration(decisionAnchor, decisionTs) : DASH;
       cells["Selected Internally"] = fmtTs(selected);
       cells["Rejected Internally"] = fmtTs(rejected);
-      cells["→ time to Submitted"] = submitted ? fmtDuration(submittedAnchor, submitted) : DASH;
-      cells["Submitted (→ Client/Vendor)"] = fmtTs(submitted);
+      cells["→ time to Submitted"] = clientVendor ? fmtDuration(submittedAnchor, clientVendor) : DASH;
+      cells["Submitted (→ Client/Vendor)"] = fmtTs(clientVendor);
       cells["Note"] = idx === 0 ? extraNote : "";
 
       rows.push({ cells, na: false, red: false });
@@ -287,6 +289,7 @@ function countBuckets(cands: CandidateAgg[]): Record<CanonicalStatus, number> {
     SELECTED: 0,
     REJECTED: 0,
     SUBMITTED: 0,
+    CLIENT_VENDOR: 0,
     OTHER: 0,
   };
   for (const c of cands) counts[c.currentBucket]++;
@@ -302,5 +305,6 @@ function setStageCounts(
   cells["# Selected Internally"] = counts ? String(counts.SELECTED) : NA;
   cells["# Rejected Internally"] = counts ? String(counts.REJECTED) : NA;
   cells["# Submitted"] = counts ? String(counts.SUBMITTED) : NA;
+  cells["# Submissions to Vendor/Client"] = counts ? String(counts.CLIENT_VENDOR) : NA;
   cells["# Other Statuses"] = counts ? String(counts.OTHER) : NA;
 }

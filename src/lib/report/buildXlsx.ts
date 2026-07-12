@@ -22,6 +22,7 @@ const WIDTHS: Record<string, number> = {
   "Job Status": 14,
   "Job Created On": 18,
   "Job Age": 14,
+  "# Submissions to Vendor/Client": 14,
   "# Submitted Profiles": 12,
   "# Waiting for Evaluation": 12,
   "# Internal Interview": 12,

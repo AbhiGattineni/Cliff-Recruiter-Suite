@@ -9,7 +9,8 @@ export type CanonicalStatus =
   | "INTERNAL_INTERVIEW"
   | "SELECTED"
   | "REJECTED"
-  | "SUBMITTED"
+  | "SUBMITTED" // submitted to the account manager (internal)
+  | "CLIENT_VENDOR" // submitted to the client / vendor (forwarded by the AM)
   | "OTHER";
 
 /** Lower-case, strip everything except a-z0-9 for tolerant header matching. */
@@ -124,13 +125,18 @@ export function normalizeStatus(raw: unknown): CanonicalStatus {
   if (n.includes("internalinterview") || n.includes("internalscreeningsubmitted")) return "INTERNAL_INTERVIEW";
   if (n.includes("selectedinternally")) return "SELECTED";
   if (n.includes("rejectedinternally")) return "REJECTED";
-  // Submitted to vendor / client / end client, or a bare "submitted".
+  // Submitted to the client / vendor / end client (forwarded by the AM).
   if (
     n.includes("submittedtovendor") ||
     n.includes("submittedtoclient") ||
     n.includes("submittedtoendclient") ||
-    n === "submitted"
+    n.includes("clientsubmission") ||
+    n.includes("vendorsubmission")
   ) {
+    return "CLIENT_VENDOR";
+  }
+  // Submitted to the account manager (internal) — distinct from client/vendor.
+  if (n === "submitted" || n.includes("submittedtoaccountmanager")) {
     return "SUBMITTED";
   }
   return "OTHER";

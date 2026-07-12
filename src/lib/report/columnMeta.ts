@@ -21,6 +21,7 @@ export const COLUMN_GROUPS: ColumnGroup[] = [
       { name: "Job Status", desc: "Open, closed, on-hold, etc." },
       { name: "Job Created On", desc: "When the job was posted (EST)." },
       { name: "Job Age", desc: "Time elapsed since the job was created." },
+      { name: "# Submissions to Vendor/Client", desc: "Candidates forwarded to the client/vendor (distinct from # Submitted, which is submitted to the account manager)." },
     ],
   },
   {
@@ -45,7 +46,7 @@ export const COLUMN_GROUPS: ColumnGroup[] = [
       { name: "# Internal Interview", desc: "In internal interview / screening." },
       { name: "# Selected Internally", desc: "Selected internally." },
       { name: "# Rejected Internally", desc: "Rejected internally." },
-      { name: "# Submitted", desc: "Submitted to client / vendor." },
+      { name: "# Submitted", desc: "Submitted to the account manager (not yet forwarded to client/vendor)." },
       { name: "# Other Statuses", desc: "Any other status." },
     ],
   },

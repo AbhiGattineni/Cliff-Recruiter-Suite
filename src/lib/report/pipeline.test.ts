@@ -79,10 +79,12 @@ describe("Ceipal API → report pipeline", () => {
     expect(michael.cells["→ time to Submitted"]).not.toBe(DASH);
   });
 
-  it("counts stage buckets", () => {
+  it("counts stage buckets — client/vendor separate from submitted-to-AM", () => {
     const row = report.rows[0].cells;
-    // Michael's latest status = Submitted; Sara = Waiting for Evaluation
     expect(row["# Submitted Profiles"]).toBe("2");
-    expect(Number(row["# Submitted"]) + Number(row["# Waiting for Evaluation"])).toBe(2);
+    // Michael reached "Submitted To Client" → client/vendor; Sara = Waiting.
+    expect(row["# Submissions to Vendor/Client"]).toBe("1");
+    expect(row["# Waiting for Evaluation"]).toBe("1");
+    expect(row["# Submitted"]).toBe("0"); // bare "submitted to AM" only
   });
 });
