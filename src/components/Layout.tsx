@@ -12,41 +12,60 @@ const NAV = [
   { to: "/recruiters", icon: "🏆", label: "Recruiter Performance" },
 ];
 
+const isMobile = () => typeof window !== "undefined" && window.matchMedia("(max-width: 768px)").matches;
+
 export default function Layout() {
   const { user, signOut } = useAuth();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("sidebarCollapsed") === "1");
+  const [mobileOpen, setMobileOpen] = useState(false);
 
+  // On mobile the ☰ opens/closes the slide-over drawer; on desktop it toggles
+  // the icon-only rail.
   const toggle = () => {
-    setCollapsed((c) => {
-      const next = !c;
-      localStorage.setItem("sidebarCollapsed", next ? "1" : "0");
-      return next;
-    });
+    if (isMobile()) {
+      setMobileOpen((o) => !o);
+    } else {
+      setCollapsed((c) => {
+        const next = !c;
+        localStorage.setItem("sidebarCollapsed", next ? "1" : "0");
+        return next;
+      });
+    }
   };
+
+  const showFull = !collapsed || mobileOpen; // drawer always shows the full sidebar
 
   return (
     <div className="app-shell">
-      <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
+      {mobileOpen && <div className="sidebar-backdrop" onClick={() => setMobileOpen(false)} />}
+
+      <aside className={`sidebar ${collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-open" : ""}`}>
         <div className="brand">
-          {collapsed ? (
-            <span className="brand-mark">C</span>
-          ) : (
+          {showFull ? (
             <span className="brand-full">
               Cliff Recruiter Suite
               <small>Cliff Services Inc.</small>
             </span>
+          ) : (
+            <span className="brand-mark">C</span>
           )}
         </div>
         <nav>
           {NAV.map((n) => (
-            <NavLink key={n.to} to={n.to} end={n.end} title={collapsed ? n.label : undefined}>
+            <NavLink
+              key={n.to}
+              to={n.to}
+              end={n.end}
+              title={collapsed && !mobileOpen ? n.label : undefined}
+              onClick={() => setMobileOpen(false)}
+            >
               <span className="nav-ico">{n.icon}</span>
               <span className="nav-label">{n.label}</span>
             </NavLink>
           ))}
         </nav>
         <div className="spacer" />
-        {!collapsed && (
+        {showFull && (
           <div className="user-box">
             {user ? (
               <>
@@ -68,7 +87,7 @@ export default function Layout() {
 
       <div className="main">
         <div className="topbar">
-          <button className="collapse-btn" onClick={toggle} title={collapsed ? "Expand menu" : "Collapse menu"} aria-label="Toggle menu">
+          <button className="collapse-btn" onClick={toggle} title="Toggle menu" aria-label="Toggle menu">
             ☰
           </button>
           <span>Recruiter Tools</span>
