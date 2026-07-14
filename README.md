@@ -194,6 +194,7 @@ Detailed docs live in [`docs/`](docs/):
 | [RESUME-PARSING.md](docs/RESUME-PARSING.md) | Resume assessment, providers, duplicate detection, PDF |
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Setup, secrets, build, and Firebase deploy commands |
 | [CHANGELOG.md](docs/CHANGELOG.md) | Chronological record of notable changes |
+| [FUTURE-FEATURES.md](docs/FUTURE-FEATURES.md) | Scoped-but-not-built ideas (e.g. candidate online-profile web-search check) |
 
 ## Secrets & git safety
 
