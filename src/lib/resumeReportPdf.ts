@@ -3,6 +3,7 @@
 import { jsPDF } from "jspdf";
 import { ResumeReport } from "./resumeReports";
 import { normalizeAiLines, aiPercentOf } from "./resume";
+import { highlightKeywords } from "./highlight";
 
 const BRAND: [number, number, number] = [31, 78, 120]; // #1F4E78
 const INK: [number, number, number] = [31, 41, 51];
@@ -163,20 +164,53 @@ export function downloadResumeReportPdf(r: ResumeReport): void {
     `${aiPct != null ? aiPct + "% AI-generated." : r.aiGeneratedLikelihood + " likelihood."} ${r.aiGeneratedConfidence || ""}`
   );
   const aiLines = normalizeAiLines(r.aiGeneratedLines);
+  const jdKeywords = (r.skillMatches ?? []).map((s) => s.skill);
+  const HL: [number, number, number] = [255, 242, 168];
+
+  // One flagged line with inline highlighting of JD keywords.
+  const drawFlaggedLine = (prefix: string, text: string) => {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    const startX = margin + 14;
+    const maxX = margin + contentW;
+    ensureSpace(13);
+    doc.setTextColor(...RED);
+    doc.text("▸", margin, y);
+    let x = startX;
+    const tokens: { w: string; hl: boolean }[] = [];
+    if (prefix) tokens.push({ w: prefix, hl: false });
+    for (const seg of highlightKeywords(text, jdKeywords)) {
+      for (const part of seg.text.split(/(\s+)/)) {
+        if (part.length) tokens.push({ w: part, hl: seg.match && part.trim().length > 0 });
+      }
+    }
+    for (const t of tokens) {
+      const wWidth = doc.getTextWidth(t.w);
+      const isSpace = t.w.trim().length === 0;
+      if (!isSpace && x + wWidth > maxX) {
+        y += 12;
+        ensureSpace(12);
+        x = startX;
+      }
+      if (t.hl) {
+        doc.setFillColor(...HL);
+        doc.rect(x, y - 7, wWidth, 9, "F");
+      }
+      doc.setTextColor(...(t.hl ? INK : RED));
+      doc.text(t.w, x, y);
+      x += wWidth;
+    }
+    y += 13;
+  };
+
   if (aiLines.length) {
     paragraph(`Lines that read as AI-generated (${aiLines.length}):`, { bold: true, color: RED });
+    if (jdKeywords.length) {
+      paragraph("Highlighted = job-description skills present in the point.", { size: 8, color: MUTED });
+    }
     for (const line of aiLines) {
       const prefix = Number.isFinite(line.score) ? `[${Math.round(line.score)}%] ` : "";
-      const wrapped = doc.splitTextToSize(prefix + line.text, contentW - 16);
-      wrapped.forEach((ln: string, i: number) => {
-        ensureSpace(13);
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(9);
-        doc.setTextColor(...RED);
-        if (i === 0) doc.text("▸", margin, y);
-        doc.text(ln, margin + 14, y);
-        y += 13;
-      });
+      drawFlaggedLine(prefix, line.text);
     }
   }
   paragraph("This is a probabilistic signal, not proof — treat it as one input alongside human review.", {

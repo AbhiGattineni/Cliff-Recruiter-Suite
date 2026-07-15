@@ -1,10 +1,12 @@
 import { ResumeAssessment, normalizeAiLines, aiPercentOf } from "../lib/resume";
+import { highlightKeywords } from "../lib/highlight";
 
 // Full assessment detail — used inline on Resume Parsing and inside the
 // Resume Reports modal. AI-generated lines are highlighted to stand out.
 export default function AssessmentDetail({ a }: { a: ResumeAssessment }) {
   const ratingClass = a.rating === "Strong" ? "green" : a.rating === "Weak" ? "red" : "amber";
   const aiLines = normalizeAiLines(a.aiGeneratedLines);
+  const jdKeywords = (a.skillMatches ?? []).map((s) => s.skill);
   const aiPct = aiPercentOf(a);
   const aiClass =
     aiPct != null
@@ -88,10 +90,23 @@ export default function AssessmentDetail({ a }: { a: ResumeAssessment }) {
           <div className="ai-flags-head">
             ⚠ Lines that read as AI-generated ({aiLines.length})
           </div>
+          {jdKeywords.length > 0 && (
+            <div className="muted" style={{ fontSize: "0.78rem", margin: "0 0 0.4rem" }}>
+              <mark className="kw-hl">Highlighted</mark> = job-description skills in the point (possible keyword-stuffing).
+            </div>
+          )}
           {aiLines.map((line, i) => (
             <div className="ai-flag-line" key={i}>
               <span className="ai-tag">{Number.isFinite(line.score) ? `${Math.round(line.score)}%` : "AI"}</span>
-              <span>{line.text}</span>
+              <span>
+                {highlightKeywords(line.text, jdKeywords).map((seg, j) =>
+                  seg.match ? (
+                    <mark className="kw-hl" key={j}>{seg.text}</mark>
+                  ) : (
+                    <span key={j}>{seg.text}</span>
+                  )
+                )}
+              </span>
             </div>
           ))}
         </div>

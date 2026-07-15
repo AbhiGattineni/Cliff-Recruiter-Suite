@@ -270,6 +270,7 @@ table.data tr:hover td { background: #f0f6fc; }
   font-size: 0.9rem; color: #5b1a1a;
 }
 .ai-flag-line:last-child { margin-bottom: 0; }
+.kw-hl { background: #fff2a8; color: inherit; border-radius: 2px; padding: 0 1px; font-weight: 600; }
 .ai-tag {
   flex-shrink: 0; background: var(--danger); color: #fff; font-size: 0.62rem; font-weight: 700;
   padding: 0.1rem 0.35rem; border-radius: 4px; letter-spacing: 0.03em; margin-top: 0.1rem;
