@@ -1,13 +1,28 @@
+import { Fragment, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { DateTime } from "luxon";
 import { getActiveJobs } from "../lib/activeJobs";
+import { JobSubmission } from "../lib/recruiterStats";
 
 const cleanLoc = (s: string) => s.replace(/^\[|\]$/g, "").trim();
 const dateOnly = (s: string) => (s ? s.split(/\s+/)[0] : "—");
+const fmtDt = (d: DateTime | null) => (d ? d.toFormat("MM/dd/yyyy hh:mm a") : "—");
 
-// Small live snapshot of the currently-open jobs (Ceipal "Active Jobs - All").
-export default function ActiveJobsCard() {
+// Live snapshot of currently-open jobs (Ceipal "Active Jobs - All"). Each job row
+// expands to the submissions for that job — reusing the submissions already loaded
+// on the page (subsByJob), so no extra fetch.
+export default function ActiveJobsCard({ subsByJob }: { subsByJob: Map<string, JobSubmission[]> }) {
   const q = useQuery({ queryKey: ["activeJobs"], queryFn: () => getActiveJobs() });
   const jobs = q.data ?? [];
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const toggle = (code: string) =>
+    setExpanded((cur) => {
+      const next = new Set(cur);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
 
   return (
     <div className="card">
@@ -35,38 +50,83 @@ export default function ActiveJobsCard() {
       ) : jobs.length === 0 ? (
         <p className="muted" style={{ marginBottom: 0 }}>No active jobs right now.</p>
       ) : (
-        <div className="table-wrap" style={{ marginTop: "0.6rem", maxHeight: "40vh" }}>
-          <table className="data">
-            <thead>
-              <tr>
-                <th style={{ width: 40 }}>#</th>
-                <th>Req ID</th>
-                <th>Job</th>
-                <th>Client</th>
-                <th>Location</th>
-                <th style={{ textAlign: "right" }}>Positions</th>
-                <th style={{ textAlign: "right" }}>Subs</th>
-                <th style={{ textAlign: "right" }}>Interviews</th>
-                <th>Posted</th>
-              </tr>
-            </thead>
-            <tbody>
-              {jobs.map((j, i) => (
-                <tr key={j.jobCode || i}>
-                  <td className="muted">{i + 1}</td>
-                  <td>{j.jobCode || "—"}</td>
-                  <td style={{ whiteSpace: "normal", fontWeight: 600 }}>{j.jobTitle || "—"}</td>
-                  <td style={{ whiteSpace: "normal" }}>{j.client || "—"}</td>
-                  <td style={{ whiteSpace: "normal" }}>{cleanLoc(j.location) || "—"}</td>
-                  <td style={{ textAlign: "right" }}>{j.positions || "—"}</td>
-                  <td style={{ textAlign: "right" }}>{j.submissions}</td>
-                  <td style={{ textAlign: "right" }}>{j.interviews}</td>
-                  <td style={{ whiteSpace: "nowrap" }}>{dateOnly(j.jobCreated)}</td>
+        <>
+          <p className="muted" style={{ marginTop: 0, fontSize: "0.82rem" }}>Click a job to see its submissions.</p>
+          <div className="table-wrap" style={{ maxHeight: "48vh" }}>
+            <table className="data">
+              <thead>
+                <tr>
+                  <th style={{ width: 28 }}></th>
+                  <th>Req ID</th>
+                  <th>Job</th>
+                  <th>Client</th>
+                  <th>Location</th>
+                  <th style={{ textAlign: "right" }}>Positions</th>
+                  <th style={{ textAlign: "right" }}>Submissions</th>
+                  <th style={{ textAlign: "right" }}>Interviews</th>
+                  <th>Posted</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {jobs.map((j, i) => {
+                  const details = subsByJob.get(j.jobCode) ?? [];
+                  const open = expanded.has(j.jobCode || String(i));
+                  const key = j.jobCode || String(i);
+                  return (
+                    <Fragment key={key}>
+                      <tr onClick={() => toggle(key)} style={{ cursor: "pointer" }}>
+                        <td style={{ color: "var(--muted)" }}>{open ? "▾" : "▸"}</td>
+                        <td>{j.jobCode || "—"}</td>
+                        <td style={{ whiteSpace: "normal", fontWeight: 600 }}>{j.jobTitle || "—"}</td>
+                        <td style={{ whiteSpace: "normal" }}>{j.client || "—"}</td>
+                        <td style={{ whiteSpace: "normal" }}>{cleanLoc(j.location) || "—"}</td>
+                        <td style={{ textAlign: "right" }}>{j.positions || "—"}</td>
+                        <td style={{ textAlign: "right", fontWeight: 700 }}>{j.submissions}</td>
+                        <td style={{ textAlign: "right" }}>{j.interviews}</td>
+                        <td style={{ whiteSpace: "nowrap" }}>{dateOnly(j.jobCreated)}</td>
+                      </tr>
+                      {open && (
+                        <tr>
+                          <td></td>
+                          <td colSpan={8} style={{ background: "#f8fafc", padding: "0.5rem 0.75rem" }}>
+                            {details.length > 0 ? (
+                              <table className="data" style={{ margin: 0 }}>
+                                <thead>
+                                  <tr>
+                                    <th>Consultant</th>
+                                    <th>Recruiter</th>
+                                    <th>Current status</th>
+                                    <th>Submitted on</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {details.map((s, k) => (
+                                    <tr key={k}>
+                                      <td style={{ whiteSpace: "normal", fontWeight: 600 }}>{s.consultant || "—"}</td>
+                                      <td style={{ whiteSpace: "normal" }}>{s.recruiter || "—"}</td>
+                                      <td style={{ whiteSpace: "normal" }}>{s.status}</td>
+                                      <td style={{ whiteSpace: "nowrap" }}>{fmtDt(s.submittedOn)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            ) : (
+                              <span className="muted" style={{ fontSize: "0.85rem" }}>
+                                {subsByJob.size === 0
+                                  ? "Submission details load with the leaderboard below…"
+                                  : "No submission details in the loaded data for this job."}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );

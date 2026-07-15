@@ -8,6 +8,7 @@ import {
   computeRecruiterStats,
   sortStats,
   screeningOf,
+  submissionsByJob,
   RecruiterStat,
   StatusMeta,
   SortKey,
@@ -198,6 +199,8 @@ export default function RecruiterPerformance() {
 
   const sorted = useMemo(() => sortStats(allStats, sortKey), [allStats, sortKey]);
   const board = usePagination(sorted, 25);
+  // Submissions grouped by job — reused by the Active Jobs card (no extra fetch).
+  const subsByJob = useMemo(() => (subs ? submissionsByJob(subs) : new Map()), [subs]);
   const names = useMemo(() => allStats.map((s) => s.name).sort((a, b) => a.localeCompare(b)), [allStats]);
   const picked = selected ? allStats.find((s) => s.name === selected) ?? null : null;
   const pickedRank = picked ? rankByName.get(picked.name) ?? 0 : 0;
@@ -247,7 +250,7 @@ export default function RecruiterPerformance() {
         </div>
       </div>
 
-      <ActiveJobsCard />
+      <ActiveJobsCard subsByJob={subsByJob} />
 
       {error && <div className="alert error">{error}</div>}
       {fetchInfo && !error && <div className="alert info">{fetchInfo}</div>}

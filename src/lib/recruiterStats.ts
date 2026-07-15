@@ -270,6 +270,28 @@ function buildJobGroups(rows: ProfileRow[], assigned: JobRecord[]): JobGroup[] {
   });
 }
 
+export interface JobSubmission {
+  consultant: string;
+  recruiter: string;
+  status: string; // merged display label (current status)
+  submittedOn: DateTime | null;
+}
+
+/** Group the already-loaded submissions by Job Code (one row per candidate, latest status). */
+export function submissionsByJob(subs: SubmissionEvent[]): Map<string, JobSubmission[]> {
+  const cands = foldCandidates(subs);
+  const m = new Map<string, JobSubmission[]>();
+  for (const c of cands) {
+    const code = c.jobCode && c.jobCode !== "(unknown)" && c.jobCode.toUpperCase() !== "NA" ? c.jobCode : "";
+    if (!code) continue;
+    const { label } = statusIdentity(c.status || "");
+    if (!m.has(code)) m.set(code, []);
+    m.get(code)!.push({ consultant: c.consultant, recruiter: c.recruiter, status: label, submittedOn: c.submittedOn });
+  }
+  for (const arr of m.values()) arr.sort((a, b) => (b.submittedOn?.toMillis() ?? 0) - (a.submittedOn?.toMillis() ?? 0));
+  return m;
+}
+
 /** Aggregate raw submission events into per-recruiter performance, ranked by index. */
 export function computeRecruiterStats(subs: SubmissionEvent[], jobs: JobRecord[] = []): RecruiterStatsResult {
   const cands = foldCandidates(subs);
