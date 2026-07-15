@@ -209,6 +209,7 @@ table.data th {
 table.data td { padding: 0.45rem 0.7rem; border-top: 1px solid var(--line); }
 table.data tr.na td { background: var(--peach); }
 table.data tr.red td { background: var(--danger-bg); color: var(--danger); font-weight: 600; }
+table.data tr.internal-only td { background: #ffe8b3; color: #7a5600; }
 table.data tr:hover td { background: #f0f6fc; }
 
 /* ---------- Alerts ---------- */

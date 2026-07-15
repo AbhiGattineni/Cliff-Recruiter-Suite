@@ -2,6 +2,17 @@
 
 Chronological record of notable changes. Newest first.
 
+## Report preview: "in our field" (amber) highlight
+- New **amber** row highlight in the Report Generation preview + Excel for requirements that have
+  submissions but **not a single profile has reached the client/vendor side** (still entirely in our
+  internal pipeline: waiting / internal interview / selected/rejected internally / submitted-to-AM).
+  Distinct from the existing **red** (0-submission overdue). Helps management spot reqs where we have
+  profiles but haven't submitted any to the client/vendor.
+- `isClientVendorStatus` (columns.ts) recognises the full client/vendor status set (submitted to
+  client/vendor/end-client/VMS, client/vendor interview, selected/rejected/hold/disqualified by
+  client/vendor/end-client, rejected-after-client-selection, BGV). Transform sets `ReportRow.internalOnly`
+  + `ReportResult.internalOnlyCount` (shown as an "In our field (amber)" stat). 2 new tests.
+
 ## Active jobs snapshot on Recruiter Performance
 - New **"Active jobs today"** card at the top of the Recruiter Performance page — a live snapshot
   of currently-open jobs from the Ceipal **"Active Jobs - All"** report (Req ID, title, client,

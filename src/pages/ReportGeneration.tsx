@@ -428,6 +428,7 @@ export default function ReportGeneration() {
               <Stat label="Jobs" value={result.jobCount} />
               <Stat label="Candidate rows" value={result.candidateCount} />
               <Stat label="Overdue (red)" value={result.redCount} />
+              <Stat label="In our field (amber)" value={result.internalOnlyCount} />
               <Stat
                 label="Report time (EST)"
                 value={result.generatedAt ? result.generatedAt.toFormat("MM/dd HH:mm") : "—"}
@@ -509,8 +510,10 @@ export default function ReportGeneration() {
             <h2>Preview</h2>
             <p className="sub">
               {filteredRows.length} rows{anyFilter ? " (filtered)" : ""} ·{" "}
-              {visibleCols.length} of {COLUMNS.length} columns. Peach = NA row, red = overdue
-              0-submission job. Download exports <strong>all</strong> {filteredRows.length} rows (the whole set, not just this page).
+              {visibleCols.length} of {COLUMNS.length} columns. Red = overdue 0-submission job,
+              <span style={{ background: "#ffe8b3", padding: "0 4px", borderRadius: 3 }}> amber</span> = has
+              submissions but none sent to client/vendor (still in our field), peach = NA row. Download
+              exports <strong>all</strong> {filteredRows.length} rows (the whole set, not just this page).
             </p>
             {visibleCols.length === 0 ? (
               <div style={{ textAlign: "center", padding: "1.5rem", color: "var(--muted)" }}>
@@ -530,7 +533,10 @@ export default function ReportGeneration() {
                     </thead>
                     <tbody>
                       {preview.pageItems.map((row, i) => (
-                        <tr key={preview.startIndex + i} className={row.red ? "red" : row.na ? "na" : ""}>
+                        <tr
+                          key={preview.startIndex + i}
+                          className={row.red ? "red" : row.internalOnly ? "internal-only" : row.na ? "na" : ""}
+                        >
                           <td className="muted">{preview.startIndex + i + 1}</td>
                           {visibleCols.map((c) => (
                             <td key={c}>{row.cells[c] ?? ""}</td>

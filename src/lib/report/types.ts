@@ -46,6 +46,7 @@ export interface CandidateAgg {
   // Latest timestamp seen for each mapped status.
   statusTs: Partial<Record<CanonicalStatus, DateTime | null>>;
   currentBucket: CanonicalStatus; // status with the latest Status Changed On
+  hasClientVendor: boolean; // ever reached any client/vendor-side status
 }
 
 // The exact, ordered output columns (headers in row 1).
@@ -92,6 +93,7 @@ export interface ReportRow {
   cells: Record<string, string>; // keyed by COLUMNS entries
   na: boolean; // generic NA row -> peach shading
   red: boolean; // 0-submission overdue -> red shading
+  internalOnly: boolean; // has submissions but none sent to client/vendor -> amber
 }
 
 export interface ReportResult {
@@ -100,5 +102,6 @@ export interface ReportResult {
   jobCount: number;
   candidateCount: number;
   redCount: number;
+  internalOnlyCount: number; // jobs with submissions but none sent to client/vendor
   warnings: string[];
 }

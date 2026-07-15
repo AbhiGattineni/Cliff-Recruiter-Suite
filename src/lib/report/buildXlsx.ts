@@ -13,6 +13,8 @@ const HEADER_FONT = "FFFFFFFF";
 const PEACH = "FFFCE4D6";
 const RED_FILL = "FFFFC7CE";
 const RED_TEXT = "FF9C0006";
+const AMBER_FILL = "FFFFE8B3";
+const AMBER_TEXT = "FF7A5600";
 
 // Sensible per-column widths (characters).
 const WIDTHS: Record<string, number> = {
@@ -117,11 +119,14 @@ export async function buildWorkbook(result: ReportResult, info?: ReportInfo): Pr
     const values = cols.map((c) => row.cells[c] ?? "");
     const added = ws.addRow(values);
     added.eachCell((cell) => {
-      cell.font = { name: "Arial", size: 10, color: row.red ? { argb: RED_TEXT } : undefined, bold: row.red };
+      const textColor = row.red ? RED_TEXT : row.internalOnly ? AMBER_TEXT : undefined;
+      cell.font = { name: "Arial", size: 10, color: textColor ? { argb: textColor } : undefined, bold: row.red };
       cell.alignment = { vertical: "top", wrapText: true };
       cell.border = thinBorder();
       if (row.red) {
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: RED_FILL } };
+      } else if (row.internalOnly) {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: AMBER_FILL } };
       } else if (row.na) {
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: PEACH } };
       }

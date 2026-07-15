@@ -87,4 +87,44 @@ describe("Ceipal API → report pipeline", () => {
     expect(row["# Waiting for Evaluation"]).toBe("1");
     expect(row["# Submitted"]).toBe("0"); // bare "submitted to AM" only
   });
+
+  it("does not flag internal-only when a profile reached client/vendor", () => {
+    // CS-361 has Michael at "Submitted To Client" → not internal-only.
+    expect(report.rows.every((r) => r.internalOnly === false)).toBe(true);
+  });
+});
+
+describe("internal-only highlighting", () => {
+  const row = (code: string, name: string, status: string) => ({
+    JobTitle: "Role",
+    ApplicantFullName: name,
+    SubmittedBy: "Rec",
+    JobCode: code,
+    JobCreatedOn: "07/10/2026 10:00:00",
+    Client: "C",
+    SubmissionStatus: status,
+    StatusChangedOn: "07/10/2026 11:00:00",
+    SubmittedOn: "07/10/2026 10:05:00",
+    AccountManager: "AM",
+  });
+  const report = buildReport(
+    [],
+    parseSubmissionsFromApi({
+      success: 1,
+      result: [
+        row("CS-A", "Alpha", "Waiting for Evaluation"),
+        row("CS-A", "Beta", "Selected Internally"), // still internal
+        row("CS-B", "Gamma", "Client Interview"), // reached client/vendor
+      ],
+    })
+  );
+
+  it("flags jobs with submissions but no client/vendor activity", () => {
+    const csA = report.rows.filter((r) => r.cells["Job Code"] === "CS-A");
+    const csB = report.rows.filter((r) => r.cells["Job Code"] === "CS-B");
+    expect(csA.length).toBeGreaterThan(0);
+    expect(csA.every((r) => r.internalOnly)).toBe(true); // in our field → amber
+    expect(csB.every((r) => r.internalOnly)).toBe(false); // client interview → no color
+    expect(report.internalOnlyCount).toBe(1);
+  });
 });

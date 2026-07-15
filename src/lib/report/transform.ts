@@ -5,7 +5,7 @@
 
 import { DateTime } from "luxon";
 import { JobRecord, SubmissionEvent, CandidateAgg, ReportRow, ReportResult } from "./types";
-import { CanonicalStatus, normalizeStatus } from "./columns";
+import { CanonicalStatus, normalizeStatus, isClientVendorStatus } from "./columns";
 import { fmtTs, fmtDuration, maxDt, minDt, DASH } from "./dates";
 import { collectTimestamps } from "./parseSource";
 
@@ -40,6 +40,7 @@ function groupCandidates(subs: SubmissionEvent[]): Map<string, CandidateAgg[]> {
         submittedOn: null,
         statusTs: {},
         currentBucket: "OTHER",
+        hasClientVendor: false,
         _bestTs: null,
       };
       jobMap.set(key, agg);
@@ -49,6 +50,7 @@ function groupCandidates(subs: SubmissionEvent[]): Map<string, CandidateAgg[]> {
     agg.accountManager = firstNonEmpty(agg.accountManager, ev.accountManager);
     agg.client = firstNonEmpty(agg.client, ev.client);
     agg.submittedOn = minDt([agg.submittedOn, ev.submittedOn]);
+    if (isClientVendorStatus(ev.submissionStatus)) agg.hasClientVendor = true;
 
     const bucket = normalizeStatus(ev.submissionStatus);
 
@@ -141,6 +143,7 @@ export function buildReport(jobs: JobRecord[], subs: SubmissionEvent[]): ReportR
   const rows: ReportRow[] = [];
   let candidateCount = 0;
   let redCount = 0;
+  let internalOnlyCount = 0;
 
   for (const code of sortedCodes) {
     const job = jobsMap.get(code);
@@ -211,11 +214,15 @@ export function buildReport(jobs: JobRecord[], subs: SubmissionEvent[]): ReportR
           : "No submissions";
       }
       if (red) redCount++;
-      rows.push({ cells, na: true, red });
+      rows.push({ cells, na: true, red, internalOnly: false });
       continue;
     }
 
     // --- Job with candidates ---
+    // "Internal only" = has submissions but not a single profile ever reached the
+    // client/vendor side (still entirely in our field).
+    const internalOnly = !cands.some((c) => c.hasClientVendor);
+    if (internalOnly) internalOnlyCount++;
     const counts = countBuckets(cands);
     // Order candidates by Submitted On, earliest first (nulls last).
     const ordered = cands.slice().sort((a, b) => {
@@ -268,7 +275,7 @@ export function buildReport(jobs: JobRecord[], subs: SubmissionEvent[]): ReportR
       cells["Submitted (→ Client/Vendor)"] = fmtTs(clientVendor);
       cells["Note"] = idx === 0 ? extraNote : "";
 
-      rows.push({ cells, na: false, red: false });
+      rows.push({ cells, na: false, red: false, internalOnly });
     });
   }
 
@@ -278,6 +285,7 @@ export function buildReport(jobs: JobRecord[], subs: SubmissionEvent[]): ReportR
     jobCount: sortedCodes.length,
     candidateCount,
     redCount,
+    internalOnlyCount,
     warnings,
   };
 }

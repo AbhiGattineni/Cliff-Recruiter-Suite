@@ -141,3 +141,39 @@ export function normalizeStatus(raw: unknown): CanonicalStatus {
   }
   return "OTHER";
 }
+
+/**
+ * True when a status means the profile has moved to the CLIENT / VENDOR side
+ * (submitted to client/vendor/end-client/VMS, or any downstream client/vendor
+ * status: interview, selected/rejected/hold/disqualified by client/vendor, BGV).
+ * A requirement whose profiles are all still internal (never any client/vendor
+ * status) is "in our field" and gets highlighted for management.
+ */
+export function isClientVendorStatus(raw: unknown): boolean {
+  const n = normHeader(raw); // lower + alnum only
+  if (!n) return false;
+  if (n.includes("vms")) return true; // submitted in VMS
+  if (n.includes("bgv")) return true; // background verification — only after client selection
+  return (
+    n.includes("submittedtoclient") ||
+    n.includes("submittedtoendclient") ||
+    n.includes("submittedtovendor") ||
+    n.includes("clientsubmission") ||
+    n.includes("vendorsubmission") ||
+    n.includes("clientinterview") ||
+    n.includes("vendorinterview") ||
+    n.includes("selectedbyclient") ||
+    n.includes("selectedbyendclient") ||
+    n.includes("selectedbyvendor") ||
+    n.includes("rejectedbyclient") ||
+    n.includes("rejectedbyendclient") ||
+    n.includes("rejectedbyvendor") ||
+    n.includes("rejectedafterclientselection") ||
+    n.includes("holdbyclient") ||
+    n.includes("holdbyendclient") ||
+    n.includes("holdbyvendor") ||
+    n.includes("disqualifiedbyclient") ||
+    n.includes("disqualifiedbyendclient") ||
+    n.includes("disqualifiedbyvendor")
+  );
+}
