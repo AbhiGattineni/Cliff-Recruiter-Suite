@@ -34,10 +34,11 @@ Given a candidate resume and a job description, (1) assess the fit and (2) detec
 
 AI-DETECTION METHOD — do this rigorously, line by line:
 - Split the resume's experience/summary/project sections into individual bullet points and sentences.
-- Score EACH bullet/sentence 0-100 for how likely it was written by an AI/LLM (ChatGPT-style).
-- Strong signals of AI generation (raise the score): generic templated phrasing; heavy buzzwords ("spearheaded", "leveraged", "orchestrated", "streamlined", "spearheading cross-functional", "synergy", "robust", "scalable solutions", "drove", "utilized"); every bullet following the same "strong verb + task + vague metric" pattern; uniform sentence length/rhythm; vague or round quantifiers ("improved efficiency by 30%", "reduced costs by 40%") with no concrete specifics; overly polished marketing tone; absence of concrete tools, product names, dates, or messy human detail.
-- Signals it is human-written (lower the score): specific tool/version names, real project/product names, uneven phrasing, first-person quirks, concrete non-round numbers, typos.
-- Be thorough and lean towards flagging when content is generic and templated. If the entire experience section reads AI-generated, flag ALL of its bullets and set the percentage high (90-100).
+- Score EACH bullet/sentence 0-100 for how likely the WRITING was produced/rewritten by an AI/LLM (ChatGPT-style).
+- Strong signals of AI generation (raise the score): uniformly polished, smooth, "professionally rewritten" prose; parallel/templated bullet structure; heavy buzzwords ("spearheaded", "leveraged", "orchestrated", "streamlined", "cross-functional", "synergy", "robust", "scalable", "comprehensive", "hands-on", "solid command of", "comfortable building", "drove", "utilized"); every bullet/sentence following the same rhythm (verb + task + outcome); even sentence length and cadence; long flowing sentences that read like an LLM expanded a short bullet; marketing-brochure tone.
+- CRITICAL: Most AI-written resumes are AI *rewrites* of a real person's resume — they KEEP genuine specifics (tool names, product names, schedules, codes, exact numbers) while polishing the wording. Therefore specific or technical detail does NOT indicate human authorship. Do NOT lower the score just because the resume names real tools, projects, schedules, or exact numbers. Judge the WRITING STYLE, not the factual specificity.
+- Genuine human signals (only these lower the score, and they are about STYLE, not facts): messy or uneven phrasing, abrupt fragments, inconsistent formatting, first-person voice, typos or grammatical slips, terse note-like bullets.
+- Be thorough and lean towards flagging when the prose is uniformly polished and templated, EVEN IF it is full of specific technical detail. If the whole summary/experience reads professionally rewritten, flag ALL of its bullets/sentences and set the percentage high (80-100).
 
 Return ONLY a single JSON object (no prose, no markdown fences, no comments) with exactly these keys:
 {

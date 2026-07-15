@@ -16,6 +16,13 @@ Chronological record of notable changes. Newest first.
   `components/LlmUsagePanel.tsx` shows "N resumes · model · tokens · est. cost" per model plus
   totals, on the **Dashboard** and **Resume Reports** pages.
 
+## AI-detection: judge writing style, not factual specificity
+- A real AI-rewritten resume scored **0%** on gpt-4o (it reasoned "specific tool names/schedules ⇒
+  human"), while gpt-4o-mini flagged it 75%. Root cause: AI *rewrites* keep genuine specifics while
+  polishing the prose. Reworked the prompt to judge **writing style** (uniform polished/templated
+  prose, buzzwords, parallel rhythm) and to explicitly NOT treat concrete tools/numbers as a
+  human signal. After the fix both gpt-4o and gpt-4o-mini score the same resume **85% (High)**.
+
 ## Stronger AI-generated-content detection (Resume Parsing)
 - The old prompt capped flagged lines at 5 and returned only Low/Med/High — a fully AI-written
   resume showed "3 lines, Medium". Reworked the LLM prompt to score **every** bullet/sentence 0–100
