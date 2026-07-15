@@ -275,6 +275,19 @@ table.data tr:hover td { background: #f0f6fc; }
   padding: 0.1rem 0.35rem; border-radius: 4px; letter-spacing: 0.03em; margin-top: 0.1rem;
 }
 
+/* ---------- Pagination ---------- */
+.pager {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  gap: 0.6rem; margin-top: 0.75rem; font-size: 0.85rem;
+}
+.pager-btns { display: flex; align-items: center; gap: 0.35rem; }
+.pager-btns button {
+  min-width: 30px; height: 30px; border: 1px solid var(--line); background: #fff; color: var(--ink);
+  border-radius: 6px; cursor: pointer; font-size: 0.95rem; padding: 0 0.4rem;
+}
+.pager-btns button:hover:not(:disabled) { background: #f1f5f9; border-color: #cbd5e1; }
+.pager-btns button:disabled { opacity: 0.4; cursor: default; }
+
 /* ---------- Responsive ---------- */
 .sidebar-backdrop { display: none; } /* only shown on mobile (below) */
 

@@ -2,6 +2,20 @@
 
 Chronological record of notable changes. Newest first.
 
+## React Query, pagination, row numbers, per-model LLM usage
+- **React Query** (`@tanstack/react-query`) with `staleTime` 5 min + `refetchOnWindowFocus:false`
+  wraps the app (`main.tsx`); Firestore reads (resume reports, dashboard stats, LLM usage, report
+  configs, LLM availability) go through `useQuery` so switching tabs no longer re-hits the API.
+  Saving a resume invalidates the shared `llmUsageSummary` / `resumeReports` / `dashboardStats`
+  caches so they refresh.
+- **Pagination** — reusable `components/Pagination.tsx` (`usePagination` hook) applied to the Report
+  preview (50/page), Resume Reports, Recruiter leaderboard, and Saved Reports (25/page). Report
+  download still exports the whole set, not just the page.
+- **Row numbers (S.No)** column on those tables (continuous across pages).
+- **Per-model LLM usage** — `llmUsageSummary` now returns a `byModel` breakdown; a shared
+  `components/LlmUsagePanel.tsx` shows "N resumes · model · tokens · est. cost" per model plus
+  totals, on the **Dashboard** and **Resume Reports** pages.
+
 ## Stronger AI-generated-content detection (Resume Parsing)
 - The old prompt capped flagged lines at 5 and returned only Low/Med/High — a fully AI-written
   resume showed "3 lines, Medium". Reworked the LLM prompt to score **every** bullet/sentence 0–100

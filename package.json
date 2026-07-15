@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.101.2",
     "exceljs": "^4.4.0",
     "fast-xml-parser": "^4.5.0",
     "firebase": "^10.13.2",

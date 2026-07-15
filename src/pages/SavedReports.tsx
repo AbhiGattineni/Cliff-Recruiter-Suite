@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   listReportConfigs,
   deleteReportConfig,
@@ -7,6 +7,7 @@ import {
   ReportConfigData,
 } from "../lib/reportConfigs";
 import { friendlyError } from "../lib/errors";
+import Pagination, { usePagination } from "../components/Pagination";
 
 // One-line human summary of the filters saved in a configuration.
 function summarizeFilters(cfg: ReportConfigData): string {
@@ -23,34 +24,20 @@ function summarizeFilters(cfg: ReportConfigData): string {
 }
 
 export default function SavedReports() {
-  const [configs, setConfigs] = useState<SavedReportConfig[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
-
-  const load = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setConfigs(await listReportConfigs());
-    } catch (err) {
-      setError(friendlyError(err));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    load();
-  }, []);
+  const qc = useQueryClient();
+  const configsQ = useQuery({ queryKey: ["reportConfigs"], queryFn: () => listReportConfigs() });
+  const configs: SavedReportConfig[] = configsQ.data ?? [];
+  const { page, setPage, pageCount, pageItems, pageSize, total, startIndex } = usePagination(configs, 25);
+  const error = configsQ.error ? friendlyError(configsQ.error) : null;
 
   const remove = async (id: string, name: string) => {
     if (!window.confirm(`Delete the saved report “${name}”?`)) return;
     try {
       await deleteReportConfig(id);
-      setConfigs((cs) => (cs ? cs.filter((c) => c.id !== id) : cs));
+      qc.invalidateQueries({ queryKey: ["reportConfigs"] });
     } catch (err) {
-      setError(friendlyError(err));
+      window.alert(friendlyError(err));
     }
   };
 
@@ -66,23 +53,25 @@ export default function SavedReports() {
             Generation tab, then generate and download.
           </p>
         </div>
-        <button className="btn secondary" onClick={load} disabled={loading}>
-          {loading ? <span className="spinner dark" /> : "⟳"} Refresh
+        <button className="btn secondary" onClick={() => configsQ.refetch()} disabled={configsQ.isFetching}>
+          {configsQ.isFetching ? <span className="spinner dark" /> : "⟳"} Refresh
         </button>
       </div>
 
       {error && <div className="alert error">{error}</div>}
 
       <div className="card">
-        {loading && !configs ? (
+        {configsQ.isLoading ? (
           <div className="center-load" style={{ minHeight: "30vh" }}>
             <div className="spinner dark" />
           </div>
-        ) : configs && configs.length > 0 ? (
+        ) : configs.length > 0 ? (
+          <>
           <div className="table-wrap">
             <table className="data">
               <thead>
                 <tr>
+                  <th style={{ width: 44 }}>#</th>
                   <th>Name</th>
                   <th>Saved</th>
                   <th>Source</th>
@@ -91,8 +80,9 @@ export default function SavedReports() {
                 </tr>
               </thead>
               <tbody>
-                {configs.map((c) => (
+                {pageItems.map((c, i) => (
                   <tr key={c.id} style={{ cursor: "pointer" }} onClick={() => open(c.id)}>
+                    <td className="muted">{startIndex + i + 1}</td>
                     <td style={{ fontWeight: 600, whiteSpace: "normal" }}>{c.name}</td>
                     <td className="muted" style={{ fontSize: "0.85rem" }}>
                       {c.createdAt ? new Date(c.createdAt).toLocaleString() : "—"}
@@ -124,6 +114,8 @@ export default function SavedReports() {
               </tbody>
             </table>
           </div>
+          <Pagination page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} />
+          </>
         ) : (
           <div style={{ textAlign: "center", padding: "2rem", color: "var(--muted)" }}>
             <p>No saved reports yet.</p>

@@ -1,22 +1,15 @@
-import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getDashboardStats, DashboardStats } from "../lib/dashboard";
+import { useQuery } from "@tanstack/react-query";
+import { getDashboardStats } from "../lib/dashboard";
+import { getLlmUsageSummary } from "../lib/resume";
+import LlmUsagePanel from "../components/LlmUsagePanel";
 
 export default function Home() {
   const navigate = useNavigate();
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let active = true;
-    getDashboardStats()
-      .then((s) => active && setStats(s))
-      .catch(() => {})
-      .finally(() => active && setLoading(false));
-    return () => {
-      active = false;
-    };
-  }, []);
+  const statsQ = useQuery({ queryKey: ["dashboardStats"], queryFn: () => getDashboardStats() });
+  const usageQ = useQuery({ queryKey: ["llmUsageSummary"], queryFn: () => getLlmUsageSummary() });
+  const stats = statsQ.data ?? null;
+  const loading = statsQ.isLoading;
 
   return (
     <div>
@@ -45,6 +38,10 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      <div style={{ marginTop: "0.25rem" }}>
+        <LlmUsagePanel summary={usageQ.data} />
+      </div>
 
       {/* Tools */}
       <div className="tool-grid" style={{ marginTop: "1.25rem" }}>

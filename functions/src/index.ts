@@ -531,13 +531,26 @@ export const llmAvailability = onCall(
 export const llmUsageSummary = onCall(
   { ...commonOpts, timeoutSeconds: 30 },
   async () => {
-    const snap = await getFirestore().collection("resumeReports").select("totalTokens", "cost").get();
+    const snap = await getFirestore()
+      .collection("resumeReports")
+      .select("totalTokens", "cost", "model", "provider")
+      .get();
     let totalTokens = 0;
     let totalCost = 0;
+    const models = new Map<string, { model: string; provider: string; count: number; totalTokens: number; totalCost: number }>();
     snap.docs.forEach((d) => {
-      const x = d.data() as { totalTokens?: number; cost?: number };
-      totalTokens += Number(x.totalTokens) || 0;
-      totalCost += Number(x.cost) || 0;
+      const x = d.data() as { totalTokens?: number; cost?: number; model?: string; provider?: string };
+      const tok = Number(x.totalTokens) || 0;
+      const cost = Number(x.cost) || 0;
+      totalTokens += tok;
+      totalCost += cost;
+      const model = String(x.model || "unknown");
+      const key = model;
+      let m = models.get(key);
+      if (!m) { m = { model, provider: String(x.provider || ""), count: 0, totalTokens: 0, totalCost: 0 }; models.set(key, m); }
+      m.count++;
+      m.totalTokens += tok;
+      m.totalCost += cost;
     });
     const budget = Number(process.env.LLM_BUDGET_USD) || 0;
     return {
@@ -545,6 +558,7 @@ export const llmUsageSummary = onCall(
       count: snap.size,
       totalTokens,
       totalCost,
+      byModel: Array.from(models.values()).sort((a, b) => b.count - a.count),
       budget,
       balance: budget > 0 ? Math.max(0, budget - totalCost) : null,
     };

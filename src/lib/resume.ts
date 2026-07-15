@@ -129,10 +129,19 @@ export interface AssessResult {
   duplicate: DuplicateInfo | null;
 }
 
+export interface ModelUsage {
+  model: string;
+  provider: string;
+  count: number;
+  totalTokens: number;
+  totalCost: number;
+}
+
 export interface LlmUsageSummary {
   count: number;
   totalTokens: number;
   totalCost: number;
+  byModel: ModelUsage[];
   budget: number;
   balance: number | null; // budget − spent, or null if no budget configured
 }
@@ -206,6 +215,7 @@ export async function getLlmUsageSummary(): Promise<LlmUsageSummary> {
     count: d?.count ?? 0,
     totalTokens: d?.totalTokens ?? 0,
     totalCost: d?.totalCost ?? 0,
+    byModel: d?.byModel ?? [],
     budget: d?.budget ?? 0,
     balance: d?.balance ?? null,
   };

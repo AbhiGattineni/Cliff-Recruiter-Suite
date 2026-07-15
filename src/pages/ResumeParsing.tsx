@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   assessResume,
   saveResumeReport,
@@ -10,7 +11,6 @@ import {
   ResumeAssessment,
   DuplicateInfo,
   TokenUsage,
-  LlmUsageSummary,
 } from "../lib/resume";
 import { friendlyError } from "../lib/errors";
 import { extractResumeText, ACCEPTED_RESUME_TYPES } from "../lib/resumeFile";
@@ -34,41 +34,29 @@ export default function ResumeParsing() {
   const [savedId, setSavedId] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState<DuplicateInfo | null>(null);
   const [usage, setUsage] = useState<TokenUsage | null>(null);
-  const [summary, setSummary] = useState<LlmUsageSummary | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const refreshSummary = () => {
-    getLlmUsageSummary().then(setSummary).catch(() => {});
-  };
-  useEffect(() => {
-    refreshSummary();
-  }, []);
+  const qc = useQueryClient();
+  const summaryQ = useQuery({ queryKey: ["llmUsageSummary"], queryFn: () => getLlmUsageSummary() });
+  const summary = summaryQ.data ?? null;
 
   // Model selection.
   const [provider, setProvider] = useState<ProviderId>("ollama");
   const [model, setModel] = useState<string>(MODEL_CATALOG.ollama.defaultModel);
-  const [availability, setAvailability] = useState<Record<ProviderId, boolean> | null>(null);
+  const availabilityQ = useQuery({ queryKey: ["llmAvailability"], queryFn: () => getLlmAvailability() });
+  const availability = availabilityQ.data ?? null;
 
+  // Auto-pick the first configured provider once availability loads.
   useEffect(() => {
-    let active = true;
-    getLlmAvailability()
-      .then((a) => {
-        if (!active) return;
-        setAvailability(a);
-        if (!a[provider]) {
-          const firstAvail = PROVIDER_ORDER.find((p) => a[p]);
-          if (firstAvail) {
-            setProvider(firstAvail);
-            setModel(MODEL_CATALOG[firstAvail].defaultModel);
-          }
-        }
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
+    if (availability && !availability[provider]) {
+      const firstAvail = PROVIDER_ORDER.find((p) => availability[p]);
+      if (firstAvail) {
+        setProvider(firstAvail);
+        setModel(MODEL_CATALOG[firstAvail].defaultModel);
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [availability]);
 
   const isAvailable = (p: ProviderId) => (availability ? availability[p] : true);
 
@@ -99,7 +87,10 @@ export default function ResumeParsing() {
     try {
       const id = await saveResumeReport(assessment, provider, model, jd, u);
       setSavedId(id);
-      refreshSummary();
+      // Refresh anything that reflects the new report.
+      qc.invalidateQueries({ queryKey: ["llmUsageSummary"] });
+      qc.invalidateQueries({ queryKey: ["resumeReports"] });
+      qc.invalidateQueries({ queryKey: ["dashboardStats"] });
     } catch (err) {
       setError(friendlyError(err));
     }

@@ -19,6 +19,7 @@ import { extensionFor } from "../lib/extensions";
 import StageBar, { StageLegend } from "../components/StageBar";
 import PieChart from "../components/PieChart";
 import Modal from "../components/Modal";
+import Pagination, { usePagination } from "../components/Pagination";
 
 const fmtDt = (d: DateTime | null) => (d ? d.toFormat("MM/dd/yyyy hh:mm a") : "—");
 
@@ -195,6 +196,7 @@ export default function RecruiterPerformance() {
   }, [allStats]);
 
   const sorted = useMemo(() => sortStats(allStats, sortKey), [allStats, sortKey]);
+  const board = usePagination(sorted, 25);
   const names = useMemo(() => allStats.map((s) => s.name).sort((a, b) => a.localeCompare(b)), [allStats]);
   const picked = selected ? allStats.find((s) => s.name === selected) ?? null : null;
   const pickedRank = picked ? rankByName.get(picked.name) ?? 0 : 0;
@@ -343,7 +345,7 @@ export default function RecruiterPerformance() {
                       </tr>
                     </thead>
                     <tbody>
-                      {sorted.map((s) => {
+                      {board.pageItems.map((s) => {
                         const rank = rankByName.get(s.name) ?? 0;
                         return (
                           <tr key={s.name} style={{ cursor: "pointer" }} onClick={() => setSelected(s.name)}>
@@ -365,6 +367,7 @@ export default function RecruiterPerformance() {
                     </tbody>
                   </table>
                 </div>
+                <Pagination page={board.page} pageCount={board.pageCount} total={board.total} pageSize={board.pageSize} onPage={board.setPage} />
 
                 <IndexExplainer />
               </div>

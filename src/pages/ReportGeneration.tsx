@@ -17,6 +17,7 @@ import { logReportRun } from "../lib/dashboard";
 import MultiSelect from "../components/MultiSelect";
 import PieChart from "../components/PieChart";
 import ColumnPicker from "../components/ColumnPicker";
+import Pagination, { usePagination } from "../components/Pagination";
 import { orderColumns } from "../lib/report/columnMeta";
 import {
   saveReportConfig,
@@ -135,6 +136,8 @@ export default function ReportGeneration() {
     !!search ||
     Object.values(selFilters).some((a) => a && a.length > 0) ||
     !!submittedFrom || !!submittedTo || !!createdFrom || !!createdTo;
+
+  const preview = usePagination(filteredRows, 50);
 
   // Distribution of time-to-submission, bucketed, counted once per job (time-taken
   // is a job-level value repeated on each candidate row → dedupe by Job Code).
@@ -505,42 +508,47 @@ export default function ReportGeneration() {
           <div className="card">
             <h2>Preview</h2>
             <p className="sub">
-              Showing all {filteredRows.length} rows{anyFilter ? " (filtered)" : ""} ·{" "}
+              {filteredRows.length} rows{anyFilter ? " (filtered)" : ""} ·{" "}
               {visibleCols.length} of {COLUMNS.length} columns. Peach = NA row, red = overdue
-              0-submission job. Download exports exactly these rows and columns.
+              0-submission job. Download exports <strong>all</strong> {filteredRows.length} rows (the whole set, not just this page).
             </p>
             {visibleCols.length === 0 ? (
               <div style={{ textAlign: "center", padding: "1.5rem", color: "var(--muted)" }}>
                 No columns selected — pick some above to preview and export.
               </div>
             ) : (
-              <div className="table-wrap" style={{ maxHeight: "65vh" }}>
-                <table className="data">
-                  <thead>
-                    <tr>
-                      {visibleCols.map((c) => (
-                        <th key={c}>{c}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredRows.map((row, i) => (
-                      <tr key={i} className={row.red ? "red" : row.na ? "na" : ""}>
+              <>
+                <div className="table-wrap" style={{ maxHeight: "65vh" }}>
+                  <table className="data">
+                    <thead>
+                      <tr>
+                        <th style={{ width: 44 }}>#</th>
                         {visibleCols.map((c) => (
-                          <td key={c}>{row.cells[c] ?? ""}</td>
+                          <th key={c}>{c}</th>
                         ))}
                       </tr>
-                    ))}
-                    {filteredRows.length === 0 && (
-                      <tr>
-                        <td colSpan={visibleCols.length} style={{ textAlign: "center", padding: "1.5rem", color: "var(--muted)" }}>
-                          No rows match the current filters.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {preview.pageItems.map((row, i) => (
+                        <tr key={preview.startIndex + i} className={row.red ? "red" : row.na ? "na" : ""}>
+                          <td className="muted">{preview.startIndex + i + 1}</td>
+                          {visibleCols.map((c) => (
+                            <td key={c}>{row.cells[c] ?? ""}</td>
+                          ))}
+                        </tr>
+                      ))}
+                      {filteredRows.length === 0 && (
+                        <tr>
+                          <td colSpan={visibleCols.length + 1} style={{ textAlign: "center", padding: "1.5rem", color: "var(--muted)" }}>
+                            No rows match the current filters.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <Pagination page={preview.page} pageCount={preview.pageCount} total={preview.total} pageSize={preview.pageSize} onPage={preview.setPage} />
+              </>
             )}
           </div>
 
