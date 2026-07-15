@@ -137,11 +137,19 @@ export interface ModelUsage {
   totalCost: number;
 }
 
+export interface FeatureUsage {
+  feature: string;
+  count: number;
+  totalTokens: number;
+  totalCost: number;
+}
+
 export interface LlmUsageSummary {
   count: number;
   totalTokens: number;
   totalCost: number;
   byModel: ModelUsage[];
+  byFeature: FeatureUsage[];
   budget: number;
   balance: number | null; // budget − spent, or null if no budget configured
 }
@@ -216,6 +224,7 @@ export async function getLlmUsageSummary(): Promise<LlmUsageSummary> {
     totalTokens: d?.totalTokens ?? 0,
     totalCost: d?.totalCost ?? 0,
     byModel: d?.byModel ?? [],
+    byFeature: d?.byFeature ?? [],
     budget: d?.budget ?? 0,
     balance: d?.balance ?? null,
   };

@@ -107,6 +107,69 @@ function extractJson(text: string): unknown {
   return JSON.parse(cleaned.slice(start, end + 1));
 }
 
+/**
+ * Given a job description and a list of past role titles, return the titles that
+ * are a relevant match (same or adjacent/transferable role) — used to filter the
+ * internally-selected candidate pool by a pasted JD.
+ */
+export async function matchRolesToJd(
+  jobDescription: string,
+  roles: string[],
+  config: LlmConfig
+): Promise<{ relevant: string[]; usage: TokenUsage }> {
+  const { apiKey, model } = config;
+  const url = `${config.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (apiKey && !apiKey.startsWith("PLACEHOLDER")) headers["authorization"] = `Bearer ${apiKey}`;
+
+  const sys = `You match a job description to a pool of past role titles.
+Given the JOB DESCRIPTION and a numbered LIST of role titles, return ONLY the titles that are a RELEVANT match for the job description's role — the same role or an adjacent / transferable role in the same skill area (e.g. "Backend Developer" matches "Java Developer"; "Data Engineer" matches "ETL Developer"). Exclude clearly unrelated roles.
+Return ONLY a JSON object: {"relevant": string[]} where each string is copied VERBATIM from the provided list. If none match, return {"relevant": []}. Output the JSON and nothing else.`;
+  const user = `JOB DESCRIPTION:\n${jobDescription}\n\nROLE TITLES:\n${roles.map((r, i) => `${i + 1}. ${r}`).join("\n")}`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model,
+      stream: false,
+      temperature: 0.1,
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: user },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(`LLM match failed (${res.status}): ${t.slice(0, 200)}`);
+  }
+  const data = (await res.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    message?: { content?: string };
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+    prompt_eval_count?: number;
+    eval_count?: number;
+  };
+  const text = data.choices?.[0]?.message?.content ?? data.message?.content ?? "";
+  const promptTokens = data.usage?.prompt_tokens ?? data.prompt_eval_count ?? 0;
+  const completionTokens = data.usage?.completion_tokens ?? data.eval_count ?? 0;
+  const usage = computeUsage(model, Number(promptTokens) || 0, Number(completionTokens) || 0);
+  if (data.usage?.total_tokens) usage.totalTokens = Number(data.usage.total_tokens);
+
+  let relevant: string[] = [];
+  try {
+    const parsed = extractJson(text) as { relevant?: unknown };
+    if (Array.isArray(parsed.relevant)) relevant = parsed.relevant.map((x) => String(x)).filter((x) => x.trim());
+  } catch {
+    relevant = [];
+  }
+  // Keep only titles that were actually offered (case-insensitive).
+  const offered = new Set(roles.map((r) => r.toLowerCase().trim()));
+  relevant = relevant.filter((r) => offered.has(r.toLowerCase().trim()));
+  return { relevant, usage };
+}
+
 export async function assessResume(
   resumeText: string,
   jobDescription: string,

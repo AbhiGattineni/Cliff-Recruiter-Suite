@@ -10,6 +10,8 @@ import ResumeReports from "./pages/ResumeReports";
 import ReportGeneration from "./pages/ReportGeneration";
 import SavedReports from "./pages/SavedReports";
 import RecruiterPerformance from "./pages/RecruiterPerformance";
+import CandidatePool from "./pages/CandidatePool";
+import Preferences from "./pages/Preferences";
 
 export default function App() {
   const { loading } = useAuth();
@@ -39,6 +41,8 @@ export default function App() {
         <Route path="/reports" element={<ReportGeneration />} />
         <Route path="/saved-reports" element={<SavedReports />} />
         <Route path="/recruiters" element={<RecruiterPerformance />} />
+        <Route path="/candidate-pool" element={<CandidatePool />} />
+        <Route path="/preferences" element={<Preferences />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

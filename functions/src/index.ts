@@ -13,7 +13,7 @@ import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
 import { fetchReport, probeTotal } from "./ceipal.js";
 import { readCache, readCacheMeta, writeCache, cacheEnvelope } from "./ceipalCache.js";
-import { assessResume } from "./llm.js";
+import { assessResume, matchRolesToJd } from "./llm.js";
 import {
   isAllowedEmail,
   allowedDomain,
@@ -460,6 +460,118 @@ export const activeJobs = onCall(
   }
 );
 
+// ---- Internally-selected candidate pool ------------------------------------
+function parseCeipalMs(v: unknown): number {
+  const m = String(v ?? "").trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (!m) return 0;
+  return Date.UTC(+m[3], +m[1] - 1, +m[2], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
+}
+
+// Prefer OpenAI (cheap gpt-4o-mini) for lightweight matching, else Ollama.
+function pickLlm(): { provider: ProviderId; baseUrl: string; apiKey: string; model: string } {
+  if (keyConfigured(OPENAI_API_KEY.value())) return { provider: "openai", ...resolveLlm("openai", "gpt-4o-mini") };
+  return { provider: "ollama", ...resolveLlm("ollama", "") };
+}
+
+async function logLlmCall(
+  feature: string,
+  provider: string,
+  model: string,
+  usage: { promptTokens?: number; completionTokens?: number; totalTokens?: number; cost?: number }
+): Promise<void> {
+  await getFirestore().collection("llmCalls").add({
+    feature,
+    provider,
+    model,
+    promptTokens: Number(usage.promptTokens) || 0,
+    completionTokens: Number(usage.completionTokens) || 0,
+    totalTokens: Number(usage.totalTokens) || 0,
+    cost: Number(usage.cost) || 0,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+}
+
+// Candidates already sourced/submitted (Ceipal "internally selected" report),
+// de-duplicated to one row per candidate with the distinct roles they've been
+// submitted to (used for JD matching).
+export const candidatePool = onCall(
+  { ...commonOpts, secrets: [CEIPAL_PASSWORD], timeoutSeconds: 300, memory: "512MiB" },
+  async (request) => {
+    void request;
+    const password = CEIPAL_PASSWORD.value();
+    if (!password || password.startsWith("PLACEHOLDER")) {
+      throw new HttpsError("failed-precondition", "Ceipal password is not configured.");
+    }
+    const s = (v: unknown) => String(v ?? "").trim();
+    const data = (await fetchReport("selected_candidates", password, 0)) as { result?: Record<string, unknown>[] };
+    const rows = Array.isArray(data.result) ? data.result : [];
+
+    interface Cand {
+      name: string; email: string; mobile: string; location: string; status: string;
+      latestRole: string; latestClient: string; latestSubmittedOn: string; latestRecruiter: string;
+      roles: string[]; count: number; _ms: number;
+    }
+    const byKey = new Map<string, Cand>();
+    for (const r of rows) {
+      const email = s(r.EmailAddress).toLowerCase();
+      const phone = s(r.MobileNumber).replace(/\D/g, "");
+      const name = s(r.ApplicantName) || `${s(r.ApplicantFirstName)} ${s(r.ApplicantLastName)}`.trim();
+      const key = email || phone || `${name.toLowerCase()}|${s(r.ApplicantID)}`;
+      if (!key) continue;
+      const role = s(r.JobTitle);
+      const ms = parseCeipalMs(r.SubmittedOn);
+
+      let c = byKey.get(key);
+      if (!c) {
+        c = {
+          name, email: s(r.EmailAddress), mobile: s(r.MobileNumber), location: s(r.ApplicantLocation),
+          status: s(r.ProfileStatus), latestRole: role, latestClient: s(r.Client),
+          latestSubmittedOn: s(r.SubmittedOn), latestRecruiter: s(r.SubmittedBy) || s(r.PrimaryRecruiter),
+          roles: [], count: 0, _ms: ms,
+        };
+        byKey.set(key, c);
+      }
+      c.count++;
+      if (role && !c.roles.includes(role)) c.roles.push(role);
+      if (ms >= c._ms) {
+        c._ms = ms;
+        if (role) c.latestRole = role;
+        c.latestClient = s(r.Client) || c.latestClient;
+        c.latestSubmittedOn = s(r.SubmittedOn) || c.latestSubmittedOn;
+        c.status = s(r.ProfileStatus) || c.status;
+        c.latestRecruiter = s(r.SubmittedBy) || c.latestRecruiter;
+      }
+    }
+    const candidates = Array.from(byKey.values())
+      .sort((a, b) => b._ms - a._ms)
+      .map(({ _ms, ...rest }) => rest); // eslint-disable-line @typescript-eslint/no-unused-vars
+    return { ok: true, candidates, fetchedAt: Date.now() };
+  }
+);
+
+// Match a pasted JD to the pool's distinct role titles (LLM). Returns the relevant
+// titles; the client filters candidates by them. Usage is logged for the metrics.
+export const matchCandidatesToJd = onCall(
+  { ...commonOpts, secrets: [LLM_API_KEY, OPENAI_API_KEY], timeoutSeconds: 120, memory: "512MiB" },
+  async (request) => {
+    void request;
+    const jd = String(request.data?.jobDescription ?? "");
+    const roles = Array.isArray(request.data?.roles)
+      ? (request.data.roles as unknown[]).map((r) => String(r)).filter((r) => r.trim())
+      : [];
+    if (jd.trim().length < 15) throw new HttpsError("invalid-argument", "Provide a job description.");
+    if (!roles.length) return { ok: true, relevant: [] as string[] };
+    const config = pickLlm();
+    try {
+      const { relevant, usage } = await matchRolesToJd(jd, roles, config);
+      await logLlmCall("Candidate matching", config.provider, config.model, usage);
+      return { ok: true, relevant, usage };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+);
+
 export const parseResume = onCall(
   { ...commonOpts, secrets: [LLM_API_KEY, OPENAI_API_KEY], timeoutSeconds: 120 },
   async (request) => {
@@ -564,34 +676,45 @@ export const llmAvailability = onCall(
 export const llmUsageSummary = onCall(
   { ...commonOpts, timeoutSeconds: 30 },
   async () => {
-    const snap = await getFirestore()
-      .collection("resumeReports")
-      .select("totalTokens", "cost", "model", "provider")
-      .get();
+    const db = getFirestore();
+    const [rr, lc] = await Promise.all([
+      db.collection("resumeReports").select("totalTokens", "cost", "model", "provider").get(),
+      db.collection("llmCalls").select("totalTokens", "cost", "model", "provider", "feature").get(),
+    ]);
+
     let totalTokens = 0;
     let totalCost = 0;
     const models = new Map<string, { model: string; provider: string; count: number; totalTokens: number; totalCost: number }>();
-    snap.docs.forEach((d) => {
-      const x = d.data() as { totalTokens?: number; cost?: number; model?: string; provider?: string };
-      const tok = Number(x.totalTokens) || 0;
-      const cost = Number(x.cost) || 0;
+    const features = new Map<string, { feature: string; count: number; totalTokens: number; totalCost: number }>();
+    const add = (feature: string, provider: string, model: string, tok: number, cost: number) => {
       totalTokens += tok;
       totalCost += cost;
-      const model = String(x.model || "unknown");
-      const key = model;
-      let m = models.get(key);
-      if (!m) { m = { model, provider: String(x.provider || ""), count: 0, totalTokens: 0, totalCost: 0 }; models.set(key, m); }
-      m.count++;
-      m.totalTokens += tok;
-      m.totalCost += cost;
+      const mk = `${provider}/${model}`;
+      let m = models.get(mk);
+      if (!m) { m = { model, provider, count: 0, totalTokens: 0, totalCost: 0 }; models.set(mk, m); }
+      m.count++; m.totalTokens += tok; m.totalCost += cost;
+      let f = features.get(feature);
+      if (!f) { f = { feature, count: 0, totalTokens: 0, totalCost: 0 }; features.set(feature, f); }
+      f.count++; f.totalTokens += tok; f.totalCost += cost;
+    };
+
+    rr.docs.forEach((d) => {
+      const x = d.data() as { totalTokens?: number; cost?: number; model?: string; provider?: string };
+      add("Resume assessment", String(x.provider || ""), String(x.model || "unknown"), Number(x.totalTokens) || 0, Number(x.cost) || 0);
     });
+    lc.docs.forEach((d) => {
+      const x = d.data() as { totalTokens?: number; cost?: number; model?: string; provider?: string; feature?: string };
+      add(String(x.feature || "Other"), String(x.provider || ""), String(x.model || "unknown"), Number(x.totalTokens) || 0, Number(x.cost) || 0);
+    });
+
     const budget = Number(process.env.LLM_BUDGET_USD) || 0;
     return {
       ok: true,
-      count: snap.size,
+      count: rr.size + lc.size,
       totalTokens,
       totalCost,
       byModel: Array.from(models.values()).sort((a, b) => b.count - a.count),
+      byFeature: Array.from(features.values()).sort((a, b) => b.count - a.count),
       budget,
       balance: budget > 0 ? Math.max(0, budget - totalCost) : null,
     };

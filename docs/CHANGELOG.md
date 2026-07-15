@@ -2,6 +2,17 @@
 
 Chronological record of notable changes. Newest first.
 
+## Candidate Pool + Preferences (AI toggle) + per-feature usage
+- New **Candidate Pool** tab (`/candidate-pool`): the internally-selected/vetted candidates from the
+  Ceipal report, **de-duplicated to one row per candidate**. First load shows all (~572); a **JD box**
+  filters to candidates whose past submitted-role matches the JD.
+- **Matching** honours a **Preferences** toggle: AI **on** → `matchCandidatesToJd` LLM maps the JD to
+  the pool's distinct roles (Backend/Java JD → Java Developer, Full Stack Java…); AI **off** → free
+  keyword match. New **Preferences** tab (`/preferences`, ⚙️) hosts the toggle (localStorage).
+- **LLM usage/cost metrics** now show a **per-feature** breakdown (Resume assessment vs Candidate
+  matching) on Dashboard, Candidate Pool, and Preferences. `llmUsageSummary` aggregates `resumeReports`
+  + a new `llmCalls` log. Verified: 572 candidates, Java JD → 8 roles / 23 candidates, $0.0003.
+
 ## Report preview: "in our field" (amber) highlight
 - New **amber** row highlight in the Report Generation preview + Excel for requirements that have
   submissions but **not a single profile has reached the client/vendor side** (still entirely in our

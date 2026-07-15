@@ -20,30 +20,58 @@ export default function LlmUsagePanel({ summary, compact = false }: { summary?: 
         ) : null}
       </div>
 
-      {!compact && summary.byModel.length > 0 && (
-        <div className="table-wrap">
-          <table className="data">
-            <thead>
-              <tr>
-                <th>Model</th>
-                <th style={{ textAlign: "right" }}>Resumes</th>
-                <th style={{ textAlign: "right" }}>Tokens</th>
-                <th style={{ textAlign: "right" }}>Est. cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {summary.byModel.map((m) => (
-                <tr key={`${m.provider}/${m.model}`}>
-                  <td style={{ whiteSpace: "normal", fontWeight: 600 }}>
-                    {m.provider ? `${m.provider} / ` : ""}{m.model}
-                  </td>
-                  <td style={{ textAlign: "right" }}>{fmtNum(m.count)}</td>
-                  <td style={{ textAlign: "right" }}>{fmtNum(m.totalTokens)}</td>
-                  <td style={{ textAlign: "right" }}>{fmtCost(m.totalCost)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {!compact && (summary.byModel.length > 0 || summary.byFeature.length > 0) && (
+        <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap" }}>
+          {summary.byModel.length > 0 && (
+            <div className="table-wrap" style={{ flex: 1, minWidth: 260 }}>
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th>Model</th>
+                    <th style={{ textAlign: "right" }}>Calls</th>
+                    <th style={{ textAlign: "right" }}>Tokens</th>
+                    <th style={{ textAlign: "right" }}>Est. cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.byModel.map((m) => (
+                    <tr key={`${m.provider}/${m.model}`}>
+                      <td style={{ whiteSpace: "normal", fontWeight: 600 }}>
+                        {m.provider ? `${m.provider} / ` : ""}{m.model}
+                      </td>
+                      <td style={{ textAlign: "right" }}>{fmtNum(m.count)}</td>
+                      <td style={{ textAlign: "right" }}>{fmtNum(m.totalTokens)}</td>
+                      <td style={{ textAlign: "right" }}>{fmtCost(m.totalCost)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {summary.byFeature.length > 0 && (
+            <div className="table-wrap" style={{ flex: 1, minWidth: 260 }}>
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th>Feature</th>
+                    <th style={{ textAlign: "right" }}>Calls</th>
+                    <th style={{ textAlign: "right" }}>Tokens</th>
+                    <th style={{ textAlign: "right" }}>Est. cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.byFeature.map((f) => (
+                    <tr key={f.feature}>
+                      <td style={{ whiteSpace: "normal", fontWeight: 600 }}>{f.feature}</td>
+                      <td style={{ textAlign: "right" }}>{fmtNum(f.count)}</td>
+                      <td style={{ textAlign: "right" }}>{fmtNum(f.totalTokens)}</td>
+                      <td style={{ textAlign: "right" }}>{fmtCost(f.totalCost)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>
