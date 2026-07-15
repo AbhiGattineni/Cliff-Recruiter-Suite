@@ -3,6 +3,7 @@
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../firebase";
 import { ensureConfigured } from "./errors";
+import { currentActor, Actor } from "./auth";
 
 export interface DashboardStats {
   resumesGenerated: number;
@@ -28,11 +29,11 @@ export async function getDashboardStats(): Promise<DashboardStats> {
 export async function logReportRun(source: string, rowCount: number, jobCount: number): Promise<void> {
   try {
     ensureConfigured();
-    const callable = httpsCallable<{ source: string; rowCount: number; jobCount: number }, unknown>(
-      functions,
-      "logReportRun"
-    );
-    await callable({ source, rowCount, jobCount });
+    const callable = httpsCallable<
+      { source: string; rowCount: number; jobCount: number; by: Actor },
+      unknown
+    >(functions, "logReportRun");
+    await callable({ source, rowCount, jobCount, by: currentActor() });
   } catch {
     /* best-effort — never block the UI on logging */
   }

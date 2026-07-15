@@ -97,8 +97,9 @@ export function downloadResumeReportPdf(r: ResumeReport): void {
   y += 20;
 
   const dateStr = r.createdAt ? new Date(r.createdAt).toLocaleString() : "—";
+  const byStr = r.createdByName ? `    •    By: ${r.createdByName}` : "";
   paragraph(
-    `Generated: ${dateStr}    •    Model: ${r.provider} / ${r.model}`,
+    `Generated: ${dateStr}${byStr}    •    Model: ${r.provider} / ${r.model}`,
     { size: 9, color: MUTED }
   );
   y += 4;

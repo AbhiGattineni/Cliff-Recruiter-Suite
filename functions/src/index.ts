@@ -600,6 +600,18 @@ export const parseResume = onCall(
   }
 );
 
+// Who generated this record. Prefer the verified auth token (trustworthy);
+// fall back to the client-supplied `by` for the brief window after signup
+// before the token's `name`/`email` claims propagate.
+function actorOf(
+  auth: { token?: { name?: unknown; email?: unknown } } | undefined,
+  by?: { name?: unknown; email?: unknown }
+): { createdByName: string; createdByEmail: string } {
+  const email = String(auth?.token?.email || by?.email || "");
+  const name = String(auth?.token?.name || by?.name || email || "");
+  return { createdByName: name, createdByEmail: email };
+}
+
 // Save an already-computed assessment to the reports history.
 export const saveResumeReport = onCall(
   { ...commonOpts, timeoutSeconds: 30 },
@@ -628,6 +640,7 @@ export const saveResumeReport = onCall(
       completionTokens: Number(usage?.completionTokens) || 0,
       totalTokens: Number(usage?.totalTokens) || 0,
       cost: Number(usage?.cost) || 0,
+      ...actorOf(request.auth, request.data?.by),
       createdAt: FieldValue.serverTimestamp(),
     });
     return { ok: true, reportId: doc.id };
@@ -730,6 +743,7 @@ export const logReportRun = onCall(
       source: String(request.data?.source ?? ""),
       rowCount: Number(request.data?.rowCount) || 0,
       jobCount: Number(request.data?.jobCount) || 0,
+      ...actorOf(request.auth, request.data?.by),
       createdAt: FieldValue.serverTimestamp(),
     });
     return { ok: true };
@@ -791,6 +805,7 @@ export const saveReportConfig = onCall(
     const doc = await getFirestore().collection("reportConfigs").add({
       name,
       config,
+      ...actorOf(request.auth, request.data?.by),
       createdAt: FieldValue.serverTimestamp(),
     });
     return { ok: true, id: doc.id };
@@ -807,8 +822,21 @@ export const listReportConfigs = onCall(
       .limit(100)
       .get();
     const configs = snap.docs.map((d) => {
-      const x = d.data() as { name?: string; config?: unknown; createdAt?: { toMillis?: () => number } };
-      return { id: d.id, name: x.name ?? "", config: x.config ?? {}, createdAt: x.createdAt?.toMillis?.() ?? null };
+      const x = d.data() as {
+        name?: string;
+        config?: unknown;
+        createdAt?: { toMillis?: () => number };
+        createdByName?: string;
+        createdByEmail?: string;
+      };
+      return {
+        id: d.id,
+        name: x.name ?? "",
+        config: x.config ?? {},
+        createdAt: x.createdAt?.toMillis?.() ?? null,
+        createdByName: x.createdByName ?? "",
+        createdByEmail: x.createdByEmail ?? "",
+      };
     });
     return { ok: true, configs };
   }

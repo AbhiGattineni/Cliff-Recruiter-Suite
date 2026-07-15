@@ -3,6 +3,7 @@
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../firebase";
 import { ensureConfigured } from "./errors";
+import { currentActor, Actor } from "./auth";
 
 export interface SkillMatch {
   skill: string;
@@ -203,10 +204,10 @@ export async function saveResumeReport(
 ): Promise<string> {
   ensureConfigured();
   const callable = httpsCallable<
-    { assessment: ResumeAssessment; provider: ProviderId; model: string; jobDescription: string; usage: TokenUsage | null },
+    { assessment: ResumeAssessment; provider: ProviderId; model: string; jobDescription: string; usage: TokenUsage | null; by: Actor },
     { ok: boolean; reportId?: string }
   >(functions, "saveResumeReport");
-  const res = await callable({ assessment, provider, model, jobDescription, usage });
+  const res = await callable({ assessment, provider, model, jobDescription, usage, by: currentActor() });
   return res.data?.reportId ?? "";
 }
 

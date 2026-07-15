@@ -3,6 +3,7 @@
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../firebase";
 import { ensureConfigured } from "./errors";
+import { currentActor, Actor } from "./auth";
 
 export interface ReportConfigData {
   source: "api" | "upload";
@@ -21,15 +22,17 @@ export interface SavedReportConfig {
   name: string;
   config: ReportConfigData;
   createdAt: number | null;
+  createdByName?: string;
+  createdByEmail?: string;
 }
 
 export async function saveReportConfig(name: string, config: ReportConfigData): Promise<string> {
   ensureConfigured();
-  const callable = httpsCallable<{ name: string; config: ReportConfigData }, { ok: boolean; id?: string }>(
-    functions,
-    "saveReportConfig"
-  );
-  const res = await callable({ name, config });
+  const callable = httpsCallable<
+    { name: string; config: ReportConfigData; by: Actor },
+    { ok: boolean; id?: string }
+  >(functions, "saveReportConfig");
+  const res = await callable({ name, config, by: currentActor() });
   return res.data?.id ?? "";
 }
 

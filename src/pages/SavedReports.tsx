@@ -73,6 +73,7 @@ export default function SavedReports() {
                 <tr>
                   <th style={{ width: 44 }}>#</th>
                   <th>Name</th>
+                  <th>Created by</th>
                   <th>Saved</th>
                   <th>Source</th>
                   <th>Filters</th>
@@ -84,6 +85,9 @@ export default function SavedReports() {
                   <tr key={c.id} style={{ cursor: "pointer" }} onClick={() => open(c.id)}>
                     <td className="muted">{startIndex + i + 1}</td>
                     <td style={{ fontWeight: 600, whiteSpace: "normal" }}>{c.name}</td>
+                    <td className="muted" style={{ fontSize: "0.85rem", whiteSpace: "normal" }} title={c.createdByEmail || ""}>
+                      {c.createdByName || "—"}
+                    </td>
                     <td className="muted" style={{ fontSize: "0.85rem" }}>
                       {c.createdAt ? new Date(c.createdAt).toLocaleString() : "—"}
                     </td>

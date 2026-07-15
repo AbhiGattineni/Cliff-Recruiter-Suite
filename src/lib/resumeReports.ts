@@ -15,6 +15,8 @@ export interface ResumeReport extends ResumeAssessment {
   completionTokens?: number;
   totalTokens?: number;
   cost?: number; // estimated USD
+  createdByName?: string;
+  createdByEmail?: string;
 }
 
 interface ListResponse {

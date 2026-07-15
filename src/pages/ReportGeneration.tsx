@@ -13,6 +13,7 @@ import { buildWorkbook } from "../lib/report/buildXlsx";
 import { COLUMNS, ReportResult } from "../lib/report/types";
 import { fetchCeipalReport, reportMeta } from "../lib/ceipal";
 import { friendlyError } from "../lib/errors";
+import { currentActor } from "../lib/auth";
 import { logReportRun } from "../lib/dashboard";
 import MultiSelect from "../components/MultiSelect";
 import PieChart from "../components/PieChart";
@@ -317,6 +318,7 @@ export default function ReportGeneration() {
         { ...result, rows: filteredRows },
         {
           generatedAt: (result.generatedAt ?? DateTime.now()).toFormat("yyyy-LL-dd HH:mm"),
+          generatedBy: currentActor().name,
           scope: maxRecords ? `Latest ${maxRecords} records per report` : "All records",
           rowCount: filteredRows.length,
           filters: flines,
@@ -357,7 +359,9 @@ export default function ReportGeneration() {
               <option value="">Load a saved configuration…</option>
               {savedConfigs.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.name}{c.createdAt ? ` — ${new Date(c.createdAt).toLocaleString()}` : ""}
+                  {c.name}
+                  {c.createdByName ? ` — by ${c.createdByName}` : ""}
+                  {c.createdAt ? ` (${new Date(c.createdAt).toLocaleString()})` : ""}
                 </option>
               ))}
             </select>
