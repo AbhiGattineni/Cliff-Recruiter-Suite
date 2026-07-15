@@ -1,12 +1,16 @@
-import { ResumeAssessment } from "../lib/resume";
+import { ResumeAssessment, normalizeAiLines, aiPercentOf } from "../lib/resume";
 
 // Full assessment detail — used inline on Resume Parsing and inside the
 // Resume Reports modal. AI-generated lines are highlighted to stand out.
 export default function AssessmentDetail({ a }: { a: ResumeAssessment }) {
   const ratingClass = a.rating === "Strong" ? "green" : a.rating === "Weak" ? "red" : "amber";
+  const aiLines = normalizeAiLines(a.aiGeneratedLines);
+  const aiPct = aiPercentOf(a);
   const aiClass =
-    a.aiGeneratedLikelihood === "Low" ? "green" : a.aiGeneratedLikelihood === "High" ? "red" : "amber";
-  const aiLines = a.aiGeneratedLines ?? [];
+    aiPct != null
+      ? aiPct > 65 ? "red" : aiPct >= 30 ? "amber" : "green"
+      : a.aiGeneratedLikelihood === "Low" ? "green" : a.aiGeneratedLikelihood === "High" ? "red" : "amber";
+  const aiLabel = aiPct != null ? `${aiPct}%` : a.aiGeneratedLikelihood;
 
   return (
     <div>
@@ -15,7 +19,7 @@ export default function AssessmentDetail({ a }: { a: ResumeAssessment }) {
         <div style={{ flex: 1, minWidth: 220 }}>
           <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.6rem" }}>
             <span className={`pill ${ratingClass}`}>Fit: {a.rating}</span>
-            <span className={`pill ${aiClass}`}>AI-generated: {a.aiGeneratedLikelihood}</span>
+            <span className={`pill ${aiClass}`}>AI-generated: {aiLabel}</span>
             {a.extracted?.currentTitle && <span className="pill grey">{a.extracted.currentTitle}</span>}
             {a.extracted?.totalExperienceYears != null && (
               <span className="pill grey">{a.extracted.totalExperienceYears} yrs exp</span>
@@ -73,7 +77,9 @@ export default function AssessmentDetail({ a }: { a: ResumeAssessment }) {
 
       <h3 style={{ marginTop: "1rem" }}>AI-generated content signal</h3>
       <p style={{ marginBottom: "0.5rem" }}>
-        <span className={`pill ${aiClass}`}>{a.aiGeneratedLikelihood} likelihood</span>{" "}
+        <span className={`pill ${aiClass}`}>
+          {aiPct != null ? `${aiPct}% AI-generated` : `${a.aiGeneratedLikelihood} likelihood`}
+        </span>{" "}
         <span className="muted">{a.aiGeneratedConfidence}</span>
       </p>
 
@@ -84,8 +90,8 @@ export default function AssessmentDetail({ a }: { a: ResumeAssessment }) {
           </div>
           {aiLines.map((line, i) => (
             <div className="ai-flag-line" key={i}>
-              <span className="ai-tag">AI</span>
-              <span>{line}</span>
+              <span className="ai-tag">{Number.isFinite(line.score) ? `${Math.round(line.score)}%` : "AI"}</span>
+              <span>{line.text}</span>
             </div>
           ))}
         </div>

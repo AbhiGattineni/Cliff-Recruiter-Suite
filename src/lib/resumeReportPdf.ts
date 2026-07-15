@@ -2,6 +2,7 @@
 
 import { jsPDF } from "jspdf";
 import { ResumeReport } from "./resumeReports";
+import { normalizeAiLines, aiPercentOf } from "./resume";
 
 const BRAND: [number, number, number] = [31, 78, 120]; // #1F4E78
 const INK: [number, number, number] = [31, 41, 51];
@@ -120,9 +121,13 @@ export function downloadResumeReportPdf(r: ResumeReport): void {
   doc.setTextColor(...ratingColor(r.rating));
   doc.text(`Rating: ${r.rating}`, margin + 140, y + 22);
   doc.setFontSize(11);
-  const aiColor = r.aiGeneratedLikelihood === "Low" ? GREEN : r.aiGeneratedLikelihood === "High" ? RED : AMBER;
+  const aiPct = aiPercentOf(r);
+  const aiColor =
+    aiPct != null
+      ? aiPct > 65 ? RED : aiPct >= 30 ? AMBER : GREEN
+      : r.aiGeneratedLikelihood === "Low" ? GREEN : r.aiGeneratedLikelihood === "High" ? RED : AMBER;
   doc.setTextColor(...aiColor);
-  doc.text(`AI-generated: ${r.aiGeneratedLikelihood}`, margin + 140, y + 42);
+  doc.text(`AI-generated: ${aiPct != null ? aiPct + "%" : r.aiGeneratedLikelihood}`, margin + 140, y + 42);
   y += 66;
 
   // ---- Sections ----
@@ -154,12 +159,15 @@ export function downloadResumeReportPdf(r: ResumeReport): void {
   }
 
   heading("AI-generated content signal");
-  paragraph(`${r.aiGeneratedLikelihood} likelihood. ${r.aiGeneratedConfidence || ""}`);
-  const aiLines = r.aiGeneratedLines ?? [];
+  paragraph(
+    `${aiPct != null ? aiPct + "% AI-generated." : r.aiGeneratedLikelihood + " likelihood."} ${r.aiGeneratedConfidence || ""}`
+  );
+  const aiLines = normalizeAiLines(r.aiGeneratedLines);
   if (aiLines.length) {
     paragraph(`Lines that read as AI-generated (${aiLines.length}):`, { bold: true, color: RED });
     for (const line of aiLines) {
-      const wrapped = doc.splitTextToSize(line, contentW - 16);
+      const prefix = Number.isFinite(line.score) ? `[${Math.round(line.score)}%] ` : "";
+      const wrapped = doc.splitTextToSize(prefix + line.text, contentW - 16);
       wrapped.forEach((ln: string, i: number) => {
         ensureSpace(13);
         doc.setFont("helvetica", "normal");

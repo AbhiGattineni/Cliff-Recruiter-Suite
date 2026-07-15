@@ -2,6 +2,14 @@
 
 Chronological record of notable changes. Newest first.
 
+## Stronger AI-generated-content detection (Resume Parsing)
+- The old prompt capped flagged lines at 5 and returned only Low/Med/High — a fully AI-written
+  resume showed "3 lines, Medium". Reworked the LLM prompt to score **every** bullet/sentence 0–100
+  and flag **all** AI-reading lines (no cap), plus an overall **percentage** (`aiGeneratedPercent`).
+- `aiGeneratedLines` is now `{ text, score }[]`; the UI/PDF/table show the percentage and per-line
+  scores (with legacy string-only reports handled via `normalizeAiLines`/`aiPercentOf`).
+- Verified: a fully AI-generated resume now returns 100% / High with all 10 bullets flagged (85–90%).
+
 ## Weekly recruiter activity in the modal (Ceipal usage reports)
 - New **Weekly activity** section in the recruiter modal, scoped to the tab's selected date range.
 - **Computed from existing submissions** (client-side): positions worked on, submissions, passed

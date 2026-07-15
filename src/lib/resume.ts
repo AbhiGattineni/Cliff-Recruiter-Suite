@@ -9,6 +9,11 @@ export interface SkillMatch {
   status: "matched" | "partial" | "missing";
 }
 
+export interface AiFlaggedLine {
+  text: string;
+  score: number; // 0-100 AI-generation likelihood for that line
+}
+
 export interface ResumeAssessment {
   candidateName: string;
   fitScore: number; // 0-100
@@ -18,8 +23,10 @@ export interface ResumeAssessment {
   gaps: string[];
   skillMatches: SkillMatch[];
   aiGeneratedLikelihood: "Low" | "Medium" | "High" | string;
+  aiGeneratedPercent?: number; // 0-100 overall (may be absent on older saved reports)
   aiGeneratedConfidence: string; // short note
-  aiGeneratedLines: string[]; // exact resume phrases that read as AI-generated
+  // Newer reports store scored objects; older ones stored plain strings.
+  aiGeneratedLines: (string | AiFlaggedLine)[];
   extracted: {
     email?: string;
     phone?: string;
@@ -27,6 +34,30 @@ export interface ResumeAssessment {
     currentTitle?: string;
     location?: string;
   };
+}
+
+/** Normalise flagged lines (legacy string[] or new scored objects) to a common shape. */
+export function normalizeAiLines(lines: unknown): AiFlaggedLine[] {
+  if (!Array.isArray(lines)) return [];
+  return lines
+    .map((l): AiFlaggedLine => {
+      if (typeof l === "string") return { text: l, score: NaN };
+      const o = (l ?? {}) as { text?: unknown; score?: unknown };
+      const t = typeof o.text === "string" ? o.text : String(o.text ?? "");
+      const s = Number(o.score);
+      return { text: t, score: Number.isFinite(s) ? s : NaN };
+    })
+    .filter((l) => l.text.trim().length > 0);
+}
+
+/** Overall AI percentage — from the stored value, else derived from line scores. */
+export function aiPercentOf(a: ResumeAssessment): number | null {
+  if (typeof a.aiGeneratedPercent === "number" && Number.isFinite(a.aiGeneratedPercent)) {
+    return Math.round(a.aiGeneratedPercent);
+  }
+  const lines = normalizeAiLines(a.aiGeneratedLines).filter((l) => Number.isFinite(l.score));
+  if (lines.length) return Math.round(lines.reduce((s, l) => s + l.score, 0) / lines.length);
+  return null; // unknown (older report without scores)
 }
 
 export type ProviderId = "ollama" | "openai";

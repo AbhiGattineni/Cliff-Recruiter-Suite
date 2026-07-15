@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { listResumeReports, ResumeReport } from "../lib/resumeReports";
+import { aiPercentOf } from "../lib/resume";
 import { downloadResumeReportPdf } from "../lib/resumeReportPdf";
 import { friendlyError } from "../lib/errors";
 import AssessmentDetail from "../components/AssessmentDetail";
@@ -104,7 +105,13 @@ export default function ResumeReports() {
                     <td style={{ whiteSpace: "normal", fontWeight: 600 }}>{r.candidateName || "—"}</td>
                     <td>{Math.round(Number(r.fitScore) || 0)}</td>
                     <td><span className={`pill ${ratingPill(r.rating)}`}>{r.rating}</span></td>
-                    <td><span className={`pill ${aiPill(r.aiGeneratedLikelihood)}`}>{r.aiGeneratedLikelihood}</span></td>
+                    <td>
+                      {(() => {
+                        const p = aiPercentOf(r);
+                        const cls = p != null ? (p > 65 ? "red" : p >= 30 ? "amber" : "green") : aiPill(r.aiGeneratedLikelihood);
+                        return <span className={`pill ${cls}`}>{p != null ? `${p}%` : r.aiGeneratedLikelihood}</span>;
+                      })()}
+                    </td>
                     <td className="muted" style={{ fontSize: "0.8rem" }}>{r.provider} / {r.model}</td>
                     <td style={{ textAlign: "right" }}>{fmtTok(r.totalTokens)}</td>
                     <td style={{ textAlign: "right" }}>{fmtCost(r.cost)}</td>
