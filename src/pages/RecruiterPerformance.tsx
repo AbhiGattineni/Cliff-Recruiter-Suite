@@ -20,6 +20,7 @@ import StageBar, { StageLegend } from "../components/StageBar";
 import PieChart from "../components/PieChart";
 import Modal from "../components/Modal";
 import Pagination, { usePagination } from "../components/Pagination";
+import ActiveJobsCard from "../components/ActiveJobsCard";
 
 const fmtDt = (d: DateTime | null) => (d ? d.toFormat("MM/dd/yyyy hh:mm a") : "—");
 
@@ -245,6 +246,8 @@ export default function RecruiterPerformance() {
           </button>
         </div>
       </div>
+
+      <ActiveJobsCard />
 
       {error && <div className="alert error">{error}</div>}
       {fetchInfo && !error && <div className="alert info">{fetchInfo}</div>}

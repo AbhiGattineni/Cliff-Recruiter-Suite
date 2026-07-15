@@ -2,6 +2,14 @@
 
 Chronological record of notable changes. Newest first.
 
+## Active jobs snapshot on Recruiter Performance
+- New **"Active jobs today"** card at the top of the Recruiter Performance page — a live snapshot
+  of currently-open jobs from the Ceipal **"Active Jobs - All"** report (Req ID, title, client,
+  location, positions, submissions, interviews, posted date).
+- New `activeJobs` callable (report key/URL added to `ceipal.ts` + `functions/.env`); client
+  `lib/activeJobs.ts` + `components/ActiveJobsCard.tsx`, fetched via React Query (cached, refresh
+  button). Verified live: 9 active jobs.
+
 ## React Query, pagination, row numbers, per-model LLM usage
 - **React Query** (`@tanstack/react-query`) with `staleTime` 5 min + `refetchOnWindowFocus:false`
   wraps the app (`main.tsx`); Firestore reads (resume reports, dashboard stats, LLM usage, report

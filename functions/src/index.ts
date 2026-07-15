@@ -427,6 +427,39 @@ export const recruiterActivity = onCall(
   }
 );
 
+// Currently-open jobs (Ceipal "Active Jobs - All" report). Small live snapshot.
+export const activeJobs = onCall(
+  { ...commonOpts, secrets: [CEIPAL_PASSWORD], timeoutSeconds: 120, memory: "256MiB" },
+  async (request) => {
+    void request;
+    const password = CEIPAL_PASSWORD.value();
+    if (!password || password.startsWith("PLACEHOLDER")) {
+      throw new HttpsError("failed-precondition", "Ceipal password is not configured.");
+    }
+    const s = (v: unknown) => String(v ?? "").trim();
+    const n = (v: unknown) => Number(String(v ?? "").replace(/[^0-9-]/g, "")) || 0;
+    const data = (await fetchReport("active_jobs", password, 0)) as { result?: Record<string, unknown>[] };
+    const rows = Array.isArray(data.result) ? data.result : [];
+    const jobs = rows.map((r) => ({
+      jobCode: s(r.JobCode),
+      jobTitle: s(r.JobTitle),
+      client: s(r.Client),
+      location: s(r.Location) || s(r.States),
+      status: s(r.JobStatus),
+      positions: n(r.NumberOfPositions),
+      submissions: n(r["#OfSubmissions"]),
+      clientSub: n(r["#OfClientSub"]),
+      interviews: n(r["#OfInterviews"]),
+      placements: n(r["#OfPlacements"]),
+      recruitmentManager: s(r.RecruitmentManager),
+      payRate: s(r["PayRate/Salary"]),
+      remote: s(r.RemoteJob),
+      jobCreated: s(r.JobCreated),
+    }));
+    return { ok: true, jobs, fetchedAt: Date.now() };
+  }
+);
+
 export const parseResume = onCall(
   { ...commonOpts, secrets: [LLM_API_KEY, OPENAI_API_KEY], timeoutSeconds: 120 },
   async (request) => {

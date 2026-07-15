@@ -20,7 +20,8 @@ export type ReportKey =
   | "job_board"
   | "pipeline_logs"
   | "mail_merge"
-  | "advanced_search";
+  | "advanced_search"
+  | "active_jobs";
 
 const REPORT_ENV: Record<ReportKey, string> = {
   job_duration: "CEIPAL_JOB_DURATION_URL",
@@ -29,6 +30,7 @@ const REPORT_ENV: Record<ReportKey, string> = {
   pipeline_logs: "CEIPAL_PIPELINE_LOGS_URL",
   mail_merge: "CEIPAL_MAIL_MERGE_URL",
   advanced_search: "CEIPAL_ADV_SEARCH_URL",
+  active_jobs: "CEIPAL_ACTIVE_JOBS_URL",
 };
 
 export function reportUrl(report: ReportKey): string {
