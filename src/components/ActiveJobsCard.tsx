@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { DateTime } from "luxon";
 import { getActiveJobs } from "../lib/activeJobs";
 import { JobSubmission } from "../lib/recruiterStats";
+import { isClientVendorStatus } from "../lib/report/columns";
 
 const cleanLoc = (s: string) => s.replace(/^\[|\]$/g, "").trim();
 const dateOnly = (s: string) => (s ? s.split(/\s+/)[0] : "—");
@@ -51,7 +52,10 @@ export default function ActiveJobsCard({ subsByJob }: { subsByJob: Map<string, J
         <p className="muted" style={{ marginBottom: 0 }}>No active jobs right now.</p>
       ) : (
         <>
-          <p className="muted" style={{ marginTop: 0, fontSize: "0.82rem" }}>Click a job to see its submissions.</p>
+          <p className="muted" style={{ marginTop: 0, fontSize: "0.82rem" }}>
+            Click a job to see its submissions. <span style={{ background: "#ffc7ce", color: "#9c0006", padding: "0 4px", borderRadius: 3 }}>Red</span> = no submissions,{" "}
+            <span style={{ background: "#ffe8b3", color: "#7a5600", padding: "0 4px", borderRadius: 3 }}>amber</span> = has submissions but none sent to client/vendor.
+          </p>
           <div className="table-wrap" style={{ maxHeight: "48vh" }}>
             <table className="data">
               <thead>
@@ -72,9 +76,21 @@ export default function ActiveJobsCard({ subsByJob }: { subsByJob: Map<string, J
                   const details = subsByJob.get(j.jobCode) ?? [];
                   const open = expanded.has(j.jobCode || String(i));
                   const key = j.jobCode || String(i);
+                  // Same rule as the Report preview: red = no submissions, amber =
+                  // has submissions but none reached the client/vendor side.
+                  let cls = "";
+                  if (j.submissions === 0) {
+                    cls = "red";
+                  } else {
+                    const clientVendor =
+                      details.length > 0
+                        ? details.some((d) => isClientVendorStatus(d.status))
+                        : j.clientSub > 0 || j.interviews > 0 || j.placements > 0;
+                    if (!clientVendor) cls = "internal-only";
+                  }
                   return (
                     <Fragment key={key}>
-                      <tr onClick={() => toggle(key)} style={{ cursor: "pointer" }}>
+                      <tr onClick={() => toggle(key)} style={{ cursor: "pointer" }} className={cls}>
                         <td style={{ color: "var(--muted)" }}>{open ? "▾" : "▸"}</td>
                         <td>{j.jobCode || "—"}</td>
                         <td style={{ whiteSpace: "normal", fontWeight: 600 }}>{j.jobTitle || "—"}</td>
