@@ -8,46 +8,71 @@ import { friendlyError } from "../lib/errors";
 import {
   computeClientScores,
   sortClientScores,
+  portfolioStats,
   STAGE_META,
   STAGE_COLOR,
+  STALE_DAYS,
   ClientScore,
   ClientSortKey,
   Verdict,
+  Trend,
 } from "../lib/clientTracker";
 import Pagination, { usePagination } from "../components/Pagination";
+import PieChart from "../components/PieChart";
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 const fmtDate = (d: DateTime | null) => (d ? d.toFormat("MM/dd/yyyy") : "—");
+const days = (n: number | null) => (n == null ? "—" : `${n}d`);
 
 const SORTS: { key: ClientSortKey; label: string }[] = [
   { key: "total", label: "Most submissions" },
   { key: "reconsider", label: "Problem clients first" },
   { key: "responseRate", label: "Response rate" },
+  { key: "response_time", label: "Fastest to respond" },
   { key: "selected", label: "Most selected" },
   { key: "waiting", label: "Longest waiting" },
+  { key: "stale", label: "Most stale" },
 ];
 
-const VERDICT: Record<Verdict, { label: string; pill: string; hint: string }> = {
-  prioritize: { label: "🟢 Prioritize", pill: "green", hint: "Responsive — moving our profiles and/or selecting." },
-  watch: { label: "🟡 Watch", pill: "amber", hint: "Some movement, but no selections yet." },
-  reconsider: { label: "🔴 Reconsider", pill: "red", hint: "No profile has ever moved past submission — silent." },
+const VERDICT: Record<Verdict, { label: string; pill: string; hint: string; color: string }> = {
+  prioritize: { label: "🟢 Prioritize", pill: "green", hint: "Responsive — moving our profiles and/or selecting.", color: "#12b886" },
+  watch: { label: "🟡 Watch", pill: "amber", hint: "Some movement, but no selections yet.", color: "#e0a800" },
+  reconsider: { label: "🔴 Reconsider", pill: "red", hint: "No profile has ever moved past submission — silent.", color: "#c92a2a" },
+};
+
+const TREND: Record<Trend, { icon: string; color: string; title: string }> = {
+  up: { icon: "↗", color: "#12b886", title: "Response rate rising vs the prior period" },
+  down: { icon: "↘", color: "#c92a2a", title: "Response rate falling vs the prior period" },
+  flat: { icon: "→", color: "#8aa4c8", title: "Response rate steady vs the prior period" },
+  na: { icon: "·", color: "#adb5bd", title: "Not enough recent data to compare" },
 };
 
 // Proportional 5-stage funnel bar for one client.
 function StageMeter({ s }: { s: ClientScore }) {
-  const segs = STAGE_META.map((m) => ({ ...m, n: (s as unknown as Record<string, number>)[m.key] })).filter(
-    (x) => x.n > 0
-  );
+  const segs = STAGE_META.map((m) => ({ ...m, n: (s as unknown as Record<string, number>)[m.key] })).filter((x) => x.n > 0);
   return (
     <div title={segs.map((x) => `${x.n} ${x.label}`).join(" · ")} style={{ display: "flex", height: 16, borderRadius: 4, overflow: "hidden", background: "#eef1f5", minWidth: 140 }}>
       {segs.map((x) => (
-        <div
-          key={x.key}
-          style={{ width: `${(x.n / s.total) * 100}%`, background: x.color, display: "flex", alignItems: "center", justifyContent: "center" }}
-        >
+        <div key={x.key} style={{ width: `${(x.n / s.total) * 100}%`, background: x.color, display: "flex", alignItems: "center", justifyContent: "center" }}>
           {x.n / s.total > 0.12 && <span style={{ color: "#fff", fontSize: "0.66rem", fontWeight: 700 }}>{x.n}</span>}
         </div>
       ))}
+    </div>
+  );
+}
+
+// One step of the portfolio conversion funnel.
+function FunnelStep({ label, value, base, color }: { label: string; value: number; base: number; color: string }) {
+  return (
+    <div style={{ flex: 1, minWidth: 120 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8rem", marginBottom: 3 }}>
+        <span className="muted">{label}</span>
+        <strong>{value}</strong>
+      </div>
+      <div style={{ height: 10, borderRadius: 3, background: "#eef1f5", overflow: "hidden" }}>
+        <div style={{ width: `${base ? (value / base) * 100 : 0}%`, height: "100%", background: color }} />
+      </div>
+      <div className="muted" style={{ fontSize: "0.72rem", marginTop: 2 }}>{base ? pct(value / base) : "—"} of submitted</div>
     </div>
   );
 }
@@ -103,17 +128,13 @@ export default function ClientTracker() {
   const scores = useMemo(() => (filtered ? computeClientScores(filtered) : []), [filtered]);
   const sorted = useMemo(() => sortClientScores(scores, sortKey), [scores, sortKey]);
   const board = usePagination(sorted, 25);
+  const pf = useMemo(() => portfolioStats(scores), [scores]);
 
-  const totals = useMemo(() => {
-    let profiles = 0, moved = 0, selected = 0, reconsider = 0;
-    for (const s of scores) {
-      profiles += s.total;
-      moved += s.moved;
-      selected += s.selected;
-      if (s.verdict === "reconsider") reconsider++;
-    }
-    return { clients: scores.length, profiles, responseRate: profiles ? moved / profiles : 0, selected, reconsider };
-  }, [scores]);
+  const verdictPie = [
+    { label: "Prioritize", value: pf.verdicts.prioritize, color: VERDICT.prioritize.color },
+    { label: "Watch", value: pf.verdicts.watch, color: VERDICT.watch.color },
+    { label: "Reconsider", value: pf.verdicts.reconsider, color: VERDICT.reconsider.color },
+  ].filter((x) => x.value > 0);
 
   const toggle = (key: string) =>
     setExpanded((cur) => {
@@ -207,19 +228,45 @@ export default function ClientTracker() {
             <>
               <div className="card">
                 <div className="stat-grid">
-                  <Stat label="Clients / Vendors" value={totals.clients} />
-                  <Stat label="Profiles submitted to them" value={totals.profiles} />
-                  <Stat label="Overall response rate" value={pct(totals.responseRate)} />
-                  <Stat label="Selected / offers" value={totals.selected} />
-                  <Stat label="🔴 Reconsider (no movement)" value={totals.reconsider} />
+                  <Stat label="Clients / Vendors" value={pf.clients} />
+                  <Stat label="Profiles submitted to them" value={pf.totalSubs} />
+                  <Stat label="Overall response rate" value={pct(pf.respondedRate)} />
+                  <Stat label="Selected / offers" value={pf.selected} />
+                  <Stat label="Avg time to first response" value={days(pf.avgTimeToResponseDays)} />
+                  <Stat label={`Stale (>${STALE_DAYS}d, no reply)`} value={pf.staleTotal} />
+                  <Stat label="🔴 Reconsider (no movement)" value={pf.verdicts.reconsider} />
+                </div>
+              </div>
+
+              {/* Portfolio: verdict split + conversion funnel */}
+              <div className="card">
+                <div style={{ display: "flex", gap: "2rem", flexWrap: "wrap", alignItems: "center" }}>
+                  {verdictPie.length > 0 && (
+                    <div style={{ minWidth: 200 }}>
+                      <PieChart title="Clients by verdict" data={verdictPie} />
+                    </div>
+                  )}
+                  <div style={{ flex: 1, minWidth: 320 }}>
+                    <h3 style={{ margin: "0 0 0.75rem" }}>Conversion funnel (all client/vendor submissions)</h3>
+                    <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
+                      <FunnelStep label="Submitted" value={pf.totalSubs} base={pf.totalSubs} color="#8aa4c8" />
+                      <FunnelStep label="Got a response" value={pf.responded} base={pf.totalSubs} color="#4c8bf5" />
+                      <FunnelStep label="Reached interview" value={pf.interviewed} base={pf.totalSubs} color="#e0a800" />
+                      <FunnelStep label="Selected / offer" value={pf.selected} base={pf.totalSubs} color="#12b886" />
+                    </div>
+                    <p className="muted" style={{ fontSize: "0.82rem", marginTop: "0.75rem", marginBottom: 0 }}>
+                      Interview → selection: <strong>{pf.interviewToSelection != null ? pct(pf.interviewToSelection) : "—"}</strong>
+                      {" "}of interviewed candidates are selected · {pf.staleTotal} profile{pf.staleTotal === 1 ? "" : "s"} stale
+                      (waiting &gt; {STALE_DAYS}d with no reply).
+                    </p>
+                  </div>
                 </div>
               </div>
 
               <div className="card">
                 <p className="sub">
-                  Click a client to see the individual profiles. Response rate = share of submissions that got
-                  any feedback (interview, selection, rejection or hold). A client is flagged 🔴 only when
-                  <strong> nothing has ever moved</strong> past submission.
+                  Click a client to see the individual profiles and its detailed metrics. Response = share of
+                  submissions that got any feedback. A client is flagged 🔴 only when <strong>nothing has ever moved</strong> past submission.
                 </p>
                 <div className="table-wrap" style={{ maxHeight: "62vh" }}>
                   <table className="data">
@@ -231,6 +278,8 @@ export default function ClientTracker() {
                         <th style={{ textAlign: "right" }}>Submitted</th>
                         <th style={{ minWidth: 150 }}>Progress</th>
                         <th style={{ textAlign: "right" }}>Response</th>
+                        <th style={{ textAlign: "center" }} title="Response-rate trend, recent vs prior 45 days">Trend</th>
+                        <th style={{ textAlign: "right" }} title="Avg days from submission to first response">Resp. time</th>
                         <th style={{ textAlign: "right" }}>Selected</th>
                         <th style={{ textAlign: "right" }}>Waiting</th>
                         <th>Last activity</th>
@@ -242,6 +291,7 @@ export default function ClientTracker() {
                         const key = s.client.toLowerCase();
                         const open = expanded.has(key);
                         const v = VERDICT[s.verdict];
+                        const tr = TREND[s.trend];
                         return (
                           <Fragment key={key}>
                             <tr onClick={() => toggle(key)} style={{ cursor: "pointer" }} className={s.verdict === "reconsider" ? "red" : ""}>
@@ -251,9 +301,16 @@ export default function ClientTracker() {
                               <td style={{ textAlign: "right", fontWeight: 600 }}>{s.total}</td>
                               <td><StageMeter s={s} /></td>
                               <td style={{ textAlign: "right" }}>{pct(s.responseRate)}</td>
+                              <td style={{ textAlign: "center", color: tr.color, fontWeight: 700 }} title={tr.title}>{tr.icon}</td>
+                              <td style={{ textAlign: "right" }} className="muted">{days(s.avgTimeToResponseDays)}</td>
                               <td style={{ textAlign: "right" }}>{s.selected || "—"}</td>
                               <td style={{ textAlign: "right" }} title={s.maxWaitDays != null ? `oldest ${s.maxWaitDays}d` : ""}>
-                                {s.submitted ? `${s.submitted} · ${s.avgWaitDays ?? 0}d` : "—"}
+                                {s.submitted ? (
+                                  <>
+                                    {s.submitted} · {s.avgWaitDays ?? 0}d
+                                    {s.staleCount > 0 && <span className="pill red" style={{ marginLeft: 4, fontSize: "0.66rem", padding: "0 5px" }}>{s.staleCount} stale</span>}
+                                  </>
+                                ) : "—"}
                               </td>
                               <td style={{ whiteSpace: "nowrap" }} className="muted">{fmtDate(s.lastActivity)}</td>
                               <td><span className={`pill ${v.pill}`} title={v.hint}>{v.label}</span></td>
@@ -261,7 +318,15 @@ export default function ClientTracker() {
                             {open && (
                               <tr>
                                 <td></td>
-                                <td colSpan={9} style={{ background: "#f8fafc", padding: "0.5rem 0.75rem" }}>
+                                <td colSpan={11} style={{ background: "#f8fafc", padding: "0.6rem 0.75rem" }}>
+                                  <div style={{ display: "flex", gap: "1.25rem", flexWrap: "wrap", marginBottom: "0.6rem" }}>
+                                    <Metric label="Response rate" value={pct(s.responseRate)} />
+                                    <Metric label="Reached interview" value={`${s.interviewReached} (${pct(s.interviewRate)})`} />
+                                    <Metric label="Interview → selection" value={s.interviewToSelection != null ? pct(s.interviewToSelection) : "—"} />
+                                    <Metric label="Submissions per selection" value={s.subsPerSelection != null ? s.subsPerSelection.toFixed(1) : "— (0 selected)"} />
+                                    <Metric label="Avg time to response" value={days(s.avgTimeToResponseDays)} />
+                                    <Metric label={`Stale (>${STALE_DAYS}d)`} value={String(s.staleCount)} />
+                                  </div>
                                   <table className="data" style={{ margin: 0 }}>
                                     <thead>
                                       <tr>
@@ -270,6 +335,7 @@ export default function ClientTracker() {
                                         <th>Recruiter</th>
                                         <th>Current status</th>
                                         <th>Submitted on</th>
+                                        <th style={{ textAlign: "right" }}>Resp. time</th>
                                         <th style={{ textAlign: "right" }}>Waiting</th>
                                       </tr>
                                     </thead>
@@ -286,8 +352,11 @@ export default function ClientTracker() {
                                             </span>
                                           </td>
                                           <td style={{ whiteSpace: "nowrap" }}>{fmtDate(r.submittedOn)}</td>
+                                          <td style={{ textAlign: "right" }} className="muted">{r.timeToResponseDays != null ? days(r.timeToResponseDays) : "—"}</td>
                                           <td style={{ textAlign: "right" }} className="muted">
-                                            {r.stage === "submitted" && r.daysWaiting != null ? `${r.daysWaiting}d` : "—"}
+                                            {r.stage === "submitted" && r.daysWaiting != null ? (
+                                              <span style={{ color: r.daysWaiting > STALE_DAYS ? "#c92a2a" : undefined, fontWeight: r.daysWaiting > STALE_DAYS ? 700 : undefined }}>{r.daysWaiting}d</span>
+                                            ) : "—"}
                                           </td>
                                         </tr>
                                       ))}
@@ -323,6 +392,15 @@ function Stat({ label, value }: { label: string; value: number | string }) {
     <div className="stat">
       <div className="num">{value}</div>
       <div className="lbl">{label}</div>
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div style={{ fontWeight: 700 }}>{value}</div>
+      <div className="muted" style={{ fontSize: "0.75rem" }}>{label}</div>
     </div>
   );
 }
