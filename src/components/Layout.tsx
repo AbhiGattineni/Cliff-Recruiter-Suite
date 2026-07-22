@@ -10,6 +10,7 @@ const NAV = [
   { to: "/reports", icon: "📊", label: "Report Generation" },
   { to: "/saved-reports", icon: "📁", label: "Saved Reports" },
   { to: "/recruiters", icon: "🏆", label: "Recruiter Performance" },
+  { to: "/client-tracker", icon: "🤝", label: "Client Tracker" },
   { to: "/candidate-pool", icon: "👥", label: "Candidate Pool" },
   { to: "/preferences", icon: "⚙️", label: "Preferences" },
 ];
