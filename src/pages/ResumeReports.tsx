@@ -8,6 +8,7 @@ import { friendlyError } from "../lib/errors";
 import AssessmentDetail from "../components/AssessmentDetail";
 import PortfolioDetail from "../components/PortfolioDetail";
 import { LinkedinVerdict } from "../components/LinkedinCheck";
+import { verdictClass } from "../lib/linkedinScore";
 import Modal from "../components/Modal";
 import LlmUsagePanel from "../components/LlmUsagePanel";
 import Pagination, { usePagination } from "../components/Pagination";
@@ -163,24 +164,49 @@ export default function ResumeReports() {
                 </>
               )}
             </p>
-            <AssessmentDetail a={selected} />
             {(selected.githubUrl || selected.linkedinUrl) && (
-              <>
-                <h3 style={{ marginTop: "1rem" }}>Profile links</h3>
-                <p style={{ marginTop: 0 }}>
-                  {selected.githubUrl && (
-                    <a href={selected.githubUrl} target="_blank" rel="noreferrer" style={{ marginRight: "1rem" }}>
-                      GitHub ↗
-                    </a>
-                  )}
-                  {selected.linkedinUrl && (
-                    <a href={selected.linkedinUrl} target="_blank" rel="noreferrer">
-                      LinkedIn ↗
-                    </a>
-                  )}
-                </p>
-              </>
+              <div
+                style={{
+                  display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "center",
+                  padding: "0.55rem 0.8rem", background: "var(--brand-light)", borderRadius: 8,
+                  marginBottom: "1rem", fontSize: "0.88rem",
+                }}
+              >
+                {selected.githubUrl && (
+                  <span>
+                    <a href={selected.githubUrl} target="_blank" rel="noreferrer">GitHub ↗</a>
+                    {selected.portfolio && (
+                      <span
+                        className={`pill ${
+                          selected.portfolio.rating === "Strong"
+                            ? "green"
+                            : selected.portfolio.rating === "Weak"
+                              ? "red"
+                              : "amber"
+                        }`}
+                        style={{ marginLeft: "0.4rem" }}
+                      >
+                        {selected.portfolio.portfolioScore}/100 · {selected.portfolio.rating}
+                      </span>
+                    )}
+                  </span>
+                )}
+                {selected.linkedinUrl && (
+                  <span>
+                    <a href={selected.linkedinUrl} target="_blank" rel="noreferrer">LinkedIn ↗</a>
+                    {selected.linkedinCheck?.assessment && selected.linkedinCheck.assessment.known > 0 && (
+                      <span
+                        className={`pill ${verdictClass(selected.linkedinCheck.assessment.verdict)}`}
+                        style={{ marginLeft: "0.4rem" }}
+                      >
+                        {selected.linkedinCheck.assessment.verdict}
+                      </span>
+                    )}
+                  </span>
+                )}
+              </div>
             )}
+            <AssessmentDetail a={selected} />
             {selected.portfolio && (
               <>
                 <h3 style={{ marginTop: "1rem" }}>GitHub portfolio vs JD</h3>

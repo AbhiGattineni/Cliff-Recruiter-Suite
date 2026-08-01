@@ -24,6 +24,7 @@ import {
 import { friendlyError } from "../lib/errors";
 import { extractResumeText, ACCEPTED_RESUME_TYPES } from "../lib/resumeFile";
 import { LinkedinCheck as StoredLinkedinCheck } from "../lib/linkedin";
+import { verdictClass } from "../lib/linkedinScore";
 import AssessmentDetail from "../components/AssessmentDetail";
 import PortfolioDetail from "../components/PortfolioDetail";
 import LinkedinCheck from "../components/LinkedinCheck";
@@ -421,15 +422,23 @@ export default function ResumeParsing() {
               <span className="muted">{provider} / {model}</span>
             </div>
           )}
-          <div style={{ marginTop: "1rem" }}>
-            <AssessmentDetail a={result} />
-          </div>
-
-          {/* ---- Profile links (editable; GitHub re-assessed only on demand) ---- */}
-          <h3 style={{ marginTop: "1.25rem" }}>Profile links</h3>
-          <div className="row">
+          {/* ---- Profile links — kept at the top, with the candidate's identity ---- */}
+          <div className="row" style={{ marginTop: "1rem" }}>
             <div className="field" style={{ marginBottom: 0 }}>
-              <label>GitHub profile</label>
+              <label>
+                GitHub profile{" "}
+                {pfBusy ? (
+                  <span className="spinner dark" style={{ verticalAlign: "middle" }} />
+                ) : pf ? (
+                  <span
+                    className={`pill ${
+                      pf.portfolio.rating === "Strong" ? "green" : pf.portfolio.rating === "Weak" ? "red" : "amber"
+                    }`}
+                  >
+                    {pf.portfolio.portfolioScore}/100 · {pf.portfolio.rating}
+                  </span>
+                ) : null}
+              </label>
               <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
                 <input
                   value={ghInput}
@@ -451,9 +460,27 @@ export default function ResumeParsing() {
                   </button>
                 )}
               </div>
+              {githubUrl && (
+                <a
+                  href={githubUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="muted"
+                  style={{ fontSize: "0.78rem" }}
+                >
+                  Open profile ↗
+                </a>
+              )}
             </div>
             <div className="field" style={{ marginBottom: 0 }}>
-              <label>LinkedIn profile</label>
+              <label>
+                LinkedIn profile{" "}
+                {liCheck?.assessment && liCheck.assessment.known > 0 && (
+                  <span className={`pill ${verdictClass(liCheck.assessment.verdict)}`}>
+                    {liCheck.assessment.verdict}
+                  </span>
+                )}
+              </label>
               <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
                 <input
                   value={liInput}
@@ -480,9 +507,13 @@ export default function ResumeParsing() {
             </div>
           </div>
           <p className="muted" style={{ fontSize: "0.8rem", marginTop: "0.4rem" }}>
-            LinkedIn is stored as a link for manual review (LinkedIn has no public API for profile data);
-            GitHub is assessed automatically below.
+            GitHub is assessed automatically; LinkedIn is stored as a link and checked against the signals you
+            enter (it has no public API for profile data). Full detail for both is below the fit assessment.
           </p>
+
+          <div style={{ marginTop: "1rem" }}>
+            <AssessmentDetail a={result} />
+          </div>
 
           {/* ---- GitHub portfolio assessment ---- */}
           <h3 style={{ marginTop: "1rem" }}>GitHub portfolio vs JD</h3>
