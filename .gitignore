@@ -33,3 +33,6 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Stray PDFs from any test that reaches jsPDF save()
+Resume_Assessment_*.pdf
