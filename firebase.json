@@ -2,7 +2,20 @@
   "hosting": {
     "public": "dist",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-    "rewrites": [{ "source": "**", "destination": "/index.html" }]
+    "rewrites": [{ "source": "**", "destination": "/index.html" }],
+    "headers": [
+      {
+        // index.html must never be cached: it names the hashed asset bundles, so a
+        // cached copy pins users to the previous deploy's JS for the cache lifetime.
+        "source": "/index.html",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
+      },
+      {
+        // Asset filenames are content-hashed by Vite, so they're safe to cache forever.
+        "source": "/assets/**",
+        "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+      }
+    ]
   },
   "functions": {
     "source": "functions",
