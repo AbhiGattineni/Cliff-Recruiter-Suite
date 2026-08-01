@@ -277,6 +277,81 @@ table.data tr:hover td { background: #f0f6fc; }
   padding: 0.1rem 0.35rem; border-radius: 4px; letter-spacing: 0.03em; margin-top: 0.1rem;
 }
 
+/* ---------- Assessment sections ---------- */
+.sec {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--card); margin-bottom: 0.75rem; overflow: hidden;
+}
+.sec-head {
+  display: flex; align-items: center; gap: 0.6rem; width: 100%;
+  padding: 0.7rem 0.9rem; background: none; border: none; font: inherit;
+  cursor: pointer; text-align: left; color: var(--ink);
+}
+.sec-head:hover { background: #f7fafd; }
+.sec-head:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+.sec-caret {
+  flex-shrink: 0; color: var(--muted); font-size: 0.8rem; line-height: 1;
+  transition: transform 0.2s ease;
+}
+.sec.open .sec-caret { transform: rotate(90deg); }
+.sec-title { font-weight: 700; font-size: 0.98rem; flex: 1; min-width: 0; }
+.sec-ico { flex-shrink: 0; font-size: 1rem; }
+/* Expanding shows the body outright. Animating this was tried three ways and
+   all three broke in Chrome — see Section.tsx. An entrance animation here is
+   especially bad: starting one in the same frame the element leaves
+   display:none doesn't run it, and fill-mode holds the from-state, leaving
+   expanded content permanently invisible. The motion in this UI lives in the
+   caret, the verdict meters, and the section entrance stagger, all of which
+   animate reliably. display:none keeps child state mounted while collapsed. */
+.sec-body-wrap { display: none; }
+.sec.open .sec-body-wrap { display: block; }
+.sec-body { padding: 0.85rem 0.9rem 0.9rem; border-top: 1px solid var(--line); }
+
+/* ---------- Verdict band ---------- */
+.verdict-band { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.75rem; }
+.verdict-tile { border: 1px solid var(--line); border-radius: var(--radius); padding: 0.75rem 0.85rem; background: var(--card); }
+.verdict-lbl { font-size: 0.76rem; color: var(--muted); margin-bottom: 0.3rem; }
+.verdict-num { font-size: 1.65rem; font-weight: 700; line-height: 1; }
+.verdict-num small { font-size: 0.8rem; font-weight: 600; color: var(--muted); }
+.verdict-meter { height: 5px; border-radius: 3px; background: #eef1f5; margin: 0.55rem 0 0.4rem; overflow: hidden; }
+.verdict-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease; }
+.verdict-note { font-size: 0.76rem; font-weight: 600; }
+.verdict-tile.na .verdict-num { color: var(--muted); }
+
+/* ---------- Skill chips ---------- */
+.chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.chip {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  padding: 0.22rem 0.6rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600;
+  border: 1px solid transparent;
+}
+.chip.matched { background: #e6f4ea; color: #1e7e34; border-color: #c6e6d0; }
+.chip.partial { background: #fdf1dc; color: #a9700a; border-color: #f0dcb4; }
+.chip.missing { background: #fdecec; color: var(--danger); border-color: #f3cccc; }
+.chip .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+
+/* ---------- Detail list (key/value) ---------- */
+.kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0.6rem 1.25rem; }
+.kv-row { border-bottom: 1px solid #f1f5f9; padding-bottom: 0.4rem; min-width: 0; }
+.kv-k { font-size: 0.74rem; color: var(--muted); }
+.kv-v { font-weight: 600; font-size: 0.9rem; word-break: break-word; }
+
+/* ---------- Entrance motion + skeletons ---------- */
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.rise { animation: rise 0.32s ease both; }
+@keyframes shimmer { to { background-position: 200% 0; } }
+.skel {
+  border-radius: 6px; height: 12px; margin-bottom: 0.5rem;
+  background: linear-gradient(90deg, #eef2f7 25%, #f7fafc 50%, #eef2f7 75%);
+  background-size: 200% 100%; animation: shimmer 1.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise, .skel { animation: none; }
+  .sec-caret, .verdict-fill, .tool-card, .sidebar { transition: none; }
+  .skel { background: #eef2f7; }
+}
+
 /* ---------- Toggle switch ---------- */
 .switch { position: relative; display: inline-block; width: 46px; height: 26px; flex-shrink: 0; }
 .switch input { opacity: 0; width: 0; height: 0; }

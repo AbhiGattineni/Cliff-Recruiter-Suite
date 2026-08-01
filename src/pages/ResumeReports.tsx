@@ -8,6 +8,8 @@ import { friendlyError } from "../lib/errors";
 import AssessmentDetail from "../components/AssessmentDetail";
 import PortfolioDetail from "../components/PortfolioDetail";
 import { LinkedinVerdict } from "../components/LinkedinCheck";
+import Section from "../components/Section";
+import VerdictBand, { toneForScore } from "../components/VerdictBand";
 import { verdictClass } from "../lib/linkedinScore";
 import Modal from "../components/Modal";
 import LlmUsagePanel from "../components/LlmUsagePanel";
@@ -206,23 +208,75 @@ export default function ResumeReports() {
                 )}
               </div>
             )}
-            <AssessmentDetail a={selected} />
-            {selected.portfolio && (
-              <>
-                <h3 style={{ marginTop: "1rem" }}>GitHub portfolio vs JD</h3>
-                <PortfolioDetail
-                  portfolio={selected.portfolio}
-                  profile={selected.githubProfile ?? null}
-                  githubUrl={selected.githubUrl || ""}
-                />
-              </>
-            )}
-            {selected.linkedinCheck?.assessment && (
-              <>
-                <h3 style={{ marginTop: "1rem" }}>LinkedIn profile check</h3>
-                <LinkedinVerdict check={selected.linkedinCheck} />
-              </>
-            )}
+            <VerdictBand
+              verdicts={[
+                {
+                  label: "Resume fit",
+                  score: Number(selected.fitScore) || 0,
+                  note: selected.rating,
+                  tone: selected.rating === "Strong" ? "green" : selected.rating === "Weak" ? "red" : "amber",
+                },
+                {
+                  label: "GitHub portfolio",
+                  score: selected.portfolio ? selected.portfolio.portfolioScore : null,
+                  note: selected.portfolio
+                    ? `${selected.portfolio.rating} · ${selected.portfolio.activityLevel.toLowerCase()}`
+                    : "Not assessed",
+                  tone: selected.portfolio ? toneForScore(selected.portfolio.portfolioScore) : "grey",
+                },
+                {
+                  label: "LinkedIn",
+                  score:
+                    selected.linkedinCheck?.assessment && selected.linkedinCheck.assessment.known > 0
+                      ? selected.linkedinCheck.assessment.score
+                      : null,
+                  note:
+                    selected.linkedinCheck?.assessment && selected.linkedinCheck.assessment.known > 0
+                      ? selected.linkedinCheck.assessment.verdict
+                      : "Not checked",
+                  tone:
+                    selected.linkedinCheck?.assessment && selected.linkedinCheck.assessment.known > 0
+                      ? (verdictClass(selected.linkedinCheck.assessment.verdict) as "green" | "amber" | "red" | "grey")
+                      : "grey",
+                },
+              ]}
+            />
+            <div style={{ marginTop: "1rem" }}>
+              <AssessmentDetail a={selected} />
+              {selected.portfolio && (
+                <Section
+                  title="GitHub portfolio vs JD"
+                  icon="💻"
+                  index={3}
+                  defaultOpen
+                  summary={
+                    <span className={`pill ${toneForScore(selected.portfolio.portfolioScore)}`}>
+                      {selected.portfolio.relevantRepos.length} relevant repos
+                    </span>
+                  }
+                >
+                  <PortfolioDetail
+                    portfolio={selected.portfolio}
+                    profile={selected.githubProfile ?? null}
+                    githubUrl={selected.githubUrl || ""}
+                  />
+                </Section>
+              )}
+              {selected.linkedinCheck?.assessment && (
+                <Section
+                  title="LinkedIn profile check"
+                  icon="🔗"
+                  index={4}
+                  summary={
+                    <span className={`pill ${verdictClass(selected.linkedinCheck.assessment.verdict)}`}>
+                      {selected.linkedinCheck.assessment.verdict}
+                    </span>
+                  }
+                >
+                  <LinkedinVerdict check={selected.linkedinCheck} />
+                </Section>
+              )}
+            </div>
           </>
         )}
       </Modal>

@@ -13,6 +13,7 @@ import RecruiterPerformance from "./pages/RecruiterPerformance";
 import ClientTracker from "./pages/ClientTracker";
 import CandidatePool from "./pages/CandidatePool";
 import Preferences from "./pages/Preferences";
+import DesignPreview from "./pages/DesignPreview";
 
 export default function App() {
   const { loading } = useAuth();
@@ -29,6 +30,8 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
+      {/* Design harness for the assessment layout — dev server only. */}
+      {import.meta.env.DEV && <Route path="/design-preview" element={<DesignPreview />} />}
       <Route
         element={
           <ProtectedRoute>

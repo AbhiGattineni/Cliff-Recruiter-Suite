@@ -11,7 +11,6 @@ export default function PortfolioDetail({
   profile?: GithubProfile | null;
   githubUrl?: string;
 }) {
-  const ratingClass = portfolio.rating === "Strong" ? "green" : portfolio.rating === "Weak" ? "red" : "amber";
   const activityClass =
     portfolio.activityLevel === "Active" ? "green" : portfolio.activityLevel === "Dormant" ? "red" : "amber";
   const evidenceClass = (s: string) => (s === "evidenced" ? "green" : s === "partial" ? "amber" : "red");
@@ -20,7 +19,6 @@ export default function PortfolioDetail({
   return (
     <div>
       <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center", marginBottom: "0.6rem" }}>
-        <span className={`pill ${ratingClass}`}>Portfolio: {portfolio.portfolioScore}/100 · {portfolio.rating}</span>
         <span className={`pill ${activityClass}`}>{portfolio.activityLevel}</span>
         {profile && (
           <span className="muted" style={{ fontSize: "0.85rem" }}>

@@ -28,6 +28,8 @@ import { verdictClass } from "../lib/linkedinScore";
 import AssessmentDetail from "../components/AssessmentDetail";
 import PortfolioDetail from "../components/PortfolioDetail";
 import LinkedinCheck from "../components/LinkedinCheck";
+import Section from "../components/Section";
+import VerdictBand, { toneForScore } from "../components/VerdictBand";
 import Modal from "../components/Modal";
 
 const PROVIDER_ORDER: ProviderId[] = ["ollama", "openai"];
@@ -379,8 +381,21 @@ export default function ResumeParsing() {
 
       {result && (
         <div className="card">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
-            <h2 style={{ marginBottom: 0 }}>{result.candidateName || "Candidate"}</h2>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "0.5rem" }}>
+            <div>
+              <h2 style={{ marginBottom: 0 }}>{result.candidateName || "Candidate"}</h2>
+              <p className="muted" style={{ margin: "0.15rem 0 0", fontSize: "0.85rem" }}>
+                {[
+                  result.extracted?.currentTitle,
+                  result.extracted?.totalExperienceYears != null
+                    ? `${result.extracted.totalExperienceYears} yrs`
+                    : null,
+                  result.extracted?.location,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            </div>
             {savedId ? (
               <span className="pill green">✓ Saved to Resume Reports</span>
             ) : duplicate ? (
@@ -511,50 +526,123 @@ export default function ResumeParsing() {
             enter (it has no public API for profile data). Full detail for both is below the fit assessment.
           </p>
 
+          {/* ---- Headline verdicts ---- */}
           <div style={{ marginTop: "1rem" }}>
-            <AssessmentDetail a={result} />
+            <VerdictBand
+              verdicts={[
+                {
+                  label: "Resume fit",
+                  score: Number(result.fitScore) || 0,
+                  note: result.rating,
+                  tone: result.rating === "Strong" ? "green" : result.rating === "Weak" ? "red" : "amber",
+                },
+                {
+                  label: "GitHub portfolio",
+                  score: pf ? pf.portfolio.portfolioScore : null,
+                  note: pfBusy
+                    ? "Assessing…"
+                    : pf
+                      ? `${pf.portfolio.rating} · ${pf.portfolio.activityLevel.toLowerCase()}`
+                      : githubUrl ? "Not assessed" : "No profile",
+                  tone: pf ? toneForScore(pf.portfolio.portfolioScore) : "grey",
+                },
+                {
+                  label: "LinkedIn",
+                  score: liCheck?.assessment && liCheck.assessment.known > 0 ? liCheck.assessment.score : null,
+                  note:
+                    liCheck?.assessment && liCheck.assessment.known > 0
+                      ? liCheck.assessment.verdict
+                      : linkedinUrl ? "Not checked" : "No profile",
+                  tone:
+                    liCheck?.assessment && liCheck.assessment.known > 0
+                      ? (verdictClass(liCheck.assessment.verdict) as "green" | "amber" | "red" | "grey")
+                      : "grey",
+                },
+              ]}
+            />
           </div>
 
-          {/* ---- GitHub portfolio assessment ---- */}
-          <h3 style={{ marginTop: "1rem" }}>GitHub portfolio vs JD</h3>
-          {pfBusy ? (
-            <p className="muted" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              <span className="spinner dark" /> Fetching repositories and assessing against the job description…
-            </p>
-          ) : pfError ? (
-            <div className="alert error">
-              {pfError}{" "}
-              {githubUrl && (
-                <button className="btn ghost" style={{ marginLeft: "0.5rem" }} onClick={() => runPortfolio(githubUrl)}>
-                  Retry
-                </button>
-              )}
-            </div>
-          ) : pf ? (
-            <PortfolioDetail portfolio={pf.portfolio} profile={pf.profile} githubUrl={githubUrl} />
-          ) : (
-            <p className="muted" style={{ fontSize: "0.9rem" }}>
-              No GitHub profile attached yet — use <strong>Find on GitHub</strong> or paste a profile URL above.
-            </p>
-          )}
+          <div style={{ marginTop: "1rem" }}>
+            <AssessmentDetail a={result} />
 
-          {/* ---- LinkedIn credibility check ---- */}
-          <h3 style={{ marginTop: "1.25rem" }}>LinkedIn profile check</h3>
-          {linkedinUrl ? (
-            <LinkedinCheck
-              key={linkedinUrl}
-              profileUrl={linkedinUrl}
-              resumeYears={Number(result.extracted?.totalExperienceYears) || null}
-              initial={liCheck}
-              onChange={onLinkedinCheck}
-            />
-          ) : (
-            <p className="muted" style={{ fontSize: "0.9rem" }}>
-              Add a LinkedIn URL above to run the credibility check (account age, connections,
-              recommendations, work history). A profile created in the last few months with none of these
-              is flagged <strong>High risk</strong>.
-            </p>
-          )}
+            {/* ---- GitHub portfolio assessment ---- */}
+            <Section
+              title="GitHub portfolio vs JD"
+              icon="💻"
+              index={3}
+              defaultOpen
+              summary={
+                pfBusy ? (
+                  <span className="pill grey">Assessing…</span>
+                ) : pf ? (
+                  <span className={`pill ${toneForScore(pf.portfolio.portfolioScore)}`}>
+                    {pf.portfolio.relevantRepos.length} relevant repos
+                  </span>
+                ) : (
+                  <span className="pill grey">None</span>
+                )
+              }
+            >
+              {pfBusy ? (
+                <div>
+                  <p className="muted" style={{ marginTop: 0, fontSize: "0.88rem" }}>
+                    Fetching repositories and assessing them against the job description…
+                  </p>
+                  <div className="skel" style={{ width: "92%" }} />
+                  <div className="skel" style={{ width: "78%" }} />
+                  <div className="skel" style={{ width: "85%" }} />
+                  <div className="skel" style={{ width: "60%", marginBottom: 0 }} />
+                </div>
+              ) : pfError ? (
+                <div className="alert error" style={{ marginBottom: 0 }}>
+                  {pfError}{" "}
+                  {githubUrl && (
+                    <button className="btn ghost" style={{ marginLeft: "0.5rem" }} onClick={() => runPortfolio(githubUrl)}>
+                      Retry
+                    </button>
+                  )}
+                </div>
+              ) : pf ? (
+                <PortfolioDetail portfolio={pf.portfolio} profile={pf.profile} githubUrl={githubUrl} />
+              ) : (
+                <p className="muted" style={{ fontSize: "0.9rem", margin: 0 }}>
+                  No GitHub profile attached yet — use <strong>Find on GitHub</strong> or paste a profile URL above.
+                </p>
+              )}
+            </Section>
+
+            {/* ---- LinkedIn credibility check ---- */}
+            <Section
+              title="LinkedIn profile check"
+              icon="🔗"
+              index={4}
+              summary={
+                liCheck?.assessment && liCheck.assessment.known > 0 ? (
+                  <span className={`pill ${verdictClass(liCheck.assessment.verdict)}`}>
+                    {liCheck.assessment.verdict}
+                  </span>
+                ) : (
+                  <span className="pill grey">{linkedinUrl ? "Not checked" : "No profile"}</span>
+                )
+              }
+            >
+              {linkedinUrl ? (
+                <LinkedinCheck
+                  key={linkedinUrl}
+                  profileUrl={linkedinUrl}
+                  resumeYears={Number(result.extracted?.totalExperienceYears) || null}
+                  initial={liCheck}
+                  onChange={onLinkedinCheck}
+                />
+              ) : (
+                <p className="muted" style={{ fontSize: "0.9rem", margin: 0 }}>
+                  Add a LinkedIn URL above to run the credibility check (account age, connections,
+                  recommendations, work history). A profile created in the last few months with none of these
+                  is flagged <strong>High risk</strong>.
+                </p>
+              )}
+            </Section>
+          </div>
         </div>
       )}
 
