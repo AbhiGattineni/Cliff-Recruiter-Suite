@@ -11,10 +11,22 @@ import {
   ResumeAssessment,
   DuplicateInfo,
   TokenUsage,
+  ReportExtras,
 } from "../lib/resume";
+import { extractProfileLinks, normalizeGithubUrl, normalizeLinkedinUrl } from "../lib/links";
+import {
+  searchGithubUsers,
+  assessGithubPortfolio,
+  updateResumeReport,
+  GithubProfile,
+  PortfolioResult,
+} from "../lib/github";
 import { friendlyError } from "../lib/errors";
 import { extractResumeText, ACCEPTED_RESUME_TYPES } from "../lib/resumeFile";
+import { LinkedinCheck as StoredLinkedinCheck } from "../lib/linkedin";
 import AssessmentDetail from "../components/AssessmentDetail";
+import PortfolioDetail from "../components/PortfolioDetail";
+import LinkedinCheck from "../components/LinkedinCheck";
 import Modal from "../components/Modal";
 
 const PROVIDER_ORDER: ProviderId[] = ["ollama", "openai"];
@@ -35,6 +47,22 @@ export default function ResumeParsing() {
   const [duplicate, setDuplicate] = useState<DuplicateInfo | null>(null);
   const [usage, setUsage] = useState<TokenUsage | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const savedIdRef = useRef<string | null>(null);
+
+  // Profile links + GitHub portfolio.
+  const [githubUrl, setGithubUrl] = useState(""); // the link the portfolio was assessed against
+  const [ghInput, setGhInput] = useState(""); // editable field (overwrite is applied on demand)
+  const [linkedinUrl, setLinkedinUrl] = useState("");
+  const [liInput, setLiInput] = useState("");
+  const [pf, setPf] = useState<PortfolioResult | null>(null);
+  const [pfBusy, setPfBusy] = useState(false);
+  const [pfError, setPfError] = useState<string | null>(null);
+  const [ghModalOpen, setGhModalOpen] = useState(false);
+  const [ghSearching, setGhSearching] = useState(false);
+  const [ghMatches, setGhMatches] = useState<GithubProfile[] | null>(null);
+  const [ghManual, setGhManual] = useState("");
+  const [liCheck, setLiCheck] = useState<StoredLinkedinCheck | null>(null);
+  const liSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const qc = useQueryClient();
   const summaryQ = useQuery({ queryKey: ["llmUsageSummary"], queryFn: () => getLlmUsageSummary() });
@@ -83,10 +111,11 @@ export default function ResumeParsing() {
     }
   };
 
-  const doSave = async (assessment: ResumeAssessment, u: TokenUsage | null) => {
+  const doSave = async (assessment: ResumeAssessment, u: TokenUsage | null, extras?: ReportExtras) => {
     try {
-      const id = await saveResumeReport(assessment, provider, model, jd, u);
+      const id = await saveResumeReport(assessment, provider, model, jd, u, extras);
       setSavedId(id);
+      savedIdRef.current = id;
       // Refresh anything that reflects the new report.
       qc.invalidateQueries({ queryKey: ["llmUsageSummary"] });
       qc.invalidateQueries({ queryKey: ["resumeReports"] });
@@ -96,12 +125,111 @@ export default function ResumeParsing() {
     }
   };
 
+  /** Fetch + assess the GitHub portfolio for a profile URL, then persist it. */
+  const runPortfolio = async (gh: string) => {
+    setPfBusy(true);
+    setPfError(null);
+    setPf(null);
+    setGithubUrl(gh);
+    setGhInput(gh);
+    try {
+      const r = await assessGithubPortfolio(gh, jd, provider, model);
+      setPf(r);
+      if (savedIdRef.current) {
+        await updateResumeReport(savedIdRef.current, {
+          githubUrl: gh,
+          portfolio: r.portfolio,
+          githubProfile: r.profile,
+        });
+        qc.invalidateQueries({ queryKey: ["resumeReports"] });
+      }
+      qc.invalidateQueries({ queryKey: ["llmUsageSummary"] });
+    } catch (err) {
+      setPfError(friendlyError(err));
+    } finally {
+      setPfBusy(false);
+    }
+  };
+
+  /** No GitHub link on the resume — search for likely profiles and let the recruiter confirm. */
+  const findOnGithub = async (assessment: ResumeAssessment) => {
+    setGhModalOpen(true);
+    setGhSearching(true);
+    setGhMatches(null);
+    setGhManual("");
+    try {
+      const matches = await searchGithubUsers(
+        assessment.candidateName ?? "",
+        String(assessment.extracted?.email ?? "")
+      );
+      setGhMatches(matches);
+    } catch {
+      setGhMatches([]);
+    } finally {
+      setGhSearching(false);
+    }
+  };
+
+  /** Recruiter confirmed a profile (from search or pasted) — attach + assess. */
+  const useGithub = (input: string) => {
+    const url = normalizeGithubUrl(input);
+    if (!url) {
+      setPfError("That doesn't look like a GitHub profile URL or username.");
+      return;
+    }
+    setGhModalOpen(false);
+    void runPortfolio(url);
+  };
+
+  /** LinkedIn check edits are frequent (typing) — debounce the persist. */
+  const onLinkedinCheck = (check: StoredLinkedinCheck) => {
+    setLiCheck(check);
+    if (liSaveTimer.current) clearTimeout(liSaveTimer.current);
+    liSaveTimer.current = setTimeout(() => {
+      if (!savedIdRef.current) return;
+      updateResumeReport(savedIdRef.current, { linkedinCheck: check })
+        .then(() => qc.invalidateQueries({ queryKey: ["resumeReports"] }))
+        .catch(() => {
+          /* transient — the check is still in page state and saves on the next edit */
+        });
+    }, 1200);
+  };
+
+  useEffect(() => () => {
+    if (liSaveTimer.current) clearTimeout(liSaveTimer.current);
+  }, []);
+
+  const saveLinkedin = async () => {
+    const url = normalizeLinkedinUrl(liInput) || liInput.trim();
+    setLinkedinUrl(url);
+    setLiInput(url);
+    if (savedIdRef.current) {
+      try {
+        await updateResumeReport(savedIdRef.current, { linkedinUrl: url });
+        qc.invalidateQueries({ queryKey: ["resumeReports"] });
+      } catch (err) {
+        setError(friendlyError(err));
+      }
+    }
+  };
+
   const run = async () => {
     setError(null);
     setResult(null);
     setSavedId(null);
+    savedIdRef.current = null;
     setDuplicate(null);
     setUsage(null);
+    setPf(null);
+    setPfError(null);
+    setPfBusy(false);
+    setGithubUrl("");
+    setGhInput("");
+    setLinkedinUrl("");
+    setLiInput("");
+    setLiCheck(null);
+    setGhMatches(null);
+    setGhModalOpen(false);
     if (resumeText.trim().length < 30) {
       setError("Please add the resume — paste the text or upload a .txt / .docx file.");
       return;
@@ -115,11 +243,27 @@ export default function ResumeParsing() {
       const { assessment, usage, duplicate } = await assessResume(resumeText, jd, provider, model);
       setResult(assessment);
       setUsage(usage);
+
+      // Profile links: regex over the raw text first (verbatim), LLM extraction as fallback.
+      const links = extractProfileLinks(resumeText);
+      const gh = links.github || normalizeGithubUrl(assessment.extracted?.githubUrl);
+      const li = links.linkedin || normalizeLinkedinUrl(assessment.extracted?.linkedinUrl);
+      setGithubUrl(gh);
+      setGhInput(gh);
+      setLinkedinUrl(li);
+      setLiInput(li);
+
       if (duplicate) {
         // Flag first — ask the user what to do before saving.
         setDuplicate(duplicate);
       } else {
-        await doSave(assessment, usage);
+        await doSave(assessment, usage, { githubUrl: gh, linkedinUrl: li });
+      }
+
+      if (gh) {
+        void runPortfolio(gh); // assess in the background while the fit result is shown
+      } else {
+        void findOnGithub(assessment); // confirm-before-attach: recruiter picks the right profile
       }
     } catch (err: unknown) {
       setError(friendlyError(err));
@@ -133,7 +277,7 @@ export default function ResumeParsing() {
       <h1>Resume Parsing</h1>
       <p className="muted" style={{ marginTop: "-0.25rem" }}>
         Paste the resume text or upload a <strong>.txt</strong> or <strong>.docx</strong> file, add a
-        job description, and get a fit assessment.
+        job description, and get a fit assessment — including the candidate&#39;s GitHub portfolio.
       </p>
 
       <div className="card">
@@ -243,7 +387,18 @@ export default function ResumeParsing() {
                 Duplicate found — choose an action
               </button>
             ) : (
-              <button className="btn secondary" onClick={() => doSave(result, usage)}>
+              <button
+                className="btn secondary"
+                onClick={() =>
+                  doSave(result, usage, {
+                    githubUrl,
+                    linkedinUrl,
+                    portfolio: pf?.portfolio,
+                    githubProfile: pf?.profile,
+                    linkedinCheck: liCheck,
+                  })
+                }
+              >
                 Save to reports
               </button>
             )}
@@ -269,6 +424,106 @@ export default function ResumeParsing() {
           <div style={{ marginTop: "1rem" }}>
             <AssessmentDetail a={result} />
           </div>
+
+          {/* ---- Profile links (editable; GitHub re-assessed only on demand) ---- */}
+          <h3 style={{ marginTop: "1.25rem" }}>Profile links</h3>
+          <div className="row">
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>GitHub profile</label>
+              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                <input
+                  value={ghInput}
+                  onChange={(e) => setGhInput(e.target.value)}
+                  placeholder="https://github.com/username"
+                  style={{ flex: 1 }}
+                />
+                {ghInput.trim() && normalizeGithubUrl(ghInput) !== githubUrl ? (
+                  <button className="btn secondary" onClick={() => useGithub(ghInput)} disabled={pfBusy}>
+                    {githubUrl ? "Overwrite & re-assess" : "Assess portfolio"}
+                  </button>
+                ) : githubUrl ? (
+                  <button className="btn ghost" onClick={() => runPortfolio(githubUrl)} disabled={pfBusy}>
+                    ⟳ Re-assess
+                  </button>
+                ) : (
+                  <button className="btn secondary" onClick={() => findOnGithub(result)} disabled={pfBusy}>
+                    🔎 Find on GitHub
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>LinkedIn profile</label>
+              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                <input
+                  value={liInput}
+                  onChange={(e) => setLiInput(e.target.value)}
+                  placeholder="https://linkedin.com/in/username"
+                  style={{ flex: 1 }}
+                />
+                {liInput.trim() !== linkedinUrl && (
+                  <button className="btn secondary" onClick={saveLinkedin}>
+                    Save link
+                  </button>
+                )}
+                {linkedinUrl && liInput.trim() === linkedinUrl && (
+                  <a className="btn ghost" href={linkedinUrl} target="_blank" rel="noreferrer">
+                    Open ↗
+                  </a>
+                )}
+              </div>
+              {!linkedinUrl && (
+                <p className="muted" style={{ fontSize: "0.8rem", margin: "0.35rem 0 0" }}>
+                  No LinkedIn found on the resume — ask the candidate and paste it here.
+                </p>
+              )}
+            </div>
+          </div>
+          <p className="muted" style={{ fontSize: "0.8rem", marginTop: "0.4rem" }}>
+            LinkedIn is stored as a link for manual review (LinkedIn has no public API for profile data);
+            GitHub is assessed automatically below.
+          </p>
+
+          {/* ---- GitHub portfolio assessment ---- */}
+          <h3 style={{ marginTop: "1rem" }}>GitHub portfolio vs JD</h3>
+          {pfBusy ? (
+            <p className="muted" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <span className="spinner dark" /> Fetching repositories and assessing against the job description…
+            </p>
+          ) : pfError ? (
+            <div className="alert error">
+              {pfError}{" "}
+              {githubUrl && (
+                <button className="btn ghost" style={{ marginLeft: "0.5rem" }} onClick={() => runPortfolio(githubUrl)}>
+                  Retry
+                </button>
+              )}
+            </div>
+          ) : pf ? (
+            <PortfolioDetail portfolio={pf.portfolio} profile={pf.profile} githubUrl={githubUrl} />
+          ) : (
+            <p className="muted" style={{ fontSize: "0.9rem" }}>
+              No GitHub profile attached yet — use <strong>Find on GitHub</strong> or paste a profile URL above.
+            </p>
+          )}
+
+          {/* ---- LinkedIn credibility check ---- */}
+          <h3 style={{ marginTop: "1.25rem" }}>LinkedIn profile check</h3>
+          {linkedinUrl ? (
+            <LinkedinCheck
+              key={linkedinUrl}
+              profileUrl={linkedinUrl}
+              resumeYears={Number(result.extracted?.totalExperienceYears) || null}
+              initial={liCheck}
+              onChange={onLinkedinCheck}
+            />
+          ) : (
+            <p className="muted" style={{ fontSize: "0.9rem" }}>
+              Add a LinkedIn URL above to run the credibility check (account age, connections,
+              recommendations, work history). A profile created in the last few months with none of these
+              is flagged <strong>High risk</strong>.
+            </p>
+          )}
         </div>
       )}
 
@@ -295,7 +550,15 @@ export default function ResumeParsing() {
             <button
               className="btn"
               onClick={async () => {
-                if (result) await doSave(result, usage);
+                if (result) {
+                  await doSave(result, usage, {
+                    githubUrl,
+                    linkedinUrl,
+                    portfolio: pf?.portfolio,
+                    githubProfile: pf?.profile,
+                    linkedinCheck: liCheck,
+                  });
+                }
                 setDuplicate(null);
               }}
             >
@@ -322,6 +585,71 @@ export default function ResumeParsing() {
             </p>
           </div>
         )}
+      </Modal>
+
+      {/* GitHub confirm-before-attach */}
+      <Modal
+        open={ghModalOpen}
+        onClose={() => setGhModalOpen(false)}
+        title="Confirm the candidate's GitHub profile"
+        footer={
+          <button className="btn ghost" onClick={() => setGhModalOpen(false)}>
+            Skip — no GitHub
+          </button>
+        }
+      >
+        <p style={{ marginTop: 0 }}>
+          No GitHub link was found on the resume.{" "}
+          {ghSearching
+            ? "Searching GitHub for likely profiles…"
+            : ghMatches && ghMatches.length > 0
+              ? "Pick the right profile below, or paste one — a wrong match would assess someone else's code."
+              : "No likely matches were found — paste the profile URL if you have it."}
+        </p>
+        {ghSearching && (
+          <p className="muted" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <span className="spinner dark" /> Searching…
+          </p>
+        )}
+        {!ghSearching &&
+          (ghMatches ?? []).map((m2) => (
+            <div
+              key={m2.login}
+              style={{
+                display: "flex", gap: "0.75rem", alignItems: "center",
+                padding: "0.55rem 0", borderBottom: "1px solid var(--brand-light)",
+              }}
+            >
+              {m2.avatarUrl && (
+                <img src={m2.avatarUrl} alt="" width={40} height={40} style={{ borderRadius: "50%", flexShrink: 0 }} />
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div>
+                  <strong>{m2.name || m2.login}</strong>{" "}
+                  <a href={m2.url} target="_blank" rel="noreferrer">@{m2.login} ↗</a>
+                </div>
+                <div className="muted" style={{ fontSize: "0.82rem" }}>
+                  {[m2.bio, m2.location, `${m2.publicRepos} repos`, `${m2.followers} followers`]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </div>
+              </div>
+              <button className="btn secondary" onClick={() => useGithub(m2.url)}>
+                Use this profile
+              </button>
+            </div>
+          ))}
+        <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.9rem" }}>
+          <input
+            value={ghManual}
+            onChange={(e) => setGhManual(e.target.value)}
+            placeholder="Paste GitHub URL or username…"
+            style={{ flex: 1 }}
+          />
+          <button className="btn" onClick={() => useGithub(ghManual)} disabled={!ghManual.trim()}>
+            Use this URL
+          </button>
+        </div>
       </Modal>
     </div>
   );

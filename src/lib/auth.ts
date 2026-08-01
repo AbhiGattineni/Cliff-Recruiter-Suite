@@ -5,6 +5,7 @@
 // or Firebase's built-in email verification).
 
 import { httpsCallable } from "firebase/functions";
+import { sendPasswordResetEmail } from "firebase/auth";
 import { auth, functions } from "../firebase";
 import { ensureConfigured } from "./errors";
 
@@ -32,6 +33,15 @@ export function currentActor(): Actor {
   const u = auth.currentUser;
   const email = u?.email ?? "";
   return { name: u?.displayName || email || "", email };
+}
+
+/**
+ * Email a password-reset link (Firebase-hosted). Passwords are stored as
+ * one-way hashes, so a forgotten password can only be reset, never looked up.
+ */
+export async function requestPasswordReset(email: string): Promise<void> {
+  ensureConfigured();
+  await sendPasswordResetEmail(auth, email.trim());
 }
 
 interface RequestOtpResult {

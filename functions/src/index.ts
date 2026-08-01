@@ -13,7 +13,9 @@ import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
 import { fetchReport, probeTotal } from "./ceipal.js";
 import { readCache, readCacheMeta, writeCache, cacheEnvelope } from "./ceipalCache.js";
-import { assessResume, matchRolesToJd } from "./llm.js";
+import { assessResume, matchRolesToJd, assessPortfolio } from "./llm.js";
+import { searchUsers, buildPortfolio, parseGithubUsername } from "./github.js";
+import { fetchLinkedinSignals, providerConfigured, EMPTY_SIGNALS } from "./linkedin.js";
 import {
   isAllowedEmail,
   allowedDomain,
@@ -36,6 +38,12 @@ const CEIPAL_PASSWORD = defineSecret("CEIPAL_PASSWORD");
 const LLM_API_KEY = defineSecret("LLM_API_KEY"); // Ollama Cloud key
 const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY"); // OpenAI key
 const SMTP_PASS = defineSecret("SMTP_PASS");
+// Optional GitHub PAT — raises the API rate limit from 60 to 5000 req/hr.
+// A "PLACEHOLDER" value means unauthenticated requests are used.
+const GITHUB_TOKEN = defineSecret("GITHUB_TOKEN");
+// Optional commercial LinkedIn profile-data provider (LinkedIn itself has no
+// public API for third-party profiles). Unset = recruiter enters signals by hand.
+const LINKEDIN_API_KEY = defineSecret("LINKEDIN_API_KEY");
 
 const commonOpts = {
   region: "us-central1",
@@ -600,6 +608,104 @@ export const parseResume = onCall(
   }
 );
 
+// ---- GitHub portfolio -------------------------------------------------------
+
+// Search GitHub for likely profiles for a candidate (email first, then name).
+// The recruiter confirms the right match in the UI before anything is attached.
+export const githubSearch = onCall(
+  { ...commonOpts, secrets: [GITHUB_TOKEN], timeoutSeconds: 60 },
+  async (request) => {
+    void request; // auth on hold (open mode)
+    const name = String(request.data?.name ?? "").trim();
+    const email = String(request.data?.email ?? "").trim();
+    if (!name && !email) {
+      throw new HttpsError("invalid-argument", "Provide a candidate name or email to search GitHub.");
+    }
+    try {
+      const matches = await searchUsers(name, email, GITHUB_TOKEN.value());
+      return { ok: true, matches };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+);
+
+// Fetch a GitHub profile's repos/READMEs and assess the portfolio against a JD.
+export const githubPortfolio = onCall(
+  { ...commonOpts, secrets: [GITHUB_TOKEN, LLM_API_KEY, OPENAI_API_KEY], timeoutSeconds: 180, memory: "512MiB" },
+  async (request) => {
+    void request; // auth on hold (open mode)
+    const github = String(request.data?.github ?? "");
+    const jobDescription = String(request.data?.jobDescription ?? "");
+    const provider: ProviderId = request.data?.provider === "openai" ? "openai" : "ollama";
+    const model: string = request.data?.model ?? "";
+    const username = parseGithubUsername(github);
+    if (!username) throw new HttpsError("invalid-argument", "Provide a GitHub profile URL or username.");
+    if (jobDescription.trim().length < 20) throw new HttpsError("invalid-argument", "Provide the job description.");
+    const config = resolveLlm(provider, model); // throws failed-precondition if not configured
+    try {
+      const data = await buildPortfolio(username, GITHUB_TOKEN.value());
+      const { portfolio, usage } = await assessPortfolio(data.summaryText, jobDescription, config);
+      await logLlmCall("Portfolio assessment", provider, config.model, usage);
+      return { ok: true, profile: data.profile, portfolio, usage };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+);
+
+// Auto-fill LinkedIn credibility signals from a commercial data provider, when
+// one is configured. Without a provider this reports configured:false and the
+// recruiter fills the signals in by hand — the scoring is the same either way.
+export const linkedinLookup = onCall(
+  { ...commonOpts, secrets: [LINKEDIN_API_KEY], timeoutSeconds: 60 },
+  async (request) => {
+    void request; // auth on hold (open mode)
+    const profileUrl = String(request.data?.profileUrl ?? "").trim();
+    if (!/linkedin\.com\/(in|pub)\//i.test(profileUrl)) {
+      throw new HttpsError("invalid-argument", "Provide a LinkedIn profile URL.");
+    }
+    const apiKey = LINKEDIN_API_KEY.value();
+    if (!providerConfigured(apiKey)) {
+      return {
+        ok: true,
+        configured: false,
+        signals: EMPTY_SIGNALS,
+        message:
+          "No LinkedIn data provider is configured. LinkedIn has no public API for third-party profiles, so enter the signals from the profile manually.",
+      };
+    }
+    try {
+      const signals = await fetchLinkedinSignals(profileUrl, apiKey, Date.now());
+      return { ok: true, configured: true, signals };
+    } catch (err) {
+      return { ok: false, configured: true, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+);
+
+// Patch profile links / portfolio onto an already-saved resume report (the
+// portfolio finishes after the report auto-saves, and links are editable).
+export const updateResumeReport = onCall(
+  { ...commonOpts, timeoutSeconds: 30 },
+  async (request) => {
+    void request; // auth on hold (open mode)
+    const id = String(request.data?.id ?? "");
+    if (!id) throw new HttpsError("invalid-argument", "id is required.");
+    const d = (request.data ?? {}) as Record<string, unknown>;
+    const patch: Record<string, unknown> = {};
+    if ("githubUrl" in d) patch.githubUrl = String(d.githubUrl ?? "");
+    if ("linkedinUrl" in d) patch.linkedinUrl = String(d.linkedinUrl ?? "");
+    if (d.portfolio && typeof d.portfolio === "object") patch.portfolio = d.portfolio;
+    if (d.githubProfile && typeof d.githubProfile === "object") patch.githubProfile = d.githubProfile;
+    if (d.linkedinCheck && typeof d.linkedinCheck === "object") patch.linkedinCheck = d.linkedinCheck;
+    if (!Object.keys(patch).length) return { ok: true };
+    patch.updatedAt = FieldValue.serverTimestamp();
+    await getFirestore().collection("resumeReports").doc(id).set(patch, { merge: true });
+    return { ok: true };
+  }
+);
+
 // Who generated this record. Prefer the verified auth token (trustworthy);
 // fall back to the client-supplied `by` for the brief window after signup
 // before the token's `name`/`email` claims propagate.
@@ -636,6 +742,13 @@ export const saveResumeReport = onCall(
       jobDescriptionPreview: jobDescription.slice(0, 600),
       emailNorm,
       phoneNorm,
+      githubUrl: String(request.data?.githubUrl ?? ""),
+      linkedinUrl: String(request.data?.linkedinUrl ?? ""),
+      portfolio: request.data?.portfolio && typeof request.data.portfolio === "object" ? request.data.portfolio : null,
+      githubProfile:
+        request.data?.githubProfile && typeof request.data.githubProfile === "object" ? request.data.githubProfile : null,
+      linkedinCheck:
+        request.data?.linkedinCheck && typeof request.data.linkedinCheck === "object" ? request.data.linkedinCheck : null,
       promptTokens: Number(usage?.promptTokens) || 0,
       completionTokens: Number(usage?.completionTokens) || 0,
       totalTokens: Number(usage?.totalTokens) || 0,

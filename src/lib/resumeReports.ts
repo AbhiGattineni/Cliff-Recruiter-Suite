@@ -4,6 +4,8 @@ import { httpsCallable } from "firebase/functions";
 import { functions } from "../firebase";
 import { ensureConfigured } from "./errors";
 import { ResumeAssessment, ProviderId } from "./resume";
+import { PortfolioAssessment, GithubProfile } from "./github";
+import { LinkedinCheck } from "./linkedin";
 
 export interface ResumeReport extends ResumeAssessment {
   id: string;
@@ -17,6 +19,11 @@ export interface ResumeReport extends ResumeAssessment {
   cost?: number; // estimated USD
   createdByName?: string;
   createdByEmail?: string;
+  githubUrl?: string;
+  linkedinUrl?: string;
+  portfolio?: PortfolioAssessment | null;
+  githubProfile?: GithubProfile | null;
+  linkedinCheck?: LinkedinCheck | null;
 }
 
 interface ListResponse {

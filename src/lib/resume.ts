@@ -34,6 +34,8 @@ export interface ResumeAssessment {
     totalExperienceYears?: number | string;
     currentTitle?: string;
     location?: string;
+    githubUrl?: string;
+    linkedinUrl?: string;
   };
 }
 
@@ -194,20 +196,38 @@ export async function assessResume(
   return { assessment: payload.assessment, usage: payload.usage ?? null, duplicate: payload.duplicate ?? null };
 }
 
+// Profile links + portfolio saved alongside the assessment (loose-typed here to
+// avoid a circular import with lib/github.ts, which imports from this file).
+export interface ReportExtras {
+  githubUrl?: string;
+  linkedinUrl?: string;
+  portfolio?: unknown;
+  githubProfile?: unknown;
+  linkedinCheck?: unknown;
+}
+
 /** Save an already-computed assessment to the reports history. Returns the id. */
 export async function saveResumeReport(
   assessment: ResumeAssessment,
   provider: ProviderId,
   model: string,
   jobDescription: string,
-  usage: TokenUsage | null
+  usage: TokenUsage | null,
+  extras?: ReportExtras
 ): Promise<string> {
   ensureConfigured();
   const callable = httpsCallable<
-    { assessment: ResumeAssessment; provider: ProviderId; model: string; jobDescription: string; usage: TokenUsage | null; by: Actor },
+    {
+      assessment: ResumeAssessment;
+      provider: ProviderId;
+      model: string;
+      jobDescription: string;
+      usage: TokenUsage | null;
+      by: Actor;
+    } & ReportExtras,
     { ok: boolean; reportId?: string }
   >(functions, "saveResumeReport");
-  const res = await callable({ assessment, provider, model, jobDescription, usage, by: currentActor() });
+  const res = await callable({ assessment, provider, model, jobDescription, usage, by: currentActor(), ...extras });
   return res.data?.reportId ?? "";
 }
 

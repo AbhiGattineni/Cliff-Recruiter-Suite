@@ -6,6 +6,8 @@ import { aiPercentOf, getLlmUsageSummary } from "../lib/resume";
 import { downloadResumeReportPdf } from "../lib/resumeReportPdf";
 import { friendlyError } from "../lib/errors";
 import AssessmentDetail from "../components/AssessmentDetail";
+import PortfolioDetail from "../components/PortfolioDetail";
+import { LinkedinVerdict } from "../components/LinkedinCheck";
 import Modal from "../components/Modal";
 import LlmUsagePanel from "../components/LlmUsagePanel";
 import Pagination, { usePagination } from "../components/Pagination";
@@ -162,6 +164,39 @@ export default function ResumeReports() {
               )}
             </p>
             <AssessmentDetail a={selected} />
+            {(selected.githubUrl || selected.linkedinUrl) && (
+              <>
+                <h3 style={{ marginTop: "1rem" }}>Profile links</h3>
+                <p style={{ marginTop: 0 }}>
+                  {selected.githubUrl && (
+                    <a href={selected.githubUrl} target="_blank" rel="noreferrer" style={{ marginRight: "1rem" }}>
+                      GitHub ↗
+                    </a>
+                  )}
+                  {selected.linkedinUrl && (
+                    <a href={selected.linkedinUrl} target="_blank" rel="noreferrer">
+                      LinkedIn ↗
+                    </a>
+                  )}
+                </p>
+              </>
+            )}
+            {selected.portfolio && (
+              <>
+                <h3 style={{ marginTop: "1rem" }}>GitHub portfolio vs JD</h3>
+                <PortfolioDetail
+                  portfolio={selected.portfolio}
+                  profile={selected.githubProfile ?? null}
+                  githubUrl={selected.githubUrl || ""}
+                />
+              </>
+            )}
+            {selected.linkedinCheck?.assessment && (
+              <>
+                <h3 style={{ marginTop: "1rem" }}>LinkedIn profile check</h3>
+                <LinkedinVerdict check={selected.linkedinCheck} />
+              </>
+            )}
           </>
         )}
       </Modal>

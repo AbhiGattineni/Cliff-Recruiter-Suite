@@ -219,6 +219,112 @@ export function downloadResumeReportPdf(r: ResumeReport): void {
     color: MUTED,
   });
 
+  // ---- GitHub portfolio ----
+  const pf = r.portfolio;
+  if (pf) {
+    heading("GitHub portfolio vs JD");
+    const pfColor = ratingColor(pf.rating);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(...pfColor);
+    ensureSpace(16);
+    doc.text(`Portfolio score: ${pf.portfolioScore}/100 — ${pf.rating}  ·  Activity: ${pf.activityLevel}`, margin, y);
+    y += 16;
+    paragraph(pf.summary);
+    if (r.githubUrl) paragraph(`Profile: ${r.githubUrl}`, { size: 9, color: MUTED });
+    if (pf.redFlags?.length) {
+      paragraph("Red flags:", { bold: true, color: RED });
+      bullets(pf.redFlags);
+    }
+    if (pf.relevantRepos?.length) {
+      paragraph("Repositories relevant to this JD:", { bold: true });
+      bullets(
+        pf.relevantRepos.map(
+          (repo) =>
+            `${repo.name}${repo.language ? ` (${repo.language}` : ""}${
+              repo.stars > 0 ? `${repo.language ? ", " : " ("}★${repo.stars}` : ""
+            }${repo.language || repo.stars > 0 ? ")" : ""}${repo.lastPushed ? `, last push ${repo.lastPushed}` : ""} — ${
+              repo.whyRelevant
+            }`
+        )
+      );
+    }
+    if (pf.skillEvidence?.length) {
+      paragraph("Skill evidence in public code:", { bold: true });
+      for (const e of pf.skillEvidence) {
+        ensureSpace(14);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.setTextColor(...INK);
+        const note = e.note ? ` — ${e.note}` : "";
+        const lines = doc.splitTextToSize(`• ${e.skill}${note}`, contentW - 80);
+        lines.forEach((line: string, i: number) => {
+          ensureSpace(14);
+          doc.text(line, margin, y);
+          if (i === 0) {
+            const c = e.status === "evidenced" ? GREEN : e.status === "partial" ? AMBER : RED;
+            doc.setTextColor(...c);
+            doc.setFont("helvetica", "bold");
+            doc.text(e.status, margin + contentW - 70, y);
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(...INK);
+          }
+          y += 14;
+        });
+      }
+    }
+    paragraph(
+      "Based only on public GitHub activity — private and employer work is invisible here.",
+      { size: 8, color: MUTED }
+    );
+  }
+
+  // ---- LinkedIn profile check ----
+  const li = r.linkedinCheck;
+  if (li?.assessment) {
+    heading("LinkedIn profile check");
+    const a = li.assessment;
+    const liColor =
+      a.verdict === "Established" ? GREEN : a.verdict === "High risk" ? RED : a.verdict === "Plausible" ? AMBER : AMBER;
+    ensureSpace(16);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(...liColor);
+    doc.text(
+      `Verdict: ${a.verdict}${a.known > 0 ? ` — ${a.score}/100 across ${a.known} known signals` : ""}`,
+      margin,
+      y
+    );
+    y += 16;
+    if (r.linkedinUrl) paragraph(`Profile: ${r.linkedinUrl}`, { size: 9, color: MUTED });
+    if (a.redFlags?.length) {
+      paragraph("Red flags:", { bold: true, color: RED });
+      bullets(a.redFlags);
+    }
+    const shown = (a.signals ?? []).filter((s) => s.status !== "unknown");
+    if (shown.length) {
+      paragraph("Signals checked:", { bold: true });
+      for (const s of shown) {
+        ensureSpace(14);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.setTextColor(...INK);
+        doc.text(`• ${s.label}: ${s.detail}`, margin, y, { maxWidth: contentW - 80 });
+        const c = s.status === "good" ? GREEN : s.status === "weak" ? AMBER : RED;
+        doc.setTextColor(...c);
+        doc.setFont("helvetica", "bold");
+        doc.text(s.status, margin + contentW - 60, y);
+        y += 14;
+      }
+    }
+    paragraph(
+      `${a.note} LinkedIn has no public API for third-party profiles — signals are ${
+        li.source === "provider" ? "supplied by a licensed data provider" : "read off the profile by the recruiter"
+      }.`,
+      { size: 8, color: MUTED }
+    );
+  }
+
   heading("Extracted details");
   const ex = r.extracted || {};
   const details = [
@@ -227,6 +333,8 @@ export function downloadResumeReportPdf(r: ResumeReport): void {
     ["Experience (years)", ex.totalExperienceYears],
     ["Current title", ex.currentTitle],
     ["Location", ex.location],
+    ["GitHub", r.githubUrl],
+    ["LinkedIn", r.linkedinUrl],
   ].filter(([, v]) => v != null && v !== "");
   if (details.length) {
     for (const [k, v] of details) {

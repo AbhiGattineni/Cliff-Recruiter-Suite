@@ -2,6 +2,7 @@ import { useState, useEffect, FormEvent } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { ensureConfigured, friendlyError } from "../lib/errors";
+import { requestPasswordReset } from "../lib/auth";
 import { isPlaceholderConfig } from "../firebase";
 
 export default function Login() {
@@ -11,6 +12,27 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [resetting, setResetting] = useState(false);
+
+  const onForgot = async () => {
+    setError(null);
+    setNotice(null);
+    if (!email.trim()) {
+      setError("Enter your email address first, then choose “Forgot password”.");
+      return;
+    }
+    setResetting(true);
+    try {
+      ensureConfigured();
+      await requestPasswordReset(email);
+      setNotice(`Password reset link sent to ${email.trim()}. Check your inbox (and spam).`);
+    } catch (err: unknown) {
+      setError(friendlyError(err));
+    } finally {
+      setResetting(false);
+    }
+  };
 
   useEffect(() => {
     if (user) navigate("/", { replace: true });
@@ -44,6 +66,7 @@ export default function Login() {
           </div>
         )}
         {error && <div className="alert error">{error}</div>}
+        {notice && <div className="alert">{notice}</div>}
 
         <div className="field">
           <label htmlFor="email">Email</label>
@@ -70,6 +93,17 @@ export default function Login() {
         <button className="btn" style={{ width: "100%", justifyContent: "center" }} disabled={busy}>
           {busy ? <span className="spinner" /> : "Sign in"}
         </button>
+        <p style={{ fontSize: "0.82rem", marginTop: "0.75rem", marginBottom: 0, textAlign: "center" }}>
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={onForgot}
+            disabled={resetting}
+            style={{ padding: "0.25rem 0.5rem", fontSize: "0.82rem" }}
+          >
+            {resetting ? <span className="spinner dark" /> : null} Forgot password?
+          </button>
+        </p>
         <p className="muted" style={{ fontSize: "0.82rem", marginTop: "1.25rem", marginBottom: 0, textAlign: "center" }}>
           New here? <Link to="/signup">Create an account</Link>
         </p>
