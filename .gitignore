@@ -36,3 +36,6 @@ npm-debug.log*
 
 # Stray PDFs from any test that reaches jsPDF save()
 Resume_Assessment_*.pdf
+
+# Vitest JSON output consumed by CI
+test-results.json

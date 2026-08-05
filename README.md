@@ -1,5 +1,7 @@
 # Cliff Recruiter Suite
 
+[![CI](https://github.com/AbhiGattineni/Cliff-Recruiter-Suite/actions/workflows/ci.yml/badge.svg)](https://github.com/AbhiGattineni/Cliff-Recruiter-Suite/actions/workflows/ci.yml)
+
 Internal web app for **Cliff Services Inc.** with two tools:
 
 1. **Resume Parsing** — paste a resume + a job description, get a fit score, rating, short
