@@ -9,7 +9,10 @@ import PortfolioDetail from "../components/PortfolioDetail";
 import { LinkedinVerdict } from "../components/LinkedinCheck";
 import Section from "../components/Section";
 import VerdictBand, { toneForScore } from "../components/VerdictBand";
+import { useState } from "react";
 import Pagination, { usePagination } from "../components/Pagination";
+import ColumnFilter from "../components/ColumnFilter";
+import { applyColumnFilters, optionsForColumn, activeFilterCount, ColumnSelections } from "../lib/columnFilter";
 import { downloadResumeReportPdf } from "../lib/resumeReportPdf";
 import { scoreLinkedin, verdictClass } from "../lib/linkedinScore";
 
@@ -21,18 +24,63 @@ const DEMO_ROWS = Array.from({ length: 137 }, (_, i) => ({
   status: ["On Hold", "Closed", "Active"][i % 3],
 }));
 
+const DEMO_COLS = ["client", "title", "status"];
+
 function PaginationDemo() {
-  const p = usePagination(DEMO_ROWS, 25, "designPreviewDemo");
+  const [colFilters, setColFilters] = useState<ColumnSelections>({});
+  const cellOf = (r: (typeof DEMO_ROWS)[number], col: string) =>
+    (r as unknown as Record<string, string>)[col];
+  const rows = applyColumnFilters(DEMO_ROWS, colFilters, cellOf);
+  const count = activeFilterCount(colFilters);
+  const setCol = (col: string, values: string[]) =>
+    setColFilters((cur) => {
+      const next = { ...cur };
+      if (values.length) next[col] = values;
+      else delete next[col];
+      return next;
+    });
+  const p = usePagination(rows, 25, "designPreviewDemo");
+
   return (
     <div className="card">
-      <h3 style={{ marginTop: 0 }}>Table paging</h3>
+      <h3 style={{ marginTop: 0 }}>Table paging &amp; column filters</h3>
       <p className="muted" style={{ marginTop: "-0.25rem", fontSize: "0.85rem" }}>
-        {DEMO_ROWS.length} sample rows. The footer dropdown sets rows per page and is remembered per table.
+        {DEMO_ROWS.length} sample rows. Tick values in a column header to narrow the table; the footer
+        dropdown sets rows per page and is remembered per table.
       </p>
+      {count > 0 && (
+        <div className="colf-bar">
+          <strong>Column filters</strong>
+          {Object.entries(colFilters).map(([col, vals]) => (
+            <span className="colf-chip" key={col}>
+              {col}: {vals.length === 1 ? vals[0] : `${vals.length} values`}
+              <button type="button" aria-label={`Clear ${col} filter`} onClick={() => setCol(col, [])}>×</button>
+            </span>
+          ))}
+          <button className="btn ghost" style={{ padding: "0.2rem 0.6rem", fontSize: "0.8rem" }} onClick={() => setColFilters({})}>
+            Clear all
+          </button>
+        </div>
+      )}
       <div className="table-wrap">
         <table className="data">
           <thead>
-            <tr><th style={{ width: 44 }}>#</th><th>Client</th><th>Requirement</th><th>Status</th></tr>
+            <tr>
+              <th style={{ width: 44 }}>#</th>
+              {DEMO_COLS.map((c) => (
+                <th key={c} className="colf-th">
+                  <span className="colf-th-inner">
+                    <span>{c}</span>
+                    <ColumnFilter
+                      column={c}
+                      options={optionsForColumn(DEMO_ROWS, c, colFilters, cellOf)}
+                      selected={colFilters[c] ?? []}
+                      onChange={(v) => setCol(c, v)}
+                    />
+                  </span>
+                </th>
+              ))}
+            </tr>
           </thead>
           <tbody>
             {p.pageItems.map((r, i) => (

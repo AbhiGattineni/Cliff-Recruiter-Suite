@@ -19,6 +19,14 @@ import MultiSelect from "../components/MultiSelect";
 import PieChart from "../components/PieChart";
 import ColumnPicker from "../components/ColumnPicker";
 import Pagination, { usePagination } from "../components/Pagination";
+import ColumnFilter from "../components/ColumnFilter";
+import {
+  applyColumnFilters,
+  optionsForColumn,
+  activeFilterCount,
+  pruneSelections,
+  ColumnSelections,
+} from "../lib/columnFilter";
 import { orderColumns } from "../lib/report/columnMeta";
 import {
   saveReportConfig,
@@ -138,7 +146,32 @@ export default function ReportGeneration() {
     Object.values(selFilters).some((a) => a && a.length > 0) ||
     !!submittedFrom || !!submittedTo || !!createdFrom || !!createdTo;
 
-  const preview = usePagination(filteredRows, 50, "reportPreview");
+  // ---- Per-column header filters (applied on top of the filters above) ----
+  const [colFilters, setColFilters] = useState<ColumnSelections>({});
+  const cellOf = (r: { cells: Record<string, string> }, col: string) => r.cells[col];
+
+  // A hidden column must not keep filtering the table.
+  useEffect(() => {
+    setColFilters((cur) => {
+      const next = pruneSelections(cur, visibleCols);
+      return Object.keys(next).length === Object.keys(cur).length ? cur : next;
+    });
+  }, [visibleCols]);
+
+  const viewRows = useMemo(
+    () => applyColumnFilters(filteredRows, colFilters, cellOf),
+    [filteredRows, colFilters]
+  );
+  const colFilterCount = activeFilterCount(colFilters);
+  const setCol = (col: string, values: string[]) =>
+    setColFilters((cur) => {
+      const next = { ...cur };
+      if (values.length) next[col] = values;
+      else delete next[col];
+      return next;
+    });
+
+  const preview = usePagination(viewRows, 50, "reportPreview");
 
   // Distribution of time-to-submission, bucketed, counted once per job (time-taken
   // is a job-level value repeated on each candidate row → dedupe by Job Code).
@@ -146,7 +179,7 @@ export default function ReportGeneration() {
     const counts = TIME_SLOTS.map(() => TIME_BUCKETS.map(() => 0));
     const seen = new Set<string>();
     let jobs = 0;
-    for (const r of filteredRows) {
+    for (const r of viewRows) {
       const code = r.cells["Job Code"] || "";
       if (code) {
         if (seen.has(code)) continue;
@@ -162,7 +195,7 @@ export default function ReportGeneration() {
       });
     }
     return { counts, jobs };
-  }, [filteredRows]);
+  }, [viewRows]);
 
   const clearFilters = () => {
     setSearch("");
@@ -315,12 +348,12 @@ export default function ReportGeneration() {
         flines.push({ label: "Job created on", value: `${createdFrom || "…"} to ${createdTo || "…"}` });
 
       const blob = await buildWorkbook(
-        { ...result, rows: filteredRows },
+        { ...result, rows: viewRows },
         {
           generatedAt: (result.generatedAt ?? DateTime.now()).toFormat("yyyy-LL-dd HH:mm"),
           generatedBy: currentActor().name,
           scope: maxRecords ? `Latest ${maxRecords} records per report` : "All records",
-          rowCount: filteredRows.length,
+          rowCount: viewRows.length,
           filters: flines,
           columns: visibleCols,
         }
@@ -457,7 +490,7 @@ export default function ReportGeneration() {
               <h2 style={{ marginBottom: 0 }}>Filters</h2>
               <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
                 <span className="muted" style={{ fontSize: "0.85rem" }}>
-                  {filteredRows.length} of {result.rows.length} rows
+                  {viewRows.length} of {result.rows.length} rows
                 </span>
                 {anyFilter && (
                   <button className="btn ghost" style={{ padding: "0.25rem 0.6rem" }} onClick={clearFilters}>
@@ -513,11 +546,11 @@ export default function ReportGeneration() {
           <div className="card">
             <h2>Preview</h2>
             <p className="sub">
-              {filteredRows.length} rows{anyFilter ? " (filtered)" : ""} ·{" "}
+              {viewRows.length} rows{anyFilter || colFilterCount ? " (filtered)" : ""} ·{" "}
               {visibleCols.length} of {COLUMNS.length} columns. Red = overdue 0-submission job,
               <span style={{ background: "#ffe8b3", padding: "0 4px", borderRadius: 3 }}> amber</span> = has
               submissions but none sent to client/vendor (still in our field), peach = NA row. Download
-              exports <strong>all</strong> {filteredRows.length} rows (the whole set, not just this page).
+              exports <strong>all</strong> {viewRows.length} rows (the whole set, not just this page).
             </p>
             {visibleCols.length === 0 ? (
               <div style={{ textAlign: "center", padding: "1.5rem", color: "var(--muted)" }}>
@@ -525,13 +558,37 @@ export default function ReportGeneration() {
               </div>
             ) : (
               <>
+                {colFilterCount > 0 && (
+                  <div className="colf-bar">
+                    <strong>Column filters</strong>
+                    {Object.entries(colFilters).map(([col, vals]) => (
+                      <span className="colf-chip" key={col}>
+                        {col}: {vals.length === 1 ? vals[0] : `${vals.length} values`}
+                        <button type="button" aria-label={`Clear ${col} filter`} onClick={() => setCol(col, [])}>×</button>
+                      </span>
+                    ))}
+                    <button className="btn ghost" style={{ padding: "0.2rem 0.6rem", fontSize: "0.8rem" }} onClick={() => setColFilters({})}>
+                      Clear all
+                    </button>
+                  </div>
+                )}
                 <div className="table-wrap" style={{ maxHeight: "65vh" }}>
                   <table className="data">
                     <thead>
                       <tr>
                         <th style={{ width: 44 }}>#</th>
                         {visibleCols.map((c) => (
-                          <th key={c}>{c}</th>
+                          <th key={c} className="colf-th">
+                            <span className="colf-th-inner">
+                              <span>{c}</span>
+                              <ColumnFilter
+                                column={c}
+                                options={optionsForColumn(filteredRows, c, colFilters, cellOf)}
+                                selected={colFilters[c] ?? []}
+                                onChange={(v) => setCol(c, v)}
+                              />
+                            </span>
+                          </th>
                         ))}
                       </tr>
                     </thead>
@@ -547,7 +604,7 @@ export default function ReportGeneration() {
                           ))}
                         </tr>
                       ))}
-                      {filteredRows.length === 0 && (
+                      {viewRows.length === 0 && (
                         <tr>
                           <td colSpan={visibleCols.length + 1} style={{ textAlign: "center", padding: "1.5rem", color: "var(--muted)" }}>
                             No rows match the current filters.
