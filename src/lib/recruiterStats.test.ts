@@ -272,3 +272,49 @@ describe("index credit for client-side progress", () => {
     expect(s.rows[0].status).toBe("Client Interview");
   });
 });
+
+// ---- Period-scoped target base ---------------------------------------------
+// "2 client submissions per assigned requirement" is a lifetime expectation.
+// Applying it to a one-day window measured a single submission against every
+// requirement the recruiter had ever been assigned, so two recruiters with
+// identical activity scored differently purely on lifetime assignment counts.
+
+describe("period-scoped target base", () => {
+  const oneDay = (recruiter: string) => [
+    ev2(recruiter, `C-${recruiter}`, "Submitted To Vendor", CLIENT_SUB, CLIENT_SUB),
+  ];
+  // Same day's work, wildly different lifetime assignment.
+  const heavy = job({ jobCode: "J1", assignedTo: "Heavy" });
+  const manyJobs = Array.from({ length: 58 }, (_, i) => job({ jobCode: `A${i}`, assignedTo: "Heavy" }));
+  const fewJobs = Array.from({ length: 34 }, (_, i) => job({ jobCode: `B${i}`, assignedTo: "Light" }));
+
+  it("scores identical in-window activity identically, whatever the lifetime load", () => {
+    const a = computeRecruiterStats(oneDay("Heavy"), [...manyJobs, heavy], { periodScoped: true }).stats[0];
+    const b = computeRecruiterStats(oneDay("Light"), fewJobs, { periodScoped: true }).stats[0];
+    expect(a.index).toBe(b.index);
+    expect(a.targetBasis).toBe("worked");
+    expect(a.targetBaseCount).toBe(1);
+    expect(a.clientTarget).toBe(2);
+  });
+
+  it("still uses lifetime assigned requirements when no range is active", () => {
+    const s = computeRecruiterStats(oneDay("Heavy"), manyJobs).stats[0];
+    expect(s.targetBasis).toBe("assigned");
+    expect(s.targetBaseCount).toBe(58);
+    expect(s.clientTarget).toBe(116);
+  });
+
+  it("falls back to worked requirements when there is no Assigned-To data", () => {
+    const s = computeRecruiterStats(oneDay("Nobody"), []).stats[0];
+    expect(s.targetBasis).toBe("worked");
+  });
+
+  it("gives full credit for hitting 2 client submissions on the one requirement worked", () => {
+    const two = [
+      ev2("R", "Cand A", "Submitted To Vendor", CLIENT_SUB, CLIENT_SUB),
+      { ...ev2("R", "Cand B", "Submitted To Client", CLIENT_SUB, CLIENT_SUB), jobCode: "J1" },
+    ];
+    const s = computeRecruiterStats(two, [], { periodScoped: true }).stats[0];
+    expect(s.indexParts.clientPerAssigned).toBe(1);
+  });
+});

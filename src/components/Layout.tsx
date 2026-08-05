@@ -19,27 +19,23 @@ const isMobile = () => typeof window !== "undefined" && window.matchMedia("(max-
 
 export default function Layout() {
   const { user, signOut } = useAuth();
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem("sidebarCollapsed") === "1");
+  // The rail starts collapsed every session — hovering it slides the labels out
+  // (CSS), and ☰ pins it open for people who'd rather it stayed. Pinning isn't
+  // persisted: the default on every load is closed.
+  const [collapsed, setCollapsed] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // On mobile the ☰ opens/closes the slide-over drawer; on desktop it toggles
-  // the icon-only rail.
+  // On mobile the ☰ opens/closes the slide-over drawer; on desktop it pins or
+  // unpins the rail.
   const toggle = () => {
-    if (isMobile()) {
-      setMobileOpen((o) => !o);
-    } else {
-      setCollapsed((c) => {
-        const next = !c;
-        localStorage.setItem("sidebarCollapsed", next ? "1" : "0");
-        return next;
-      });
-    }
+    if (isMobile()) setMobileOpen((o) => !o);
+    else setCollapsed((c) => !c);
   };
 
   const showFull = !collapsed || mobileOpen; // drawer always shows the full sidebar
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${collapsed ? " rail" : ""}`}>
       {mobileOpen && <div className="sidebar-backdrop" onClick={() => setMobileOpen(false)} />}
 
       <aside className={`sidebar ${collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-open" : ""}`}>

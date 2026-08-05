@@ -166,6 +166,12 @@ export default function ClientTracker() {
   );
   const reqTotals = useMemo(() => requirementTotals(reqs), [reqs]);
 
+  // Lifetime requirements per client — deliberately NOT date-filtered, so the
+  // table can show "12 of 38 came in this period" rather than only the slice.
+  const allTimeReqs = useMemo(() => computeClientRequirements(jobs, null, null), [jobs]);
+  const allTimeByKey = useMemo(() => new Map(allTimeReqs.map((r) => [r.key, r])), [allTimeReqs]);
+  const allTimeTotal = useMemo(() => allTimeReqs.reduce((n, r) => n + r.total, 0), [allTimeReqs]);
+
   // One row per client across BOTH sources, so clients that sent requirements
   // but got no submissions stop being invisible here.
   const merged = useMemo(() => {
@@ -174,17 +180,25 @@ export default function ClientTracker() {
       const k = clientKey(s.client);
       rows.set(k, { key: k, client: s.client, score: s, req: null });
     }
+    for (const r of allTimeReqs) {
+      if (!rows.has(r.key)) rows.set(r.key, { key: r.key, client: r.client, score: null, req: null });
+    }
     for (const r of reqs) {
       const cur = rows.get(r.key);
       if (cur) cur.req = r;
       else rows.set(r.key, { key: r.key, client: r.client, score: null, req: r });
     }
     return Array.from(rows.values());
-  }, [scores, reqs]);
+  }, [scores, reqs, allTimeReqs]);
 
   const sortedRows = useMemo(() => {
     if (sortKey === "requirements") {
-      return [...merged].sort((a, b) => (b.req?.total ?? 0) - (a.req?.total ?? 0) || a.client.localeCompare(b.client));
+      return [...merged].sort(
+        (a, b) =>
+          (b.req?.total ?? 0) - (a.req?.total ?? 0) ||
+          (allTimeByKey.get(b.key)?.total ?? 0) - (allTimeByKey.get(a.key)?.total ?? 0) ||
+          a.client.localeCompare(b.client)
+      );
     }
     const order = sortClientScores(scores, sortKey).map((s) => clientKey(s.client));
     const rank = new Map(order.map((k, i) => [k, i]));
@@ -195,7 +209,7 @@ export default function ClientTracker() {
       const rb = rank.has(b.key) ? rank.get(b.key)! : Number.MAX_SAFE_INTEGER;
       return ra - rb || (b.req?.total ?? 0) - (a.req?.total ?? 0);
     });
-  }, [merged, scores, sortKey]);
+  }, [merged, scores, sortKey, allTimeByKey]);
 
   const board = usePagination(sortedRows, 25, "clientTracker");
   const noSubmissionClients = useMemo(
@@ -225,8 +239,9 @@ export default function ClientTracker() {
         <div>
           <h1>Client Tracker</h1>
           <p className="muted" style={{ marginTop: "-0.25rem" }}>
-            How many requirements each client sent us, and what we did with them: how many profiles we
-            submitted and how far they moved.
+            How many requirements each client sent us, and what we did with them. <strong>Total reqs</strong> is
+            everything that client has ever sent, ignoring the dates below; <strong>Reqs in range</strong> counts
+            only those received inside the selected period. Submission columns count profiles we sent them.
             The timeline starts when a profile is <strong>submitted to the client/vendor</strong> — internal
             submissions don&#39;t count here. Use it to decide who to prioritise and who is sitting silently on our profiles.
           </p>
@@ -318,7 +333,8 @@ export default function ClientTracker() {
 
               <div className="card">
                 <div className="stat-grid">
-                  <Stat label="Requirements received" value={reqTotals.requirements} />
+                  <Stat label="Requirements (all time)" value={allTimeTotal} />
+                  <Stat label={dateActive ? "Requirements in range" : "Requirements received"} value={reqTotals.requirements} />
                   <Stat label="Clients who sent them" value={reqTotals.clients} />
                   <Stat label="Clients / Vendors submitted to" value={pf.clients} />
                   <Stat label="Profiles submitted to them" value={pf.totalSubs} />
@@ -367,8 +383,13 @@ export default function ClientTracker() {
                         <th style={{ width: 28 }}></th>
                         <th style={{ width: 40 }}>#</th>
                         <th>Client / Vendor</th>
-                        <th style={{ textAlign: "right" }} title="Requirements this client sent us in the selected period">Reqs received</th>
-                        <th style={{ minWidth: 118 }} title="Status of those requirements">Req status</th>
+                        <th style={{ textAlign: "right" }} title="Every requirement this client has ever sent us — not affected by the date filter">
+                          Total reqs<br /><span style={{ fontWeight: 400, fontSize: "0.72rem", opacity: 0.85 }}>all time</span>
+                        </th>
+                        <th style={{ textAlign: "right" }} title="Requirements this client sent us inside the selected date range">
+                          Reqs<br /><span style={{ fontWeight: 400, fontSize: "0.72rem", opacity: 0.85 }}>in range</span>
+                        </th>
+                        <th style={{ minWidth: 118 }} title="Status of the requirements in the selected range">Req status</th>
                         <th style={{ textAlign: "right" }}>Submitted</th>
                         <th style={{ minWidth: 150 }}>Progress</th>
                         <th style={{ textAlign: "right" }}>Response</th>
@@ -384,6 +405,7 @@ export default function ClientTracker() {
                       {board.pageItems.map((row, i) => {
                         const s = row.score;
                         const req = row.req;
+                        const allTime = allTimeByKey.get(row.key) ?? null;
                         const key = row.key;
                         const open = expanded.has(key);
                         const v = s ? VERDICT[s.verdict] : null;
@@ -395,23 +417,28 @@ export default function ClientTracker() {
                               <td className="muted">{board.startIndex + i + 1}</td>
                               <td style={{ whiteSpace: "normal", fontWeight: 600 }}>
                                 {row.client}
-                                {req?.unassigned && (
+                                {allTime?.unassigned && (
                                   <span className="pill amber" style={{ marginLeft: 6, fontSize: "0.64rem", padding: "0 5px" }} title="Requirements with no client recorded in Ceipal — worth cleaning up at the source">
                                     no client set
                                   </span>
                                 )}
-                                {req?.internal && (
+                                {allTime?.internal && (
                                   <span className="pill grey" style={{ marginLeft: 6, fontSize: "0.64rem", padding: "0 5px" }} title="Our own company — internal/bench requirements, not external client demand">
                                     internal
                                   </span>
                                 )}
-                                {!s && (req?.total ?? 0) > 0 && (
+                                {!s && (allTime?.total ?? 0) > 0 && (
                                   <span className="pill red" style={{ marginLeft: 6, fontSize: "0.64rem", padding: "0 5px" }} title="This client sent requirements but we have not submitted anyone">
                                     0 submissions
                                   </span>
                                 )}
                               </td>
-                              <td style={{ textAlign: "right", fontWeight: 700 }}>{req?.total ?? "—"}</td>
+                              <td style={{ textAlign: "right", fontWeight: 700 }} title={allTime ? `First ${fmtDate(allTime.firstReceived)} · latest ${fmtDate(allTime.lastReceived)}` : ""}>
+                                {allTime?.total ?? "—"}
+                              </td>
+                              <td style={{ textAlign: "right", fontWeight: 600 }} className={dateActive ? "" : "muted"}>
+                                {req?.total ?? "—"}
+                              </td>
                               <td>
                                 {req && req.total > 0 ? (
                                   <span style={{ display: "inline-flex", gap: "0.3rem", flexWrap: "wrap", fontSize: "0.72rem" }}>
@@ -442,18 +469,20 @@ export default function ClientTracker() {
                             {open && (
                               <tr>
                                 <td></td>
-                                <td colSpan={13} style={{ background: "#f8fafc", padding: "0.6rem 0.75rem" }}>
-                                  {req && req.total > 0 && (
+                                <td colSpan={14} style={{ background: "#f8fafc", padding: "0.6rem 0.75rem" }}>
+                                  {(req?.total || allTime?.total) && (
                                     <div style={{ marginBottom: "0.8rem" }}>
                                       <div style={{ fontWeight: 700, fontSize: "0.85rem", marginBottom: "0.35rem" }}>
-                                        Requirements received ({req.total})
+                                        {req && req.total > 0
+                                          ? `Requirements received in range (${req.total} of ${allTime?.total ?? req.total} all time)`
+                                          : `Requirements — all time (${allTime?.total ?? 0}); none in the selected range`}
                                       </div>
                                       <table className="data" style={{ margin: 0 }}>
                                         <thead>
                                           <tr><th>Req code</th><th>Requirement</th><th>Status</th><th>Received</th><th style={{ textAlign: "right" }}>Submissions</th></tr>
                                         </thead>
                                         <tbody>
-                                          {req.jobs.map((jr, k) => (
+                                          {(req && req.total > 0 ? req.jobs : allTime?.jobs ?? []).map((jr, k) => (
                                             <tr key={jr.jobCode || k}>
                                               <td>{jr.jobCode || "—"}</td>
                                               <td style={{ whiteSpace: "normal" }}>{jr.jobTitle || "—"}</td>

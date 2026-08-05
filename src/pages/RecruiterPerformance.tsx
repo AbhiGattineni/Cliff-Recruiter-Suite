@@ -39,7 +39,7 @@ const medal = ["🥇", "🥈", "🥉"];
 const indexPill = (v: number) => (v >= 60 ? "green" : v >= 35 ? "amber" : "red");
 
 const INDEX_METRICS = [
-  { key: "clientPerAssigned", weight: INDEX_WEIGHTS.clientPerAssigned, label: `Client/vendor vs target (${TARGET_PER_ASSIGNED} per assigned requirement)` },
+  { key: "clientPerAssigned", weight: INDEX_WEIGHTS.clientPerAssigned, label: `Client/vendor vs target (${TARGET_PER_ASSIGNED} per requirement)` },
   { key: "clientRate", weight: INDEX_WEIGHTS.clientRate, label: "Client/vendor rate (of profiles submitted)" },
   { key: "progressRate", weight: INDEX_WEIGHTS.progressRate, label: "Reached internal interview or beyond" },
   { key: "volume", weight: INDEX_WEIGHTS.volume, label: "Volume — profiles vs the busiest recruiter" },
@@ -47,9 +47,9 @@ const INDEX_METRICS = [
 ] as const;
 
 const targetBasis = (s: RecruiterStat) =>
-  s.assignedCount > 0
-    ? `${s.assignedCount} assigned requirement${s.assignedCount === 1 ? "" : "s"}`
-    : `${s.requirements} worked requirement${s.requirements === 1 ? "" : "s"} — no Assigned-To data`;
+  s.targetBasis === "assigned"
+    ? `${s.targetBaseCount} assigned requirement${s.targetBaseCount === 1 ? "" : "s"}`
+    : `${s.targetBaseCount} requirement${s.targetBaseCount === 1 ? "" : "s"} worked in this period`;
 
 // Explains the Performance Index. With `stat`, shows that recruiter's achieved %
 // and point contribution per metric; without, just the generic weights.
@@ -184,8 +184,11 @@ export default function RecruiterPerformance() {
   }, [subs, submittedFrom, submittedTo]);
 
   const { stats: allStats, statuses } = useMemo(
-    () => (filteredSubs ? computeRecruiterStats(filteredSubs, jobs) : { stats: [], statuses: [] }),
-    [filteredSubs, jobs]
+    () =>
+      filteredSubs
+        ? computeRecruiterStats(filteredSubs, jobs, { periodScoped: dateActive })
+        : { stats: [], statuses: [] },
+    [filteredSubs, jobs, dateActive]
   );
 
   // Ranking by index is fixed (independent of sort/filter), so medals are stable.

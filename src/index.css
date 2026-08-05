@@ -47,6 +47,33 @@ h2 { font-size: 1.25rem; }
   transition: width 0.15s ease;
 }
 .sidebar.collapsed { width: 66px; }
+
+/* Collapsed rail: hovering (or tabbing into) it slides the labels out.
+   The rail is taken out of the flex row and the content reserves its 66px, so
+   expanding overlays the page instead of reflowing it under the pointer. */
+@media (min-width: 769px) {
+  .app-shell.rail .sidebar.collapsed {
+    position: fixed; top: 0; left: 0; height: 100%; width: 66px; z-index: 900;
+    overflow-x: hidden;
+  }
+  .app-shell.rail .main { margin-left: 66px; }
+
+  .app-shell.rail .sidebar.collapsed:hover,
+  .app-shell.rail .sidebar.collapsed:focus-within {
+    width: 240px; overflow-y: auto;
+    box-shadow: 4px 0 24px rgba(16, 24, 40, 0.28);
+  }
+  .app-shell.rail .sidebar.collapsed:hover .nav-label,
+  .app-shell.rail .sidebar.collapsed:focus-within .nav-label { display: inline; }
+  .app-shell.rail .sidebar.collapsed:hover nav a,
+  .app-shell.rail .sidebar.collapsed:focus-within nav a { justify-content: flex-start; padding: 0.7rem 1.25rem; }
+  .app-shell.rail .sidebar.collapsed:hover nav a.active,
+  .app-shell.rail .sidebar.collapsed:focus-within nav a.active { border-left: 3px solid #fff; }
+  .app-shell.rail .sidebar.collapsed:hover .brand,
+  .app-shell.rail .sidebar.collapsed:focus-within .brand { padding: 0 1.25rem 1rem; text-align: left; }
+  .app-shell.rail .sidebar.collapsed:hover .user-box,
+  .app-shell.rail .sidebar.collapsed:focus-within .user-box { display: block; }
+}
 .sidebar .nav-ico { width: 22px; text-align: center; flex-shrink: 0; font-size: 1.05rem; }
 .sidebar .brand-mark {
   display: inline-flex; align-items: center; justify-content: center;

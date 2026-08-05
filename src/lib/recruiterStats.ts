@@ -223,7 +223,9 @@ export interface RecruiterStat {
   clientCount: number; // profiles at a client/vendor submission
   clientRate: number; // clientCount / profiles
   progressRate: number; // reached interview or beyond / profiles
-  assignedCount: number; // distinct requirements assigned to this recruiter
+  assignedCount: number; // distinct requirements assigned to this recruiter (all time)
+  targetBasis: "assigned" | "worked"; // what clientTarget was computed from
+  targetBaseCount: number; // the requirement count behind clientTarget
   clientTarget: number; // target client/vendor submissions (2 × target base)
   index: number; // 0–100 composite Performance Index
   indexParts: {
@@ -378,8 +380,23 @@ export function submissionsByJob(subs: SubmissionEvent[]): Map<string, JobSubmis
   return m;
 }
 
+export interface StatsOptions {
+  /**
+   * True when a date range is active. The "2 client submissions per assigned
+   * requirement" target is a lifetime expectation — measuring one day's output
+   * against every requirement a recruiter has ever been assigned makes the
+   * metric meaningless (1 submission against a target of 116), so within a
+   * window we score against the requirements actually worked in it.
+   */
+  periodScoped?: boolean;
+}
+
 /** Aggregate raw submission events into per-recruiter performance, ranked by index. */
-export function computeRecruiterStats(subs: SubmissionEvent[], jobs: JobRecord[] = []): RecruiterStatsResult {
+export function computeRecruiterStats(
+  subs: SubmissionEvent[],
+  jobs: JobRecord[] = [],
+  opts: StatsOptions = {}
+): RecruiterStatsResult {
   const cands = foldCandidates(subs);
 
   // Requirements assigned to each recruiter (by the job-posting "Assigned To" column).
@@ -492,9 +509,13 @@ export function computeRecruiterStats(subs: SubmissionEvent[], jobs: JobRecord[]
   const stats: RecruiterStat[] = prelim.map((x) => {
     const volume = x.profiles / maxProfiles;
     const coverage = x.requirements / maxReqs;
-    // Target = 2 client/vendor submissions per assigned requirement. When there's
-    // no Assigned-To data, fall back to the requirements the recruiter worked.
-    const targetBase = x.assignedCount > 0 ? x.assignedCount : x.requirements;
+    // Target = 2 client/vendor submissions per requirement. Within a date range
+    // that base is the requirements actually worked in the window; across all
+    // time it's the recruiter's assigned requirements (falling back to worked
+    // when there's no Assigned-To data).
+    const useWorked = opts.periodScoped || x.assignedCount === 0;
+    const targetBasis: "assigned" | "worked" = useWorked ? "worked" : "assigned";
+    const targetBase = useWorked ? x.requirements : x.assignedCount;
     const clientTarget = TARGET_PER_ASSIGNED * targetBase;
     const clientPerAssigned = clientTarget > 0 ? Math.min(1, x.clientCount / clientTarget) : 0;
     const indexParts = {
@@ -512,7 +533,7 @@ export function computeRecruiterStats(subs: SubmissionEvent[], jobs: JobRecord[]
           W.volume * volume +
           W.coverage * coverage)
     );
-    return { ...x, clientTarget, index, indexParts };
+    return { ...x, targetBasis, targetBaseCount: targetBase, clientTarget, index, indexParts };
   });
 
   stats.sort((a, b) => b.index - a.index || b.profiles - a.profiles);
