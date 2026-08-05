@@ -26,7 +26,7 @@ export default function ResumeReports() {
   const usageQ = useQuery({ queryKey: ["llmUsageSummary"], queryFn: () => getLlmUsageSummary() });
 
   const reports = reportsQ.data ?? [];
-  const { page, setPage, pageCount, pageItems, pageSize, total, startIndex } = usePagination(reports, 25);
+  const { page, setPage, pageCount, pageItems, pageSize, setPageSize, total, startIndex } = usePagination(reports, 25, "resumeReports");
 
   // Auto-open a report when arriving via ?open=<id>.
   useEffect(() => {
@@ -126,7 +126,7 @@ export default function ResumeReports() {
                 </tbody>
               </table>
             </div>
-            <Pagination page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} />
+            <Pagination page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />
           </>
         ) : (
           <div style={{ textAlign: "center", padding: "2rem", color: "var(--muted)" }}>

@@ -198,7 +198,7 @@ export default function RecruiterPerformance() {
   }, [allStats]);
 
   const sorted = useMemo(() => sortStats(allStats, sortKey), [allStats, sortKey]);
-  const board = usePagination(sorted, 25);
+  const board = usePagination(sorted, 25, "recruiterPerformance");
   // Submissions grouped by job — reused by the Active Jobs card (no extra fetch).
   const subsByJob = useMemo(() => (subs ? submissionsByJob(subs) : new Map()), [subs]);
   const names = useMemo(() => allStats.map((s) => s.name).sort((a, b) => a.localeCompare(b)), [allStats]);
@@ -373,7 +373,7 @@ export default function RecruiterPerformance() {
                     </tbody>
                   </table>
                 </div>
-                <Pagination page={board.page} pageCount={board.pageCount} total={board.total} pageSize={board.pageSize} onPage={board.setPage} />
+                <Pagination page={board.page} pageCount={board.pageCount} total={board.total} pageSize={board.pageSize} onPage={board.setPage} onPageSize={board.setPageSize} />
 
                 <IndexExplainer />
               </div>

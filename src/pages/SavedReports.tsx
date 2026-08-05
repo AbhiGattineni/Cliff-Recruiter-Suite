@@ -28,7 +28,7 @@ export default function SavedReports() {
   const qc = useQueryClient();
   const configsQ = useQuery({ queryKey: ["reportConfigs"], queryFn: () => listReportConfigs() });
   const configs: SavedReportConfig[] = configsQ.data ?? [];
-  const { page, setPage, pageCount, pageItems, pageSize, total, startIndex } = usePagination(configs, 25);
+  const { page, setPage, pageCount, pageItems, pageSize, setPageSize, total, startIndex } = usePagination(configs, 25, "savedReports");
   const error = configsQ.error ? friendlyError(configsQ.error) : null;
 
   const remove = async (id: string, name: string) => {
@@ -118,7 +118,7 @@ export default function SavedReports() {
               </tbody>
             </table>
           </div>
-          <Pagination page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} />
+          <Pagination page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />
           </>
         ) : (
           <div style={{ textAlign: "center", padding: "2rem", color: "var(--muted)" }}>

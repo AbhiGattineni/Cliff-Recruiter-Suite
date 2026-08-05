@@ -9,8 +9,54 @@ import PortfolioDetail from "../components/PortfolioDetail";
 import { LinkedinVerdict } from "../components/LinkedinCheck";
 import Section from "../components/Section";
 import VerdictBand, { toneForScore } from "../components/VerdictBand";
+import Pagination, { usePagination } from "../components/Pagination";
 import { downloadResumeReportPdf } from "../lib/resumeReportPdf";
 import { scoreLinkedin, verdictClass } from "../lib/linkedinScore";
+
+// Enough rows to exercise every page size in the footer dropdown.
+const DEMO_ROWS = Array.from({ length: 137 }, (_, i) => ({
+  n: i + 1,
+  client: ["Fannie Mae", "IBM", "Apple", "TCS", "cognizant"][i % 5],
+  title: `Requirement ${i + 1}`,
+  status: ["On Hold", "Closed", "Active"][i % 3],
+}));
+
+function PaginationDemo() {
+  const p = usePagination(DEMO_ROWS, 25, "designPreviewDemo");
+  return (
+    <div className="card">
+      <h3 style={{ marginTop: 0 }}>Table paging</h3>
+      <p className="muted" style={{ marginTop: "-0.25rem", fontSize: "0.85rem" }}>
+        {DEMO_ROWS.length} sample rows. The footer dropdown sets rows per page and is remembered per table.
+      </p>
+      <div className="table-wrap">
+        <table className="data">
+          <thead>
+            <tr><th style={{ width: 44 }}>#</th><th>Client</th><th>Requirement</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            {p.pageItems.map((r, i) => (
+              <tr key={r.n}>
+                <td className="muted">{p.startIndex + i + 1}</td>
+                <td>{r.client}</td>
+                <td>{r.title}</td>
+                <td>{r.status}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Pagination
+        page={p.page}
+        pageCount={p.pageCount}
+        total={p.total}
+        pageSize={p.pageSize}
+        onPage={p.setPage}
+        onPageSize={p.setPageSize}
+      />
+    </div>
+  );
+}
 
 const liSignals = {
   accountAgeMonths: 30,
@@ -156,6 +202,8 @@ export default function DesignPreview() {
         </div>
         <button className="btn" onClick={() => downloadResumeReportPdf(SAMPLE)}>⬇ Download sample PDF</button>
       </div>
+
+      <PaginationDemo />
 
       <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "0.5rem" }}>

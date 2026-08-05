@@ -138,7 +138,7 @@ export default function ReportGeneration() {
     Object.values(selFilters).some((a) => a && a.length > 0) ||
     !!submittedFrom || !!submittedTo || !!createdFrom || !!createdTo;
 
-  const preview = usePagination(filteredRows, 50);
+  const preview = usePagination(filteredRows, 50, "reportPreview");
 
   // Distribution of time-to-submission, bucketed, counted once per job (time-taken
   // is a job-level value repeated on each candidate row → dedupe by Job Code).
@@ -557,7 +557,7 @@ export default function ReportGeneration() {
                     </tbody>
                   </table>
                 </div>
-                <Pagination page={preview.page} pageCount={preview.pageCount} total={preview.total} pageSize={preview.pageSize} onPage={preview.setPage} />
+                <Pagination page={preview.page} pageCount={preview.pageCount} total={preview.total} pageSize={preview.pageSize} onPage={preview.setPage} onPageSize={preview.setPageSize} />
               </>
             )}
           </div>

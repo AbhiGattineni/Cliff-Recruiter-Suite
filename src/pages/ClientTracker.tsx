@@ -127,7 +127,7 @@ export default function ClientTracker() {
 
   const scores = useMemo(() => (filtered ? computeClientScores(filtered) : []), [filtered]);
   const sorted = useMemo(() => sortClientScores(scores, sortKey), [scores, sortKey]);
-  const board = usePagination(sorted, 25);
+  const board = usePagination(sorted, 25, "clientTracker");
   const pf = useMemo(() => portfolioStats(scores), [scores]);
 
   const verdictPie = [
@@ -371,7 +371,7 @@ export default function ClientTracker() {
                     </tbody>
                   </table>
                 </div>
-                <Pagination page={board.page} pageCount={board.pageCount} total={board.total} pageSize={board.pageSize} onPage={board.setPage} />
+                <Pagination page={board.page} pageCount={board.pageCount} total={board.total} pageSize={board.pageSize} onPage={board.setPage} onPageSize={board.setPageSize} />
               </div>
             </>
           )}

@@ -31,7 +31,7 @@ export default function CandidatePool() {
     return candidates.filter((c) => c.roles.some((r) => matchRoles.has(r)));
   }, [candidates, matchRoles]);
 
-  const { page, setPage, pageCount, pageItems, pageSize, total, startIndex } = usePagination(filtered, 25);
+  const { page, setPage, pageCount, pageItems, pageSize, setPageSize, total, startIndex } = usePagination(filtered, 25, "candidatePool");
 
   const runMatch = async () => {
     if (jd.trim().length < 15) {
@@ -165,7 +165,7 @@ export default function CandidatePool() {
                 </tbody>
               </table>
             </div>
-            <Pagination page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} />
+            <Pagination page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />
           </>
         )}
       </div>
