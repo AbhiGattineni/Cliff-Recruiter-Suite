@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { DateTime } from "luxon";
-import { computeRecruiterStats, funnelOf } from "./recruiterStats";
+import { computeRecruiterStats, funnelOf, eventDate, filterByActivity } from "./recruiterStats";
 import { SubmissionEvent, JobRecord } from "./report/types";
 
 function job(over: Partial<JobRecord>): JobRecord {
@@ -114,5 +114,104 @@ describe("assigned requirements with no submissions", () => {
 
   it("sorts assigned-only requirements to the end", () => {
     expect(alice.jobGroups[alice.jobGroups.length - 1].assignedOnly).toBe(true);
+  });
+});
+
+// ---- Period attribution -----------------------------------------------------
+// A profile uploaded 31 Jul and client-submitted 4 Aug did the client-submission
+// work in AUGUST. Attributing it to the upload date credited it to July and hid
+// it from any August range entirely.
+
+/** Event with independent upload and status-change dates. */
+function ev2(
+  recruiter: string,
+  applicant: string,
+  status: string,
+  uploaded: string,
+  changed: string
+): SubmissionEvent {
+  return {
+    jobCode: "J1",
+    jobTitle: "T",
+    applicantName: applicant,
+    submittedBy: recruiter,
+    client: "C",
+    submissionStatus: status,
+    statusChangedOn: DateTime.fromISO(changed),
+    submittedOn: DateTime.fromISO(uploaded),
+    accountManager: "AM",
+    jobCreatedOn: DateTime.fromISO("2026-07-01"),
+  };
+}
+
+const UPLOADED = "2026-07-31T10:00:00";
+const CLIENT_SUB = "2026-08-04T10:00:00";
+const history = [
+  ev2("Guru", "Alice", "Submitted", UPLOADED, UPLOADED),
+  ev2("Guru", "Alice", "Client Submission", UPLOADED, CLIENT_SUB),
+];
+const day = (s: string) => DateTime.fromISO(s);
+
+describe("eventDate", () => {
+  it("uses the status-change date, not the upload date", () => {
+    expect(eventDate(history[1])!.toISODate()).toBe("2026-08-04");
+  });
+
+  it("falls back to the upload date when there is no status-change date", () => {
+    const e = { ...history[0], statusChangedOn: null } as SubmissionEvent;
+    expect(eventDate(e)!.toISODate()).toBe("2026-07-31");
+  });
+});
+
+describe("filterByActivity", () => {
+  it("includes the client submission in the August range", () => {
+    const aug = filterByActivity(history, day("2026-08-01"), day("2026-08-31T23:59:59"));
+    expect(aug).toHaveLength(1);
+    expect(aug[0].submissionStatus).toBe("Client Submission");
+  });
+
+  it("keeps only the upload event in the July range", () => {
+    const jul = filterByActivity(history, day("2026-07-01"), day("2026-07-31T23:59:59"));
+    expect(jul).toHaveLength(1);
+    expect(jul[0].submissionStatus).toBe("Submitted");
+  });
+
+  it("returns everything when no range is given", () => {
+    expect(filterByActivity(history, null, null)).toHaveLength(2);
+  });
+});
+
+describe("period attribution end-to-end", () => {
+  it("counts the client submission in August, not July", () => {
+    const aug = computeRecruiterStats(
+      filterByActivity(history, day("2026-08-01"), day("2026-08-31T23:59:59"))
+    );
+    expect(aug.stats[0].clientCount).toBe(1);
+
+    const jul = computeRecruiterStats(
+      filterByActivity(history, day("2026-07-01"), day("2026-07-31T23:59:59"))
+    );
+    expect(jul.stats[0].clientCount).toBe(0);
+    expect(jul.stats[0].profiles).toBe(1);
+  });
+
+  it("shows the profile in both periods, at the status it held in each", () => {
+    const jul = computeRecruiterStats(filterByActivity(history, day("2026-07-01"), day("2026-07-31T23:59:59")));
+    const aug = computeRecruiterStats(filterByActivity(history, day("2026-08-01"), day("2026-08-31T23:59:59")));
+    expect(jul.stats[0].rows[0].status).toBe("Submitted");
+    expect(aug.stats[0].rows[0].status).toBe("Client / Vendor Submission");
+  });
+
+  it("keeps the original upload date on the row while attributing by activity", () => {
+    const aug = computeRecruiterStats(filterByActivity(history, day("2026-08-01"), day("2026-08-31T23:59:59")));
+    const row = aug.stats[0].rows[0];
+    expect(row.submittedOn!.toISODate()).toBe("2026-07-31");
+    expect(row.lastActivity!.toISODate()).toBe("2026-08-04");
+  });
+
+  it("does not lose the profile from an August range because it was uploaded in July", () => {
+    // The old behaviour filtered on submittedOn, so this range returned nothing.
+    const window = filterByActivity(history, day("2026-08-01"), day("2026-08-04T23:59:59"));
+    expect(window.length).toBeGreaterThan(0);
   });
 });

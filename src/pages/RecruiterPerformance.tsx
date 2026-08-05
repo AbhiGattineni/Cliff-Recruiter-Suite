@@ -6,6 +6,7 @@ import { SubmissionEvent, JobRecord } from "../lib/report/types";
 import { friendlyError } from "../lib/errors";
 import {
   computeRecruiterStats,
+  filterByActivity,
   sortStats,
   screeningOf,
   submissionsByJob,
@@ -171,18 +172,15 @@ export default function RecruiterPerformance() {
   // Filter profiles by their submitted-on date. All of a candidate's event rows
   // carry the same SubmittedOn, so filtering events == filtering profiles.
   const dateActive = !!submittedFrom || !!submittedTo;
+  // Attribute each event to when the status actually changed, not when the
+  // profile was uploaded — see filterByActivity in lib/recruiterStats.
   const filteredSubs = useMemo(() => {
     if (!subs) return null;
-    if (!submittedFrom && !submittedTo) return subs;
-    const from = submittedFrom ? DateTime.fromISO(submittedFrom) : null;
-    const to = submittedTo ? DateTime.fromISO(submittedTo).endOf("day") : null;
-    return subs.filter((s) => {
-      const d = s.submittedOn;
-      if (!d) return false; // undated profiles can't be placed in a range
-      if (from && d < from) return false;
-      if (to && d > to) return false;
-      return true;
-    });
+    return filterByActivity(
+      subs,
+      submittedFrom ? DateTime.fromISO(submittedFrom) : null,
+      submittedTo ? DateTime.fromISO(submittedTo).endOf("day") : null
+    );
   }, [subs, submittedFrom, submittedTo]);
 
   const { stats: allStats, statuses } = useMemo(
@@ -274,11 +272,11 @@ export default function RecruiterPerformance() {
                 </select>
               </div>
               <div className="field" style={{ margin: 0 }}>
-                <label>Submitted from</label>
+                <label>Activity from</label>
                 <input type="date" value={submittedFrom} onChange={(e) => setSubmittedFrom(e.target.value)} />
               </div>
               <div className="field" style={{ margin: 0 }}>
-                <label>Submitted to</label>
+                <label>Activity to</label>
                 <input type="date" value={submittedTo} onChange={(e) => setSubmittedTo(e.target.value)} />
               </div>
               {dateActive && (
@@ -303,8 +301,10 @@ export default function RecruiterPerformance() {
             </div>
             {dateActive && (
               <p className="muted" style={{ margin: "0.6rem 0 0", fontSize: "0.85rem" }}>
-                Profiles submitted {submittedFrom || "any time"} → {submittedTo || "today"} · {totals.profiles} profiles
-                across {totals.recruiters} recruiters.
+                Activity between {submittedFrom || "any time"} → {submittedTo || "today"} · {totals.profiles} profiles
+                across {totals.recruiters} recruiters. A profile counts in the period its <strong>status
+                changed</strong>, not when it was uploaded — so a candidate uploaded 31 Jul and submitted to
+                the client on 4 Aug counts as August work.
               </p>
             )}
           </div>
@@ -617,7 +617,8 @@ function RecruiterModal({
                             <tr>
                               <th>Consultant</th>
                               <th>Current status</th>
-                              <th>Submitted on</th>
+                              <th title="When this status was set — what the date filter uses">Status changed</th>
+                              <th title="When the profile was first uploaded">Uploaded</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -630,7 +631,8 @@ function RecruiterModal({
                                     {r.status}
                                   </span>
                                 </td>
-                                <td style={{ whiteSpace: "nowrap" }}>{fmtDt(r.submittedOn)}</td>
+                                <td style={{ whiteSpace: "nowrap", fontWeight: 600 }}>{fmtDt(r.lastActivity)}</td>
+                                <td style={{ whiteSpace: "nowrap" }} className="muted">{fmtDt(r.submittedOn)}</td>
                               </tr>
                             ))}
                           </tbody>

@@ -19,8 +19,45 @@ export interface ProfileRow {
   consultant: string; // candidate name
   status: string; // current status (display label)
   client: string;
-  submittedOn: DateTime | null; // time of submission
+  submittedOn: DateTime | null; // when the profile was first uploaded/submitted
+  lastActivity: DateTime | null; // when the current status was set — drives period attribution
   jobCreatedOn: DateTime | null; // time of job posting
+}
+
+/**
+ * The date a submission event should be attributed to.
+ *
+ * This is the status-change date, NOT the upload date. A candidate uploaded on
+ * 31 Jul and submitted to the client on 4 Aug did the client-submission work in
+ * August, and must count there. Using the upload date credited it to July and
+ * hid it from any August range entirely. Falls back to the upload date only
+ * when Ceipal gives us no status-change timestamp.
+ */
+export function eventDate(ev: SubmissionEvent): DateTime | null {
+  return ev.statusChangedOn ?? ev.submittedOn ?? null;
+}
+
+/**
+ * Keep events whose activity happened inside [from, to] (inclusive).
+ *
+ * Filtering happens on individual events, before they're folded into one row
+ * per candidate, so a candidate uploaded in July and client-submitted in August
+ * correctly appears in BOTH periods — as "Submitted" in July and as
+ * "Client / Vendor Submission" in August.
+ */
+export function filterByActivity(
+  subs: SubmissionEvent[],
+  from: DateTime | null,
+  to: DateTime | null
+): SubmissionEvent[] {
+  if (!from && !to) return subs;
+  return subs.filter((ev) => {
+    const d = eventDate(ev);
+    if (!d) return false;
+    if (from && d < from) return false;
+    if (to && d > to) return false;
+    return true;
+  });
 }
 
 // One requirement in a recruiter's detail view, with its submissions (may be empty
@@ -172,6 +209,7 @@ interface Candidate {
   status: string; // raw status of the latest event
   ts: number;
   submittedOn: DateTime | null;
+  lastActivity: DateTime | null; // status-change time of the latest event
   jobCreatedOn: DateTime | null;
 }
 
@@ -182,7 +220,7 @@ function foldCandidates(subs: SubmissionEvent[]): Candidate[] {
     const applicant = (ev.applicantName || "").toLowerCase().trim() || "(unknown)";
     const jobCode = ev.jobCode || "(unknown)";
     const key = `${jobCode}||${applicant}`;
-    const ts = ev.statusChangedOn?.toMillis() ?? ev.submittedOn?.toMillis() ?? 0;
+    const ts = eventDate(ev)?.toMillis() ?? 0;
     const cur = map.get(key);
     if (!cur) {
       map.set(key, {
@@ -194,6 +232,7 @@ function foldCandidates(subs: SubmissionEvent[]): Candidate[] {
         status: ev.submissionStatus || "",
         ts,
         submittedOn: ev.submittedOn ?? null,
+        lastActivity: eventDate(ev),
         jobCreatedOn: ev.jobCreatedOn ?? null,
       });
     } else {
@@ -203,9 +242,13 @@ function foldCandidates(subs: SubmissionEvent[]): Candidate[] {
       if (!cur.client && ev.client) cur.client = ev.client;
       if (!cur.submittedOn && ev.submittedOn) cur.submittedOn = ev.submittedOn;
       if (!cur.jobCreatedOn && ev.jobCreatedOn) cur.jobCreatedOn = ev.jobCreatedOn;
+      // Keep the earliest upload date, but the LATEST status wins.
+      const so = ev.submittedOn;
+      if (so && (!cur.submittedOn || so < cur.submittedOn)) cur.submittedOn = so;
       if (ts >= cur.ts) {
         cur.ts = ts;
         cur.status = ev.submissionStatus || "";
+        cur.lastActivity = eventDate(ev);
       }
     }
   }
@@ -345,6 +388,7 @@ export function computeRecruiterStats(subs: SubmissionEvent[], jobs: JobRecord[]
       status: label,
       client: c.client,
       submittedOn: c.submittedOn,
+      lastActivity: c.lastActivity,
       jobCreatedOn: c.jobCreatedOn,
     });
   }
@@ -373,9 +417,10 @@ export function computeRecruiterStats(subs: SubmissionEvent[], jobs: JobRecord[]
       counts[labelByKey.get(key) ?? key] = n;
     }
     const profiles = p.profiles || 1;
+    // Most recently active first — the useful ordering when reviewing a period.
     const rows = p.rows
       .slice()
-      .sort((a, b) => (b.submittedOn?.toMillis() ?? 0) - (a.submittedOn?.toMillis() ?? 0));
+      .sort((a, b) => (b.lastActivity?.toMillis() ?? 0) - (a.lastActivity?.toMillis() ?? 0));
     const assignedList = assignedByName.get(nameKey(name)) ?? [];
     const assignedCount = new Set(
       assignedList.map((j) => (j.jobCode || j.jobTitle || "").trim()).filter(Boolean)
