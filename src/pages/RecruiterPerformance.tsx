@@ -23,6 +23,7 @@ import PieChart from "../components/PieChart";
 import Modal from "../components/Modal";
 import Pagination, { usePagination } from "../components/Pagination";
 import ActiveJobsCard from "../components/ActiveJobsCard";
+import IndexGuide from "../components/IndexGuide";
 
 const fmtDt = (d: DateTime | null) => (d ? d.toFormat("MM/dd/yyyy hh:mm a") : "—");
 
@@ -50,61 +51,6 @@ const targetBasis = (s: RecruiterStat) =>
   s.targetBasis === "assigned"
     ? `${s.targetBaseCount} assigned requirement${s.targetBaseCount === 1 ? "" : "s"}`
     : `${s.targetBaseCount} requirement${s.targetBaseCount === 1 ? "" : "s"} worked in this period`;
-
-// Explains the Performance Index. With `stat`, shows that recruiter's achieved %
-// and point contribution per metric; without, just the generic weights.
-function IndexExplainer({ stat }: { stat?: RecruiterStat }) {
-  return (
-    <details className="colpick" style={{ marginTop: "1rem" }}>
-      <summary>
-        <span className="colpick-title" style={{ fontSize: "0.95rem" }}>
-          How the Performance Index{stat ? ` (${stat.index})` : ""} is calculated
-        </span>
-      </summary>
-      <div className="colpick-body">
-        <p className="muted" style={{ fontSize: "0.88rem", marginTop: 0 }}>
-          A 0–100 score. The biggest driver is hitting the target of {TARGET_PER_ASSIGNED} client/vendor
-          submissions per assigned requirement
-          {stat ? ` — ${stat.clientCount} of ${stat.clientTarget} target (2 × ${targetBasis(stat)})` : ""}.
-        </p>
-        <div className="table-wrap">
-          <table className="data">
-            <thead>
-              <tr>
-                <th>Metric</th>
-                <th style={{ textAlign: "right" }}>Weight</th>
-                {stat && <th style={{ textAlign: "right" }}>Achieved</th>}
-                {stat && <th style={{ textAlign: "right" }}>Points</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {INDEX_METRICS.map((m) => {
-                const v = stat ? stat.indexParts[m.key] : 0;
-                const pts = Math.round(m.weight * v * 100);
-                return (
-                  <tr key={m.key}>
-                    <td style={{ whiteSpace: "normal" }}>{m.label}</td>
-                    <td style={{ textAlign: "right" }}>{pct(m.weight)}</td>
-                    {stat && <td style={{ textAlign: "right" }}>{pct(v)}</td>}
-                    {stat && <td style={{ textAlign: "right", fontWeight: 600 }}>{pts}</td>}
-                  </tr>
-                );
-              })}
-            </tbody>
-            {stat && (
-              <tfoot>
-                <tr>
-                  <td colSpan={3} style={{ textAlign: "right", fontWeight: 700 }}>Index</td>
-                  <td style={{ textAlign: "right", fontWeight: 700 }}>{stat.index}</td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-      </div>
-    </details>
-  );
-}
 
 export default function RecruiterPerformance() {
   const [subs, setSubs] = useState<SubmissionEvent[] | null>(null);
@@ -378,7 +324,7 @@ export default function RecruiterPerformance() {
                 </div>
                 <Pagination page={board.page} pageCount={board.pageCount} total={board.total} pageSize={board.pageSize} onPage={board.setPage} onPageSize={board.setPageSize} />
 
-                <IndexExplainer />
+                <IndexGuide />
               </div>
             </>
           )}
@@ -568,7 +514,7 @@ function RecruiterModal({
         </div>
       </div>
 
-      <IndexExplainer stat={stat} />
+      <IndexGuide stat={stat} targetBasisLabel={targetBasis(stat)} />
 
       {/* Submissions grouped by requirement — click a job to see its candidates */}
       <h3 style={{ margin: "1.5rem 0 0.5rem" }}>

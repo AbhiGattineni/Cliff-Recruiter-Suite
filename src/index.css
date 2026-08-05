@@ -269,6 +269,33 @@ table.data th.colf-th { padding-right: 0.35rem; }
 }
 .colf-chip button { background: none; border: none; cursor: pointer; color: inherit; font-size: 0.9rem; line-height: 1; padding: 0; }
 
+/* ---------- Performance-index guide ---------- */
+.guide-langs { display: inline-flex; border: 1px solid var(--brand); border-radius: 8px; overflow: hidden; margin-bottom: 0.9rem; }
+.guide-lang {
+  background: #fff; color: var(--brand); border: none; padding: 0.35rem 0.85rem;
+  cursor: pointer; font: inherit; font-weight: 600; font-size: 0.85rem;
+}
+.guide-lang + .guide-lang { border-left: 1px solid var(--brand); }
+.guide-lang.active { background: var(--brand); color: #fff; }
+.guide-intro { font-size: 0.95rem; margin: 0 0 0.75rem; }
+.guide-your {
+  background: var(--brand-light); border-radius: 8px; padding: 0.5rem 0.75rem;
+  font-size: 0.9rem; font-weight: 600; margin: 0 0 0.9rem;
+}
+.guide-list { list-style: none; padding: 0; margin: 0 0 0.9rem; counter-reset: g; }
+.guide-item { border: 1px solid var(--line); border-radius: 10px; padding: 0.7rem 0.85rem; margin-bottom: 0.6rem; }
+.guide-item-head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.35rem; }
+.guide-num {
+  flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; background: var(--brand); color: #fff;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 0.78rem; font-weight: 700;
+}
+.guide-name { font-weight: 700; font-size: 0.95rem; }
+.guide-plain { margin: 0 0 0.25rem; font-size: 0.9rem; line-height: 1.6; }
+.guide-eg { margin: 0; font-size: 0.85rem; color: var(--muted); line-height: 1.6; }
+.guide-note { font-size: 0.86rem; color: var(--muted); line-height: 1.65; margin: 0 0 0.7rem; }
+.guide-h { margin: 1rem 0 0.5rem; font-size: 0.92rem; }
+.guide-bands { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.9rem; }
+
 /* ---------- Alerts ---------- */
 .alert { padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.9rem; }
 .alert.info { background: #eaf2fb; color: #1c4e80; border: 1px solid #c5dbf2; }

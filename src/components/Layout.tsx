@@ -56,7 +56,12 @@ export default function Layout() {
               to={n.to}
               end={n.end}
               title={collapsed && !mobileOpen ? n.label : undefined}
-              onClick={() => setMobileOpen(false)}
+              onClick={() => {
+                // Collapse again after picking a page — the drawer on mobile,
+                // the pinned rail on desktop.
+                setMobileOpen(false);
+                setCollapsed(true);
+              }}
             >
               <span className="nav-ico">{n.icon}</span>
               <span className="nav-label">{n.label}</span>
