@@ -14,6 +14,7 @@ import {
   ReportExtras,
 } from "../lib/resume";
 import { extractProfileLinks, normalizeGithubUrl, normalizeLinkedinUrl } from "../lib/links";
+import { countResumeLines } from "../lib/resumeLines";
 import {
   searchGithubUsers,
   assessGithubPortfolio,
@@ -50,6 +51,7 @@ export default function ResumeParsing() {
   const [savedId, setSavedId] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState<DuplicateInfo | null>(null);
   const [usage, setUsage] = useState<TokenUsage | null>(null);
+  const [totalLines, setTotalLines] = useState<number | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const savedIdRef = useRef<string | null>(null);
 
@@ -280,7 +282,11 @@ export default function ResumeParsing() {
     setBusy(true);
     try {
       const { assessment, usage, duplicate } = await assessResume(resumeText, jd, provider, model);
-      setResult(assessment);
+      // Count the scoreable lines now, while we still have the resume text —
+      // it gives the AI signal a real denominator instead of the model's guess.
+      const lines = countResumeLines(resumeText);
+      setTotalLines(lines);
+      setResult({ ...assessment, totalLines: lines });
       setUsage(usage);
 
       // Profile links: regex over the raw text first (verbatim), LLM extraction as fallback.
@@ -296,7 +302,11 @@ export default function ResumeParsing() {
         // Flag first — ask the user what to do before saving.
         setDuplicate(duplicate);
       } else {
-        await doSave(assessment, usage, { githubUrl: gh, linkedinUrl: li });
+        await doSave({ ...assessment, totalLines: lines }, usage, {
+          githubUrl: gh,
+          linkedinUrl: li,
+          totalLines: lines,
+        });
       }
 
       if (gh) void runPortfolio(gh); // assess in the background while the fit result is shown
@@ -448,6 +458,7 @@ export default function ResumeParsing() {
                     githubProfile: pf?.profile,
                     linkedinCheck: liCheck,
                     missingLinks,
+                    totalLines: totalLines ?? undefined,
                   })
                 }
               >
@@ -717,6 +728,7 @@ export default function ResumeParsing() {
                     githubProfile: pf?.profile,
                     linkedinCheck: liCheck,
                     missingLinks,
+                    totalLines: totalLines ?? undefined,
                   });
                 }
                 setDuplicate(null);

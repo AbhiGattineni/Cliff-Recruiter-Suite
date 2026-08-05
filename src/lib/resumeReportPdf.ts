@@ -7,6 +7,7 @@
 import { jsPDF } from "jspdf";
 import { ResumeReport } from "./resumeReports";
 import { normalizeAiLines, aiPercentOf } from "./resume";
+import { aiShare } from "./resumeLines";
 import { highlightKeywords } from "./highlight";
 
 type RGB = [number, number, number];
@@ -440,18 +441,39 @@ export function buildResumeReportPdf(r: ResumeReport): { doc: jsPDF; filename: s
   }
 
   // ---- AI signal ----------------------------------------------------------
-  const aiPct = aiPercentOf(r);
+  const modelPct = aiPercentOf(r);
   const aiLines = normalizeAiLines(r.aiGeneratedLines);
+  const share = aiShare(aiLines.length, r.totalLines);
+  const headlinePct = share ? share.share : modelPct;
   const aiColor =
-    aiPct != null
-      ? aiPct > 65 ? RED : aiPct >= 30 ? AMBER : GREEN
+    headlinePct != null
+      ? headlinePct > 65 ? RED : headlinePct >= 30 ? AMBER : GREEN
       : r.aiGeneratedLikelihood === "Low" ? GREEN : r.aiGeneratedLikelihood === "High" ? RED : AMBER;
 
   section(
     "AI-written content signal",
-    aiPct != null ? `${aiPct}%${aiLines.length ? ` · ${aiLines.length} lines` : ""}` : r.aiGeneratedLikelihood,
+    share
+      ? `${share.flagged} of ${share.total} lines · ${share.share}%`
+      : modelPct != null
+        ? `${modelPct}%${aiLines.length ? ` · ${aiLines.length} lines` : ""}`
+        : r.aiGeneratedLikelihood,
     aiColor,
     () => {
+      if (share) {
+        text(
+          `${share.flagged} of ${share.total} scoreable lines read as AI-written (${share.share}%). ` +
+            "Scoreable lines are the bullets and sentences in the summary, experience and project sections." +
+            (modelPct != null ? ` The model's own overall impression was ${modelPct}%.` : ""),
+          MARGIN + 10,
+          { w: contentW - 20 }
+        );
+      } else if (modelPct != null) {
+        text(
+          `${modelPct}% is the model's overall impression; this report predates the line count, so there is no measured share. ${aiLines.length} line(s) flagged.`,
+          MARGIN + 10,
+          { w: contentW - 20, color: MUTED }
+        );
+      }
       if (r.aiGeneratedConfidence) text(r.aiGeneratedConfidence, MARGIN + 10, { w: contentW - 20, color: MUTED });
       const jdKeywords = (r.skillMatches ?? []).map((s) => s.skill);
       if (aiLines.length) {

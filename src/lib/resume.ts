@@ -28,6 +28,8 @@ export interface ResumeAssessment {
   aiGeneratedConfidence: string; // short note
   // Newer reports store scored objects; older ones stored plain strings.
   aiGeneratedLines: (string | AiFlaggedLine)[];
+  /** Scoreable lines in the source resume — the denominator for the AI share. */
+  totalLines?: number;
   extracted: {
     email?: string;
     phone?: string;
@@ -205,6 +207,8 @@ export interface ReportExtras {
   githubProfile?: unknown;
   linkedinCheck?: unknown;
   missingLinks?: { github: boolean; linkedin: boolean } | null;
+  /** Scoreable lines in the resume — the denominator for the AI share. */
+  totalLines?: number;
 }
 
 /** Save an already-computed assessment to the reports history. Returns the id. */

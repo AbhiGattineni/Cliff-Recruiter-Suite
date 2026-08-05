@@ -26,6 +26,8 @@ export interface ResumeReport extends ResumeAssessment {
   linkedinCheck?: LinkedinCheck | null;
   /** Which profile links the recruiter confirmed were not supplied. */
   missingLinks?: { github: boolean; linkedin: boolean } | null;
+  /** Scoreable lines in the resume when it was parsed (absent on older reports). */
+  totalLines?: number;
 }
 
 interface ListResponse {

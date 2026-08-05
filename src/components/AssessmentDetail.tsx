@@ -1,5 +1,6 @@
 import { ResumeAssessment, normalizeAiLines, aiPercentOf } from "../lib/resume";
 import { highlightKeywords } from "../lib/highlight";
+import { aiShare } from "../lib/resumeLines";
 import Section from "./Section";
 
 // Fit assessment detail — used inline on Resume Parsing and inside the Resume
@@ -9,10 +10,14 @@ import Section from "./Section";
 export default function AssessmentDetail({ a, startIndex = 0 }: { a: ResumeAssessment; startIndex?: number }) {
   const aiLines = normalizeAiLines(a.aiGeneratedLines);
   const jdKeywords = (a.skillMatches ?? []).map((s) => s.skill);
-  const aiPct = aiPercentOf(a);
+  const modelPct = aiPercentOf(a); // the model's own holistic estimate
+  // Measured share = flagged lines / scoreable lines in the resume. Absent on
+  // reports saved before the line count was recorded.
+  const share = aiShare(aiLines.length, a.totalLines);
+  const headline = share ? share.share : modelPct;
   const aiClass =
-    aiPct != null
-      ? aiPct > 65 ? "red" : aiPct >= 30 ? "amber" : "green"
+    headline != null
+      ? headline > 65 ? "red" : headline >= 30 ? "amber" : "green"
       : a.aiGeneratedLikelihood === "Low" ? "green" : a.aiGeneratedLikelihood === "High" ? "red" : "amber";
 
   const skills = a.skillMatches ?? [];
@@ -87,11 +92,29 @@ export default function AssessmentDetail({ a, startIndex = 0 }: { a: ResumeAsses
         index={startIndex + 1}
         summary={
           <span className={`pill ${aiClass}`}>
-            {aiPct != null ? `${aiPct}%` : a.aiGeneratedLikelihood}
-            {aiLines.length > 0 ? ` · ${aiLines.length} lines` : ""}
+            {share
+              ? `${share.flagged} of ${share.total} lines · ${share.share}%`
+              : `${modelPct != null ? `${modelPct}%` : a.aiGeneratedLikelihood}${aiLines.length ? ` · ${aiLines.length} lines` : ""}`}
           </span>
         }
       >
+        {share ? (
+          <p style={{ marginTop: 0, fontSize: "0.9rem" }}>
+            <strong>{share.flagged} of {share.total}</strong> scoreable lines in this resume read as
+            AI-written — <strong>{share.share}%</strong>. Scoreable lines are the bullets and sentences in the
+            summary, experience and project sections; headings, dates, contact rows and skill lists are not
+            counted.
+            {modelPct != null && (
+              <span className="muted"> The model&#39;s own overall impression was {modelPct}%.</span>
+            )}
+          </p>
+        ) : (
+          <p style={{ marginTop: 0, fontSize: "0.9rem" }} className="muted">
+            {modelPct != null ? `${modelPct}% is the model's overall impression` : a.aiGeneratedLikelihood} —
+            this report predates the line count, so there is no measured share. {aiLines.length} line
+            {aiLines.length === 1 ? "" : "s"} were flagged.
+          </p>
+        )}
         {a.aiGeneratedConfidence && (
           <p className="muted" style={{ marginTop: 0, fontSize: "0.88rem" }}>{a.aiGeneratedConfidence}</p>
         )}

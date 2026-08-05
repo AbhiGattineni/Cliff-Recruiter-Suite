@@ -6,7 +6,9 @@
 // and the 16 was just how many lines it chose to list; the two numbers were
 // unrelated and there was no total anywhere, so "16 of what?" had no answer.
 
-/** Lines that are structure, not prose — headers, dates, contact rows. */
+const words = (s: string) => s.split(/\s+/).filter(Boolean).length;
+
+/** Lines that are structure, not prose — headers, dates, contact and list rows. */
 function isStructural(line: string): boolean {
   const t = line.trim();
   if (t.length < 25) return true; // section titles, dates, short labels
@@ -14,8 +16,16 @@ function isStructural(line: string): boolean {
   if (/^[\s|•·—–-]*$/.test(t)) return true; // rule / separator
   // Contact lines: mostly email / phone / URL with little else.
   if (/@|https?:\/\/|linkedin\.com|github\.com/i.test(t) && t.length < 120 && !/[.!?]\s/.test(t)) return true;
+  // Comma-separated lists (skills rows) — many commas, no sentence punctuation.
+  const commas = (t.match(/,/g) ?? []).length;
+  if (commas >= 2 && commas >= words(t) / 4 && !/[.!?]$/.test(t)) return true;
   return false;
 }
+
+// A bulleted line is a unit outright; running prose has to look like a
+// sentence, which keeps job titles and company/location rows out of the count.
+const MIN_BULLET_WORDS = 4;
+const MIN_PROSE_WORDS = 8;
 
 /** Strip a leading bullet glyph or numbering. */
 function stripBullet(line: string): string {
@@ -39,15 +49,14 @@ export function resumeSegments(text: string): string[] {
     // a prose paragraph splits into its sentences.
     const bulleted = /^\s*(?:[•·▪◦*\-–—]|\(?\d{1,2}[.)])\s+/.test(rawLine);
     if (bulleted) {
-      out.push(line);
+      if (words(line) >= MIN_BULLET_WORDS) out.push(line);
       continue;
     }
     const sentences = line
       .split(/(?<=[.!?])\s+(?=[A-Z(])/)
       .map((s) => s.trim())
-      .filter((s) => s.length >= 25);
-    if (sentences.length) out.push(...sentences);
-    else out.push(line);
+      .filter((s) => s.length >= 25 && words(s) >= MIN_PROSE_WORDS);
+    out.push(...sentences);
   }
   return out;
 }
