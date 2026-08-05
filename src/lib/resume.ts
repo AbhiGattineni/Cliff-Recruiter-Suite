@@ -204,6 +204,7 @@ export interface ReportExtras {
   portfolio?: unknown;
   githubProfile?: unknown;
   linkedinCheck?: unknown;
+  missingLinks?: { github: boolean; linkedin: boolean } | null;
 }
 
 /** Save an already-computed assessment to the reports history. Returns the id. */

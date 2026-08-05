@@ -699,6 +699,7 @@ export const updateResumeReport = onCall(
     if (d.portfolio && typeof d.portfolio === "object") patch.portfolio = d.portfolio;
     if (d.githubProfile && typeof d.githubProfile === "object") patch.githubProfile = d.githubProfile;
     if (d.linkedinCheck && typeof d.linkedinCheck === "object") patch.linkedinCheck = d.linkedinCheck;
+    if (d.missingLinks && typeof d.missingLinks === "object") patch.missingLinks = d.missingLinks;
     if (!Object.keys(patch).length) return { ok: true };
     patch.updatedAt = FieldValue.serverTimestamp();
     await getFirestore().collection("resumeReports").doc(id).set(patch, { merge: true });
@@ -749,6 +750,8 @@ export const saveResumeReport = onCall(
         request.data?.githubProfile && typeof request.data.githubProfile === "object" ? request.data.githubProfile : null,
       linkedinCheck:
         request.data?.linkedinCheck && typeof request.data.linkedinCheck === "object" ? request.data.linkedinCheck : null,
+      missingLinks:
+        request.data?.missingLinks && typeof request.data.missingLinks === "object" ? request.data.missingLinks : null,
       promptTokens: Number(usage?.promptTokens) || 0,
       completionTokens: Number(usage?.completionTokens) || 0,
       totalTokens: Number(usage?.totalTokens) || 0,

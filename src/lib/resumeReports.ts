@@ -24,6 +24,8 @@ export interface ResumeReport extends ResumeAssessment {
   portfolio?: PortfolioAssessment | null;
   githubProfile?: GithubProfile | null;
   linkedinCheck?: LinkedinCheck | null;
+  /** Which profile links the recruiter confirmed were not supplied. */
+  missingLinks?: { github: boolean; linkedin: boolean } | null;
 }
 
 interface ListResponse {

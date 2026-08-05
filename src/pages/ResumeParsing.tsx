@@ -30,6 +30,7 @@ import PortfolioDetail from "../components/PortfolioDetail";
 import LinkedinCheck from "../components/LinkedinCheck";
 import Section from "../components/Section";
 import VerdictBand, { toneForScore } from "../components/VerdictBand";
+import MissingLinksNote from "../components/MissingLinksNote";
 import Modal from "../components/Modal";
 
 const PROVIDER_ORDER: ProviderId[] = ["ollama", "openai"];
@@ -64,6 +65,10 @@ export default function ResumeParsing() {
   const [ghSearching, setGhSearching] = useState(false);
   const [ghMatches, setGhMatches] = useState<GithubProfile[] | null>(null);
   const [ghManual, setGhManual] = useState("");
+  const [liManual, setLiManual] = useState("");
+  // Set when the recruiter explicitly skips a link they were asked for, so the
+  // report can say it was never supplied rather than silently showing nothing.
+  const [missingLinks, setMissingLinks] = useState<{ github: boolean; linkedin: boolean } | null>(null);
   const [liCheck, setLiCheck] = useState<StoredLinkedinCheck | null>(null);
   const liSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -154,12 +159,18 @@ export default function ResumeParsing() {
     }
   };
 
-  /** No GitHub link on the resume — search for likely profiles and let the recruiter confirm. */
-  const findOnGithub = async (assessment: ResumeAssessment) => {
+  /**
+   * Ask the recruiter for the profile links the resume didn't carry. When
+   * GitHub is missing we also search for likely profiles so they can confirm
+   * one rather than hunt for it.
+   */
+  const askForLinks = async (assessment: ResumeAssessment, needGithub: boolean) => {
     setGhModalOpen(true);
+    setGhManual("");
+    setLiManual("");
+    if (!needGithub) return;
     setGhSearching(true);
     setGhMatches(null);
-    setGhManual("");
     try {
       const matches = await searchGithubUsers(
         assessment.candidateName ?? "",
@@ -170,6 +181,30 @@ export default function ResumeParsing() {
       setGhMatches([]);
     } finally {
       setGhSearching(false);
+    }
+  };
+
+  /** Persist which links the recruiter left blank. */
+  const recordMissing = (flags: { github: boolean; linkedin: boolean }) => {
+    setMissingLinks(flags);
+    if (savedIdRef.current) {
+      updateResumeReport(savedIdRef.current, { missingLinks: flags })
+        .then(() => qc.invalidateQueries({ queryKey: ["resumeReports"] }))
+        .catch(() => { /* non-fatal — the flag is still shown on screen */ });
+    }
+  };
+
+  /** "Save & continue" — take whatever was typed, then flag what's still absent. */
+  const submitLinks = () => {
+    const gh = normalizeGithubUrl(ghManual) || githubUrl;
+    const li = normalizeLinkedinUrl(liManual) || liManual.trim() || linkedinUrl;
+    if (li) { setLinkedinUrl(li); setLiInput(li); }
+    setGhModalOpen(false);
+    recordMissing({ github: !gh, linkedin: !li });
+    if (gh && gh !== githubUrl) void runPortfolio(gh);
+    else if (gh) { setGithubUrl(gh); setGhInput(gh); }
+    if (savedIdRef.current) {
+      updateResumeReport(savedIdRef.current, { githubUrl: gh, linkedinUrl: li }).catch(() => {});
     }
   };
 
@@ -233,6 +268,7 @@ export default function ResumeParsing() {
     setLiCheck(null);
     setGhMatches(null);
     setGhModalOpen(false);
+    setMissingLinks(null);
     if (resumeText.trim().length < 30) {
       setError("Please add the resume — paste the text or upload a .txt / .docx file.");
       return;
@@ -263,11 +299,10 @@ export default function ResumeParsing() {
         await doSave(assessment, usage, { githubUrl: gh, linkedinUrl: li });
       }
 
-      if (gh) {
-        void runPortfolio(gh); // assess in the background while the fit result is shown
-      } else {
-        void findOnGithub(assessment); // confirm-before-attach: recruiter picks the right profile
-      }
+      if (gh) void runPortfolio(gh); // assess in the background while the fit result is shown
+      // Ask for whatever the resume didn't carry. GitHub also gets a profile
+      // search so the recruiter confirms a match rather than hunting for one.
+      if (!gh || !li) void askForLinks(assessment, !gh);
     } catch (err: unknown) {
       setError(friendlyError(err));
     } finally {
@@ -412,6 +447,7 @@ export default function ResumeParsing() {
                     portfolio: pf?.portfolio,
                     githubProfile: pf?.profile,
                     linkedinCheck: liCheck,
+                    missingLinks,
                   })
                 }
               >
@@ -470,7 +506,7 @@ export default function ResumeParsing() {
                     ⟳ Re-assess
                   </button>
                 ) : (
-                  <button className="btn secondary" onClick={() => findOnGithub(result)} disabled={pfBusy}>
+                  <button className="btn secondary" onClick={() => askForLinks(result, true)} disabled={pfBusy}>
                     🔎 Find on GitHub
                   </button>
                 )}
@@ -525,6 +561,10 @@ export default function ResumeParsing() {
             GitHub is assessed automatically; LinkedIn is stored as a link and checked against the signals you
             enter (it has no public API for profile data). Full detail for both is below the fit assessment.
           </p>
+
+          <div style={{ marginTop: "0.9rem" }}>
+            <MissingLinksNote missing={missingLinks} />
+          </div>
 
           {/* ---- Headline verdicts ---- */}
           <div style={{ marginTop: "1rem" }}>
@@ -676,6 +716,7 @@ export default function ResumeParsing() {
                     portfolio: pf?.portfolio,
                     githubProfile: pf?.profile,
                     linkedinCheck: liCheck,
+                    missingLinks,
                   });
                 }
                 setDuplicate(null);
@@ -706,19 +747,57 @@ export default function ResumeParsing() {
         )}
       </Modal>
 
-      {/* GitHub confirm-before-attach */}
+      {/* Ask for the profile links the resume didn't carry */}
       <Modal
+        wide
         open={ghModalOpen}
         onClose={() => setGhModalOpen(false)}
-        title="Confirm the candidate's GitHub profile"
+        title="Add the candidate's profile links"
         footer={
-          <button className="btn ghost" onClick={() => setGhModalOpen(false)}>
-            Skip — no GitHub
-          </button>
+          <>
+            <button
+              className="btn ghost"
+              onClick={() => {
+                setGhModalOpen(false);
+                recordMissing({ github: !githubUrl, linkedin: !linkedinUrl });
+              }}
+            >
+              Not provided — continue
+            </button>
+            <button className="btn" onClick={submitLinks}>
+              Save &amp; continue
+            </button>
+          </>
         }
       >
         <p style={{ marginTop: 0 }}>
-          No GitHub link was found on the resume.{" "}
+          The resume didn&#39;t include{" "}
+          <strong>
+            {!githubUrl && !linkedinUrl ? "a GitHub or LinkedIn link" : !githubUrl ? "a GitHub link" : "a LinkedIn link"}
+          </strong>
+          . Add {!githubUrl && !linkedinUrl ? "them" : "it"} below if you have {!githubUrl && !linkedinUrl ? "them" : "it"} —
+          otherwise choose <em>Not provided</em> and the report will record that {!githubUrl && !linkedinUrl ? "they were" : "it was"} never
+          supplied.
+        </p>
+
+        {!linkedinUrl && (
+          <div className="field">
+            <label>LinkedIn profile</label>
+            <input
+              value={liManual}
+              onChange={(e) => setLiManual(e.target.value)}
+              placeholder="https://linkedin.com/in/username"
+            />
+            <span className="muted" style={{ fontSize: "0.78rem" }}>
+              Stored as a link for your own review, and used for the credibility check.
+            </span>
+          </div>
+        )}
+
+        {!githubUrl && (
+        <>
+        <p style={{ marginBottom: "0.4rem", fontWeight: 600 }}>GitHub profile</p>
+        <p className="muted" style={{ marginTop: 0, fontSize: "0.85rem" }}>
           {ghSearching
             ? "Searching GitHub for likely profiles…"
             : ghMatches && ghMatches.length > 0
@@ -765,10 +844,12 @@ export default function ResumeParsing() {
             placeholder="Paste GitHub URL or username…"
             style={{ flex: 1 }}
           />
-          <button className="btn" onClick={() => useGithub(ghManual)} disabled={!ghManual.trim()}>
+          <button className="btn secondary" onClick={() => useGithub(ghManual)} disabled={!ghManual.trim()}>
             Use this URL
           </button>
         </div>
+        </>
+        )}
       </Modal>
     </div>
   );

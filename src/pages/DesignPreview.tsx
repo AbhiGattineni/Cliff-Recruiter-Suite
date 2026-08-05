@@ -9,8 +9,12 @@ import PortfolioDetail from "../components/PortfolioDetail";
 import { LinkedinVerdict } from "../components/LinkedinCheck";
 import Section from "../components/Section";
 import VerdictBand, { toneForScore } from "../components/VerdictBand";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import Pagination, { usePagination } from "../components/Pagination";
+import IndexGuide from "../components/IndexGuide";
+import { computeRecruiterStats } from "../lib/recruiterStats";
+import { SubmissionEvent } from "../lib/report/types";
+import { DateTime } from "luxon";
 import ColumnFilter from "../components/ColumnFilter";
 import { applyColumnFilters, optionsForColumn, activeFilterCount, ColumnSelections } from "../lib/columnFilter";
 import { downloadResumeReportPdf } from "../lib/resumeReportPdf";
@@ -236,7 +240,34 @@ const SAMPLE: ResumeReport = {
   cost: 0.00121,
 };
 
+// A sample recruiter for the index guide.
+const demoEvent = (cand: string, status: string, job: string): SubmissionEvent => ({
+  jobCode: job,
+  jobTitle: "Sample requirement",
+  applicantName: cand,
+  submittedBy: "Sample Recruiter",
+  client: "Acme",
+  submissionStatus: status,
+  statusChangedOn: DateTime.fromISO("2026-08-04T10:00:00"),
+  submittedOn: DateTime.fromISO("2026-08-01T10:00:00"),
+  accountManager: "AM",
+  jobCreatedOn: DateTime.fromISO("2026-07-01"),
+});
+
+function demoStat() {
+  return computeRecruiterStats(
+  [
+    demoEvent("Cand A", "Submitted To Client", "J1"),
+    demoEvent("Cand B", "Client Interview", "J1"),
+    demoEvent("Cand C", "Submitted", "J2"),
+  ],
+  [],
+  { periodScoped: true }
+).stats[0];
+}
+
 export default function DesignPreview() {
+  const DEMO_STAT = useMemo(demoStat, []);
   const pf = SAMPLE.portfolio!;
   const li = SAMPLE.linkedinCheck!;
   return (
@@ -252,6 +283,15 @@ export default function DesignPreview() {
       </div>
 
       <PaginationDemo />
+
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Performance index guide</h3>
+        <p className="muted" style={{ marginTop: "-0.25rem", fontSize: "0.85rem" }}>
+          Plain-language explanation with sample figures. Switch between English, Telugu and Hindi.
+        </p>
+        <IndexGuide stat={DEMO_STAT} />
+      </div>
+
 
       <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "0.5rem" }}>

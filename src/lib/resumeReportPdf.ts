@@ -255,6 +255,35 @@ export function buildResumeReportPdf(r: ResumeReport): { doc: jsPDF; filename: s
     y += 4;
   }
 
+  // ---- missing profile links ---------------------------------------------
+  const ml = r.missingLinks;
+  if (ml && (ml.github || ml.linkedin)) {
+    const which = ml.github && ml.linkedin ? "GitHub or LinkedIn" : ml.github ? "GitHub" : "LinkedIn";
+    keepTogether(34);
+    y += 12;
+    const boxTop = y;
+    const boxH = 30;
+    doc.setFillColor(255, 248, 230);
+    doc.setDrawColor(243, 224, 166);
+    doc.setLineWidth(0.7);
+    doc.rect(MARGIN, boxTop, contentW, boxH, "FD");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(138, 97, 0);
+    doc.text(`No ${which} profile provided`, MARGIN + 10, boxTop + 13);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.text(
+      doc.splitTextToSize(
+        "The resume did not contain it and the recruiter confirmed it was not available, so the corresponding check could not run.",
+        contentW - 20
+      )[0],
+      MARGIN + 10,
+      boxTop + 24
+    );
+    y = boxTop + boxH + 4;
+  }
+
   // ---- fit assessment -----------------------------------------------------
   section("Fit assessment", r.rating, ratingColor(r.rating), () => {
     text(r.summary, MARGIN + 10, { w: contentW - 20 });

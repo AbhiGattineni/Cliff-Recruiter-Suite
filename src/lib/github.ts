@@ -87,6 +87,7 @@ export interface ResumeReportPatch {
   portfolio?: PortfolioAssessment;
   githubProfile?: GithubProfile;
   linkedinCheck?: unknown;
+  missingLinks?: { github: boolean; linkedin: boolean } | null;
 }
 
 /** Patch profile links / portfolio onto an already-saved resume report. */

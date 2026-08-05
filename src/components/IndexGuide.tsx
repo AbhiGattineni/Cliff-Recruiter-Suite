@@ -16,14 +16,7 @@ const WEIGHT_OF: Record<string, number> = {
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 
-export default function IndexGuide({
-  stat,
-  targetBasisLabel,
-}: {
-  stat?: RecruiterStat;
-  /** e.g. "1 requirement worked in this period" — already localised upstream. */
-  targetBasisLabel?: string;
-}) {
+export default function IndexGuide({ stat }: { stat?: RecruiterStat }) {
   const [lang, setLang] = useState<Lang>(readLang);
   const t = GUIDE[lang];
   const pick = (l: Lang) => {
@@ -57,8 +50,10 @@ export default function IndexGuide({
 
         <p className="guide-intro">{t.intro}</p>
 
-        {stat && targetBasisLabel && (
-          <p className="guide-your">{t.yourLine(stat.clientCount, stat.clientTarget, targetBasisLabel)}</p>
+        {stat && (
+          <p className="guide-your">
+            {t.yourLine(stat.clientCount, stat.clientTarget, t.basis(stat.targetBaseCount, stat.targetBasis))}
+          </p>
         )}
 
         <ol className="guide-list">

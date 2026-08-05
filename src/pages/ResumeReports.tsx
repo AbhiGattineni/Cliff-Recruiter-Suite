@@ -11,6 +11,7 @@ import { LinkedinVerdict } from "../components/LinkedinCheck";
 import Section from "../components/Section";
 import VerdictBand, { toneForScore } from "../components/VerdictBand";
 import { verdictClass } from "../lib/linkedinScore";
+import MissingLinksNote from "../components/MissingLinksNote";
 import Modal from "../components/Modal";
 import LlmUsagePanel from "../components/LlmUsagePanel";
 import Pagination, { usePagination } from "../components/Pagination";
@@ -141,6 +142,7 @@ export default function ResumeReports() {
       <Modal
         open={!!selected}
         onClose={() => setSelected(null)}
+        wide
         title={selected?.candidateName || "Resume report"}
         footer={
           <>
@@ -208,6 +210,7 @@ export default function ResumeReports() {
                 )}
               </div>
             )}
+            <MissingLinksNote missing={selected.missingLinks} />
             <VerdictBand
               verdicts={[
                 {

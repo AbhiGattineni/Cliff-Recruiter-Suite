@@ -13,8 +13,6 @@ import {
   RecruiterStat,
   StatusMeta,
   SortKey,
-  INDEX_WEIGHTS,
-  TARGET_PER_ASSIGNED,
 } from "../lib/recruiterStats";
 import { getRecruiterActivity, RecruiterActivity, ActivityCounts, activityNameKey } from "../lib/recruiterActivity";
 import { extensionFor } from "../lib/extensions";
@@ -38,14 +36,6 @@ const SORTS: { key: SortKey; label: string }[] = [
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 const medal = ["🥇", "🥈", "🥉"];
 const indexPill = (v: number) => (v >= 60 ? "green" : v >= 35 ? "amber" : "red");
-
-const INDEX_METRICS = [
-  { key: "clientPerAssigned", weight: INDEX_WEIGHTS.clientPerAssigned, label: `Client/vendor vs target (${TARGET_PER_ASSIGNED} per requirement)` },
-  { key: "clientRate", weight: INDEX_WEIGHTS.clientRate, label: "Client/vendor rate (of profiles submitted)" },
-  { key: "progressRate", weight: INDEX_WEIGHTS.progressRate, label: "Reached internal interview or beyond" },
-  { key: "volume", weight: INDEX_WEIGHTS.volume, label: "Volume — profiles vs the busiest recruiter" },
-  { key: "coverage", weight: INDEX_WEIGHTS.coverage, label: "Coverage — requirements worked vs the widest" },
-] as const;
 
 const targetBasis = (s: RecruiterStat) =>
   s.targetBasis === "assigned"
@@ -514,7 +504,7 @@ function RecruiterModal({
         </div>
       </div>
 
-      <IndexGuide stat={stat} targetBasisLabel={targetBasis(stat)} />
+      <IndexGuide stat={stat} />
 
       {/* Submissions grouped by requirement — click a job to see its candidates */}
       <h3 style={{ margin: "1.5rem 0 0.5rem" }}>
