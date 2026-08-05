@@ -2,8 +2,8 @@ import { Fragment, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DateTime } from "luxon";
 import { fetchCeipalReport, reportMeta } from "../lib/ceipal";
-import { parseSubmissionsFromApi } from "../lib/report/parseSource";
-import { SubmissionEvent } from "../lib/report/types";
+import { parseSubmissionsFromApi, parseJobsFromApi } from "../lib/report/parseSource";
+import { SubmissionEvent, JobRecord } from "../lib/report/types";
 import { friendlyError } from "../lib/errors";
 import {
   computeClientScores,
@@ -17,6 +17,12 @@ import {
   Verdict,
   Trend,
 } from "../lib/clientTracker";
+import {
+  computeClientRequirements,
+  requirementTotals,
+  clientKey,
+  ClientRequirements,
+} from "../lib/clientRequirements";
 import Pagination, { usePagination } from "../components/Pagination";
 import PieChart from "../components/PieChart";
 
@@ -26,6 +32,7 @@ const days = (n: number | null) => (n == null ? "—" : `${n}d`);
 
 const SORTS: { key: ClientSortKey; label: string }[] = [
   { key: "total", label: "Most submissions" },
+  { key: "requirements", label: "Most requirements received" },
   { key: "reconsider", label: "Problem clients first" },
   { key: "responseRate", label: "Response rate" },
   { key: "response_time", label: "Fastest to respond" },
@@ -82,8 +89,17 @@ export default function ClientTracker() {
   const subsQ = useQuery({
     queryKey: ["clientTrackerSubs"],
     queryFn: async () => {
-      const json = await fetchCeipalReport("submissions");
-      return { subs: parseSubmissionsFromApi(json), meta: reportMeta(json) };
+      // Requirements come from the job report; best-effort so a failure there
+      // doesn't take down the submission metrics.
+      const [subJson, jobRes] = await Promise.all([
+        fetchCeipalReport("submissions"),
+        fetchCeipalReport("job_duration").catch(() => null),
+      ]);
+      return {
+        subs: parseSubmissionsFromApi(subJson),
+        jobs: jobRes ? parseJobsFromApi(jobRes) : [],
+        meta: reportMeta(subJson),
+      };
     },
   });
   const [refreshing, setRefreshing] = useState(false);
@@ -93,8 +109,15 @@ export default function ClientTracker() {
     setRefreshing(true);
     setRefreshErr(null);
     try {
-      const json = await fetchCeipalReport("submissions", { refresh: true });
-      qc.setQueryData(["clientTrackerSubs"], { subs: parseSubmissionsFromApi(json), meta: reportMeta(json) });
+      const [subJson, jobRes] = await Promise.all([
+        fetchCeipalReport("submissions", { refresh: true }),
+        fetchCeipalReport("job_duration", { refresh: true }).catch(() => null),
+      ]);
+      qc.setQueryData(["clientTrackerSubs"], {
+        subs: parseSubmissionsFromApi(subJson),
+        jobs: jobRes ? parseJobsFromApi(jobRes) : [],
+        meta: reportMeta(subJson),
+      });
     } catch (e) {
       setRefreshErr(friendlyError(e));
     } finally {
@@ -103,6 +126,7 @@ export default function ClientTracker() {
   };
 
   const subs: SubmissionEvent[] | null = subsQ.data?.subs ?? null;
+  const jobs: JobRecord[] = subsQ.data?.jobs ?? [];
   const meta = subsQ.data?.meta ?? null;
 
   const [submittedFrom, setSubmittedFrom] = useState("");
@@ -126,9 +150,58 @@ export default function ClientTracker() {
   }, [subs, submittedFrom, submittedTo, dateActive]);
 
   const scores = useMemo(() => (filtered ? computeClientScores(filtered) : []), [filtered]);
-  const sorted = useMemo(() => sortClientScores(scores, sortKey), [scores, sortKey]);
-  const board = usePagination(sorted, 25, "clientTracker");
   const pf = useMemo(() => portfolioStats(scores), [scores]);
+
+  // Requirements RECEIVED from each client in the same window (by job created
+  // date). Independent of submissions — a client can send requirements and
+  // receive nothing back, which is exactly the gap worth seeing.
+  const reqs = useMemo(
+    () =>
+      computeClientRequirements(
+        jobs,
+        submittedFrom ? DateTime.fromISO(submittedFrom) : null,
+        submittedTo ? DateTime.fromISO(submittedTo).endOf("day") : null
+      ),
+    [jobs, submittedFrom, submittedTo]
+  );
+  const reqTotals = useMemo(() => requirementTotals(reqs), [reqs]);
+
+  // One row per client across BOTH sources, so clients that sent requirements
+  // but got no submissions stop being invisible here.
+  const merged = useMemo(() => {
+    const rows = new Map<string, { key: string; client: string; score: ClientScore | null; req: ClientRequirements | null }>();
+    for (const s of scores) {
+      const k = clientKey(s.client);
+      rows.set(k, { key: k, client: s.client, score: s, req: null });
+    }
+    for (const r of reqs) {
+      const cur = rows.get(r.key);
+      if (cur) cur.req = r;
+      else rows.set(r.key, { key: r.key, client: r.client, score: null, req: r });
+    }
+    return Array.from(rows.values());
+  }, [scores, reqs]);
+
+  const sortedRows = useMemo(() => {
+    if (sortKey === "requirements") {
+      return [...merged].sort((a, b) => (b.req?.total ?? 0) - (a.req?.total ?? 0) || a.client.localeCompare(b.client));
+    }
+    const order = sortClientScores(scores, sortKey).map((s) => clientKey(s.client));
+    const rank = new Map(order.map((k, i) => [k, i]));
+    // Clients with no submissions can't be ranked by a submission metric — they
+    // sort after those that can, by requirement count.
+    return [...merged].sort((a, b) => {
+      const ra = rank.has(a.key) ? rank.get(a.key)! : Number.MAX_SAFE_INTEGER;
+      const rb = rank.has(b.key) ? rank.get(b.key)! : Number.MAX_SAFE_INTEGER;
+      return ra - rb || (b.req?.total ?? 0) - (a.req?.total ?? 0);
+    });
+  }, [merged, scores, sortKey]);
+
+  const board = usePagination(sortedRows, 25, "clientTracker");
+  const noSubmissionClients = useMemo(
+    () => merged.filter((r) => !r.score && (r.req?.total ?? 0) > 0 && !r.req?.unassigned).length,
+    [merged]
+  );
 
   const verdictPie = [
     { label: "Prioritize", value: pf.verdicts.prioritize, color: VERDICT.prioritize.color },
@@ -152,7 +225,8 @@ export default function ClientTracker() {
         <div>
           <h1>Client Tracker</h1>
           <p className="muted" style={{ marginTop: "-0.25rem" }}>
-            For each client/vendor we submit to: how many profiles we sent and how far they moved.
+            How many requirements each client sent us, and what we did with them: how many profiles we
+            submitted and how far they moved.
             The timeline starts when a profile is <strong>submitted to the client/vendor</strong> — internal
             submissions don&#39;t count here. Use it to decide who to prioritise and who is sitting silently on our profiles.
           </p>
@@ -213,7 +287,8 @@ export default function ClientTracker() {
             </div>
             {dateActive && (
               <p className="muted" style={{ margin: "0.6rem 0 0", fontSize: "0.85rem" }}>
-                Profiles submitted {submittedFrom || "any time"} → {submittedTo || "today"}.
+                {submittedFrom || "any time"} → {submittedTo || "today"} · requirements counted by the date the
+                client sent them, submissions by the date we sent the profile.
               </p>
             )}
           </div>
@@ -226,9 +301,26 @@ export default function ClientTracker() {
             </div>
           ) : (
             <>
+              {noSubmissionClients > 0 && (
+                <div className="alert warn">
+                  <strong>{noSubmissionClients}</strong> client{noSubmissionClients === 1 ? "" : "s"} sent
+                  requirements in this period but received <strong>no submissions</strong> from us. They are
+                  listed below with a red marker.
+                </div>
+              )}
+              {reqTotals.unassigned > 0 && (
+                <div className="alert info">
+                  <strong>{reqTotals.unassigned}</strong> requirement{reqTotals.unassigned === 1 ? " has" : "s have"} no
+                  client recorded in Ceipal and {reqTotals.unassigned === 1 ? "is" : "are"} grouped under
+                  “Unassigned client”. Filling the client field in Ceipal will move them to the right row.
+                </div>
+              )}
+
               <div className="card">
                 <div className="stat-grid">
-                  <Stat label="Clients / Vendors" value={pf.clients} />
+                  <Stat label="Requirements received" value={reqTotals.requirements} />
+                  <Stat label="Clients who sent them" value={reqTotals.clients} />
+                  <Stat label="Clients / Vendors submitted to" value={pf.clients} />
                   <Stat label="Profiles submitted to them" value={pf.totalSubs} />
                   <Stat label="Overall response rate" value={pct(pf.respondedRate)} />
                   <Stat label="Selected / offers" value={pf.selected} />
@@ -275,6 +367,8 @@ export default function ClientTracker() {
                         <th style={{ width: 28 }}></th>
                         <th style={{ width: 40 }}>#</th>
                         <th>Client / Vendor</th>
+                        <th style={{ textAlign: "right" }} title="Requirements this client sent us in the selected period">Reqs received</th>
+                        <th style={{ minWidth: 118 }} title="Status of those requirements">Req status</th>
                         <th style={{ textAlign: "right" }}>Submitted</th>
                         <th style={{ minWidth: 150 }}>Progress</th>
                         <th style={{ textAlign: "right" }}>Response</th>
@@ -287,38 +381,98 @@ export default function ClientTracker() {
                       </tr>
                     </thead>
                     <tbody>
-                      {board.pageItems.map((s, i) => {
-                        const key = s.client.toLowerCase();
+                      {board.pageItems.map((row, i) => {
+                        const s = row.score;
+                        const req = row.req;
+                        const key = row.key;
                         const open = expanded.has(key);
-                        const v = VERDICT[s.verdict];
-                        const tr = TREND[s.trend];
+                        const v = s ? VERDICT[s.verdict] : null;
+                        const tr = s ? TREND[s.trend] : null;
                         return (
                           <Fragment key={key}>
-                            <tr onClick={() => toggle(key)} style={{ cursor: "pointer" }} className={s.verdict === "reconsider" ? "red" : ""}>
+                            <tr onClick={() => toggle(key)} style={{ cursor: "pointer" }} className={s?.verdict === "reconsider" ? "red" : ""}>
                               <td style={{ color: "var(--muted)" }}>{open ? "▾" : "▸"}</td>
                               <td className="muted">{board.startIndex + i + 1}</td>
-                              <td style={{ whiteSpace: "normal", fontWeight: 600 }}>{s.client}</td>
-                              <td style={{ textAlign: "right", fontWeight: 600 }}>{s.total}</td>
-                              <td><StageMeter s={s} /></td>
-                              <td style={{ textAlign: "right" }}>{pct(s.responseRate)}</td>
-                              <td style={{ textAlign: "center", color: tr.color, fontWeight: 700 }} title={tr.title}>{tr.icon}</td>
-                              <td style={{ textAlign: "right" }} className="muted">{days(s.avgTimeToResponseDays)}</td>
-                              <td style={{ textAlign: "right" }}>{s.selected || "—"}</td>
-                              <td style={{ textAlign: "right" }} title={s.maxWaitDays != null ? `oldest ${s.maxWaitDays}d` : ""}>
-                                {s.submitted ? (
+                              <td style={{ whiteSpace: "normal", fontWeight: 600 }}>
+                                {row.client}
+                                {req?.unassigned && (
+                                  <span className="pill amber" style={{ marginLeft: 6, fontSize: "0.64rem", padding: "0 5px" }} title="Requirements with no client recorded in Ceipal — worth cleaning up at the source">
+                                    no client set
+                                  </span>
+                                )}
+                                {req?.internal && (
+                                  <span className="pill grey" style={{ marginLeft: 6, fontSize: "0.64rem", padding: "0 5px" }} title="Our own company — internal/bench requirements, not external client demand">
+                                    internal
+                                  </span>
+                                )}
+                                {!s && (req?.total ?? 0) > 0 && (
+                                  <span className="pill red" style={{ marginLeft: 6, fontSize: "0.64rem", padding: "0 5px" }} title="This client sent requirements but we have not submitted anyone">
+                                    0 submissions
+                                  </span>
+                                )}
+                              </td>
+                              <td style={{ textAlign: "right", fontWeight: 700 }}>{req?.total ?? "—"}</td>
+                              <td>
+                                {req && req.total > 0 ? (
+                                  <span style={{ display: "inline-flex", gap: "0.3rem", flexWrap: "wrap", fontSize: "0.72rem" }}>
+                                    {req.active > 0 && <span className="pill green" style={{ padding: "0 6px" }} title="Active">{req.active} act</span>}
+                                    {req.onHold > 0 && <span className="pill amber" style={{ padding: "0 6px" }} title="On Hold / Hold by Client">{req.onHold} hold</span>}
+                                    {req.closed > 0 && <span className="pill grey" style={{ padding: "0 6px" }} title="Closed">{req.closed} closed</span>}
+                                    {req.other > 0 && <span className="pill grey" style={{ padding: "0 6px" }} title="Draft, Filled or other">{req.other} other</span>}
+                                  </span>
+                                ) : <span className="muted">—</span>}
+                              </td>
+                              <td style={{ textAlign: "right", fontWeight: 600 }}>{s ? s.total : "—"}</td>
+                              <td>{s ? <StageMeter s={s} /> : <span className="muted">—</span>}</td>
+                              <td style={{ textAlign: "right" }}>{s ? pct(s.responseRate) : "—"}</td>
+                              <td style={{ textAlign: "center", color: tr?.color, fontWeight: 700 }} title={tr?.title}>{tr?.icon ?? "·"}</td>
+                              <td style={{ textAlign: "right" }} className="muted">{s ? days(s.avgTimeToResponseDays) : "—"}</td>
+                              <td style={{ textAlign: "right" }}>{s ? s.selected || "—" : "—"}</td>
+                              <td style={{ textAlign: "right" }} title={s?.maxWaitDays != null ? `oldest ${s.maxWaitDays}d` : ""}>
+                                {s && s.submitted ? (
                                   <>
                                     {s.submitted} · {s.avgWaitDays ?? 0}d
                                     {s.staleCount > 0 && <span className="pill red" style={{ marginLeft: 4, fontSize: "0.66rem", padding: "0 5px" }}>{s.staleCount} stale</span>}
                                   </>
                                 ) : "—"}
                               </td>
-                              <td style={{ whiteSpace: "nowrap" }} className="muted">{fmtDate(s.lastActivity)}</td>
-                              <td><span className={`pill ${v.pill}`} title={v.hint}>{v.label}</span></td>
+                              <td style={{ whiteSpace: "nowrap" }} className="muted">{s ? fmtDate(s.lastActivity) : "—"}</td>
+                              <td>{v ? <span className={`pill ${v.pill}`} title={v.hint}>{v.label}</span> : <span className="muted">—</span>}</td>
                             </tr>
                             {open && (
                               <tr>
                                 <td></td>
-                                <td colSpan={11} style={{ background: "#f8fafc", padding: "0.6rem 0.75rem" }}>
+                                <td colSpan={13} style={{ background: "#f8fafc", padding: "0.6rem 0.75rem" }}>
+                                  {req && req.total > 0 && (
+                                    <div style={{ marginBottom: "0.8rem" }}>
+                                      <div style={{ fontWeight: 700, fontSize: "0.85rem", marginBottom: "0.35rem" }}>
+                                        Requirements received ({req.total})
+                                      </div>
+                                      <table className="data" style={{ margin: 0 }}>
+                                        <thead>
+                                          <tr><th>Req code</th><th>Requirement</th><th>Status</th><th>Received</th><th style={{ textAlign: "right" }}>Submissions</th></tr>
+                                        </thead>
+                                        <tbody>
+                                          {req.jobs.map((jr, k) => (
+                                            <tr key={jr.jobCode || k}>
+                                              <td>{jr.jobCode || "—"}</td>
+                                              <td style={{ whiteSpace: "normal" }}>{jr.jobTitle || "—"}</td>
+                                              <td>{jr.jobStatus || "—"}</td>
+                                              <td style={{ whiteSpace: "nowrap" }}>{fmtDate(jr.jobCreatedOn)}</td>
+                                              <td style={{ textAlign: "right" }}>{jr.numOfSubmissions ?? "—"}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  )}
+                                  {!s && (
+                                    <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
+                                      No profiles submitted to this client in the selected period.
+                                    </p>
+                                  )}
+                                  {s && (
+                                  <>
                                   <div style={{ display: "flex", gap: "1.25rem", flexWrap: "wrap", marginBottom: "0.6rem" }}>
                                     <Metric label="Response rate" value={pct(s.responseRate)} />
                                     <Metric label="Reached interview" value={`${s.interviewReached} (${pct(s.interviewRate)})`} />
@@ -362,6 +516,8 @@ export default function ClientTracker() {
                                       ))}
                                     </tbody>
                                   </table>
+                                  </>
+                                  )}
                                 </td>
                               </tr>
                             )}

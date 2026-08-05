@@ -94,19 +94,29 @@ export const INDEX_WEIGHTS = {
 } as const;
 
 // Internal funnel stage — for ORDERING and COLOUR only, never shown as a label.
-type Funnel = "client" | "selected" | "interview" | "waiting" | "submitted" | "rejected" | "unknown";
+type Funnel =
+  | "clientprogress" // client-side interview / offer / placement — beyond a client submission
+  | "client"
+  | "selected"
+  | "interview"
+  | "waiting"
+  | "submitted"
+  | "rejected"
+  | "unknown";
 
 const FUNNEL_RANK: Record<Funnel, number> = {
-  client: 0,
-  selected: 1,
-  interview: 2,
-  waiting: 3,
-  submitted: 4,
-  rejected: 5,
-  unknown: 6,
+  clientprogress: 0,
+  client: 1,
+  selected: 2,
+  interview: 3,
+  waiting: 4,
+  submitted: 5,
+  rejected: 6,
+  unknown: 7,
 };
 
 const FUNNEL_COLOR: Record<Funnel, string> = {
+  clientprogress: "#0b6e2e",
   client: "#1e7e34",
   selected: "#12b886",
   interview: "#e0a800",
@@ -116,6 +126,11 @@ const FUNNEL_COLOR: Record<Funnel, string> = {
   unknown: "", // filled from PALETTE
 };
 
+/** Stages that mean the profile reached the client/vendor (submission or later). */
+function reachedClient(f: Funnel): boolean {
+  return f === "client" || f === "clientprogress";
+}
+
 // Distinct colours for statuses that don't match a known funnel stage.
 const PALETTE = ["#7048e8", "#e8590c", "#0ca678", "#f06595", "#495057", "#a61e4d", "#1098ad", "#d9480f"];
 
@@ -123,6 +138,33 @@ const PALETTE = ["#7048e8", "#e8590c", "#0ca678", "#f06595", "#495057", "#a61e4d
 export function funnelOf(raw: string): Funnel {
   const n = String(raw ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
   if (!n) return "unknown";
+
+  // Negative outcomes first, so "rejected by vendor" isn't read as client progress.
+  if (n.includes("reject") || n.includes("disqualif")) return "rejected";
+
+  const internal = n.includes("internal");
+
+  // Client-side stages BEYOND a client submission — an interview with the
+  // client/vendor, an offer, a placement. These imply the client submission
+  // already happened, so they must score at least as well as one. Previously
+  // "Client Interview" matched nothing and fell through to `unknown`, scoring
+  // zero on the three metrics carrying 80% of the index — penalising the
+  // recruiter for a BETTER outcome than a plain submission.
+  const clientSide =
+    n.includes("client") || n.includes("vendor") || n.includes("enduser") || n.includes("external");
+  if (
+    (!internal && clientSide && n.includes("interview")) ||
+    n.includes("offer") ||
+    n.includes("placed") ||
+    n.includes("placement") ||
+    n.includes("confirmation") ||
+    n.includes("confirmed") ||
+    n.includes("selectedbyvendor") ||
+    n.includes("selectedbyclient")
+  ) {
+    return "clientprogress";
+  }
+
   if (
     n.includes("clientsubmission") ||
     n.includes("vendorsubmission") ||
@@ -135,9 +177,10 @@ export function funnelOf(raw: string): Funnel {
   ) {
     return "client";
   }
-  if (n.includes("rejectedinternally") || n.includes("internalreject") || n === "rejected") return "rejected";
   if (n.includes("selectedinternally") || n.includes("internalselect") || n === "selected") return "selected";
-  if (n.includes("internalinterview") || n.includes("internalscreening")) return "interview";
+  if (n.includes("internalinterview") || n.includes("internalscreening") || n.includes("interview")) {
+    return "interview";
+  }
   if (n.includes("waitingforevaluation") || n === "waiting") return "waiting";
   if (
     n === "submitted" ||
@@ -412,8 +455,8 @@ export function computeRecruiterStats(subs: SubmissionEvent[], jobs: JobRecord[]
     let progressCount = 0;
     for (const [key, n] of p.counts) {
       const f = funnelByKey.get(key)!;
-      if (f === "client") clientCount += n;
-      if (f === "client" || f === "selected" || f === "interview") progressCount += n;
+      if (reachedClient(f)) clientCount += n;
+      if (reachedClient(f) || f === "selected" || f === "interview") progressCount += n;
       counts[labelByKey.get(key) ?? key] = n;
     }
     const profiles = p.profiles || 1;

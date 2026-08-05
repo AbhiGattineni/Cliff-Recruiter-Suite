@@ -301,7 +301,10 @@ export function portfolioStats(scores: ClientScore[]): PortfolioStats {
   };
 }
 
-export type ClientSortKey = "total" | "responseRate" | "selected" | "waiting" | "reconsider" | "stale" | "response_time";
+// "requirements" ranks by requirements received, which lives outside these
+// submission-derived scores — the page handles that key itself.
+export type ClientSortKey =
+  | "total" | "responseRate" | "selected" | "waiting" | "reconsider" | "stale" | "response_time" | "requirements";
 
 const VERDICT_SEVERITY: Record<Verdict, number> = { reconsider: 0, watch: 1, prioritize: 2 };
 

@@ -215,3 +215,60 @@ describe("period attribution end-to-end", () => {
     expect(window.length).toBeGreaterThan(0);
   });
 });
+
+// ---- Client-side stages beyond a submission --------------------------------
+// "Client Interview" used to match nothing and fall through to `unknown`,
+// scoring zero on the metrics carrying 80% of the index — punishing a recruiter
+// for an outcome BETTER than a plain client submission.
+
+describe("funnelOf — client-side progress", () => {
+  it("treats a client/vendor interview as having reached the client", () => {
+    expect(funnelOf("Client Interview")).toBe("clientprogress");
+    expect(funnelOf("Vendor Interview")).toBe("clientprogress");
+    expect(funnelOf("End Client Interview")).toBe("clientprogress");
+  });
+
+  it("still treats internal interviews as internal", () => {
+    expect(funnelOf("Internal Interview")).toBe("interview");
+    expect(funnelOf("Internal Screening")).toBe("interview");
+  });
+
+  it("counts offers, placements and confirmations as client progress", () => {
+    expect(funnelOf("Offer Released")).toBe("clientprogress");
+    expect(funnelOf("Placed")).toBe("clientprogress");
+    expect(funnelOf("Confirmation")).toBe("clientprogress");
+    expect(funnelOf("Selected By Vendor")).toBe("clientprogress");
+  });
+
+  it("reads rejections as rejections even when client-side", () => {
+    expect(funnelOf("Rejected By Vendor")).toBe("rejected");
+    expect(funnelOf("Disqualified By Vendor")).toBe("rejected");
+    expect(funnelOf("Rejected Internally")).toBe("rejected");
+  });
+
+  it("classifies a bare interview status instead of dropping it to unknown", () => {
+    expect(funnelOf("Interview Scheduled")).toBe("interview");
+  });
+});
+
+describe("index credit for client-side progress", () => {
+  const at = (status: string) => [ev2("Juhi", "Sindhu", status, UPLOADED, CLIENT_SUB)];
+
+  it("scores a client interview at least as well as a client submission", () => {
+    const interview = computeRecruiterStats(at("Client Interview")).stats[0];
+    const submission = computeRecruiterStats(at("Submitted To Vendor")).stats[0];
+    expect(interview.clientCount).toBe(1);
+    expect(interview.index).toBeGreaterThanOrEqual(submission.index);
+  });
+
+  it("no longer leaves a client interview scoring zero", () => {
+    const s = computeRecruiterStats(at("Client Interview")).stats[0];
+    expect(s.clientRate).toBe(1);
+    expect(s.progressRate).toBe(1);
+  });
+
+  it("keeps its own label rather than merging into Client / Vendor Submission", () => {
+    const s = computeRecruiterStats(at("Client Interview")).stats[0];
+    expect(s.rows[0].status).toBe("Client Interview");
+  });
+});
