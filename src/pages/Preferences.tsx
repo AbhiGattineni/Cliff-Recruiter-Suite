@@ -3,8 +3,11 @@ import { useQuery } from "@tanstack/react-query";
 import { getUseAI, setUseAI } from "../lib/preferences";
 import { getLlmUsageSummary } from "../lib/resume";
 import LlmUsagePanel from "../components/LlmUsagePanel";
+import RoleManagement from "../components/RoleManagement";
+import { useAuth } from "../context/AuthContext";
 
 export default function Preferences() {
+  const { profile } = useAuth();
   const [useAI, setUse] = useState(getUseAI());
   const usageQ = useQuery({ queryKey: ["llmUsageSummary"], queryFn: () => getLlmUsageSummary() });
 
@@ -40,6 +43,8 @@ export default function Preferences() {
       </div>
 
       <LlmUsagePanel summary={usageQ.data} />
+
+      {profile?.role === "admin" && <RoleManagement />}
     </div>
   );
 }

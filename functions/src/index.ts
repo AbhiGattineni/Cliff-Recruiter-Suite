@@ -30,6 +30,21 @@ import {
   RESEND_COOLDOWN_MS,
   MAX_ATTEMPTS,
 } from "./otp.js";
+import {
+  Role,
+  UserProfile,
+  getOrCreateProfile,
+  getProfile,
+  listAllProfiles,
+  setRole,
+  saveEntry,
+  listEntriesForUser,
+  listAllEntries,
+  createLeaveRequest,
+  listLeavesForUser,
+  listLeavesVisibleTo,
+  decideLeave,
+} from "./timesheets.js";
 
 initializeApp();
 
@@ -90,6 +105,32 @@ function resolveLlm(provider: ProviderId, model: string): {
 function requireAuth(auth: { uid?: string } | undefined): void {
   if (!auth?.uid) {
     throw new HttpsError("unauthenticated", "You must be signed in to use this feature.");
+  }
+}
+
+// ---- Timesheets / leave: auth + role helpers -------------------------------
+// The rest of the app runs "auth on hold" (see comments below), but the
+// approval chain here only means something if we know who's really calling —
+// every timesheets/leave/role callable verifies the caller's token and reads
+// their role from Firestore rather than trusting anything the client sends.
+
+type CallableAuth = { uid?: string; token?: { email?: unknown; name?: unknown } } | undefined;
+
+async function requireProfile(auth: CallableAuth): Promise<UserProfile> {
+  requireAuth(auth);
+  const profile = await getProfile(auth!.uid!);
+  if (!profile) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Your profile hasn't been set up yet. Reload the app to finish sign-in."
+    );
+  }
+  return profile;
+}
+
+function requireRole(profile: UserProfile, roles: Role[]): void {
+  if (!roles.includes(profile.role)) {
+    throw new HttpsError("permission-denied", "You don't have permission to do this.");
   }
 }
 
@@ -967,5 +1008,148 @@ export const deleteReportConfig = onCall(
     const id = String(request.data?.id ?? "");
     if (id) await getFirestore().collection("reportConfigs").doc(id).delete();
     return { ok: true };
+  }
+);
+
+// ---- Timesheets, leave requests, and role management -----------------------
+
+// Called once per sign-in (from AuthContext) to fetch-or-create the caller's
+// role profile. Identity comes from the verified token, never the client.
+export const ensureUserProfile = onCall(
+  { ...commonOpts, timeoutSeconds: 15 },
+  async (request) => {
+    requireAuth(request.auth);
+    const uid = request.auth!.uid!;
+    const email = String(request.auth!.token.email ?? "");
+    const displayName = String(request.auth!.token.name ?? email);
+    const profile = await getOrCreateProfile(uid, email, displayName);
+    return { ok: true, profile };
+  }
+);
+
+// Read-only roster: admins use it for role management, managers use it to
+// build the team timesheet dashboard.
+export const listUsers = onCall(
+  { ...commonOpts, timeoutSeconds: 15 },
+  async (request) => {
+    const profile = await requireProfile(request.auth);
+    requireRole(profile, ["admin", "manager"]);
+    const users = await listAllProfiles();
+    return { ok: true, users };
+  }
+);
+
+export const setUserRole = onCall(
+  { ...commonOpts, timeoutSeconds: 15 },
+  async (request) => {
+    const profile = await requireProfile(request.auth);
+    requireRole(profile, ["admin"]);
+    const targetUid = String(request.data?.uid ?? "");
+    const role = request.data?.role;
+    if (!targetUid) throw new HttpsError("invalid-argument", "uid is required.");
+    if (role !== "admin" && role !== "manager" && role !== "employee") {
+      throw new HttpsError("invalid-argument", "role must be admin, manager, or employee.");
+    }
+    try {
+      const updated = await setRole(targetUid, role as Role);
+      return { ok: true, user: updated };
+    } catch (e) {
+      throw new HttpsError("failed-precondition", e instanceof Error ? e.message : String(e));
+    }
+  }
+);
+
+export const saveTimesheetEntry = onCall(
+  { ...commonOpts, timeoutSeconds: 15 },
+  async (request) => {
+    const profile = await requireProfile(request.auth);
+    const date = String(request.data?.date ?? "");
+    const hours = Number(request.data?.hours);
+    const workedOn = String(request.data?.workedOn ?? "");
+    try {
+      const entry = await saveEntry(profile, date, hours, workedOn);
+      return { ok: true, entry };
+    } catch (e) {
+      throw new HttpsError("invalid-argument", e instanceof Error ? e.message : String(e));
+    }
+  }
+);
+
+export const listMyTimesheets = onCall(
+  { ...commonOpts, timeoutSeconds: 15 },
+  async (request) => {
+    const profile = await requireProfile(request.auth);
+    const from = String(request.data?.from ?? "");
+    const to = String(request.data?.to ?? "");
+    const entries = await listEntriesForUser(profile.uid, from, to);
+    return { ok: true, entries };
+  }
+);
+
+export const listTeamTimesheets = onCall(
+  { ...commonOpts, timeoutSeconds: 20 },
+  async (request) => {
+    const profile = await requireProfile(request.auth);
+    requireRole(profile, ["admin", "manager"]);
+    const from = String(request.data?.from ?? "");
+    const to = String(request.data?.to ?? "");
+    const [entries, users] = await Promise.all([listAllEntries(from, to), listAllProfiles()]);
+    return { ok: true, entries, users };
+  }
+);
+
+export const requestLeave = onCall(
+  { ...commonOpts, timeoutSeconds: 15 },
+  async (request) => {
+    const profile = await requireProfile(request.auth);
+    const leaveType = request.data?.leaveType;
+    const startDate = String(request.data?.startDate ?? "");
+    const endDate = String(request.data?.endDate ?? "");
+    const reason = String(request.data?.reason ?? "");
+    try {
+      const leave = await createLeaveRequest(profile, leaveType, startDate, endDate, reason);
+      return { ok: true, leave };
+    } catch (e) {
+      throw new HttpsError("invalid-argument", e instanceof Error ? e.message : String(e));
+    }
+  }
+);
+
+export const listMyLeaves = onCall(
+  { ...commonOpts, timeoutSeconds: 15 },
+  async (request) => {
+    const profile = await requireProfile(request.auth);
+    const leaves = await listLeavesForUser(profile.uid);
+    return { ok: true, leaves };
+  }
+);
+
+export const listLeaveRequests = onCall(
+  { ...commonOpts, timeoutSeconds: 15 },
+  async (request) => {
+    const profile = await requireProfile(request.auth);
+    requireRole(profile, ["admin", "manager"]);
+    const leaves = await listLeavesVisibleTo(profile.role);
+    return { ok: true, leaves };
+  }
+);
+
+export const decideLeaveRequest = onCall(
+  { ...commonOpts, timeoutSeconds: 15 },
+  async (request) => {
+    const profile = await requireProfile(request.auth);
+    requireRole(profile, ["admin", "manager"]);
+    const id = String(request.data?.id ?? "");
+    const decision = request.data?.decision;
+    const note = String(request.data?.note ?? "");
+    if (decision !== "approved" && decision !== "rejected") {
+      throw new HttpsError("invalid-argument", "decision must be 'approved' or 'rejected'.");
+    }
+    try {
+      const leave = await decideLeave(profile, id, decision, note);
+      return { ok: true, leave };
+    } catch (e) {
+      throw new HttpsError("failed-precondition", e instanceof Error ? e.message : String(e));
+    }
   }
 );

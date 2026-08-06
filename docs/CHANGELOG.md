@@ -2,6 +2,24 @@
 
 Chronological record of notable changes. Newest first.
 
+## Timesheets + leave approval + role-based access
+- New **Timesheets** tab (`/timesheets`, ⏱️) replaces the placeholder with three tabs: **My Timesheet**
+  (log hours + what you worked on per day, last-30-days view, missing-day warning), **My Leaves**
+  (request half-day / one-day / multi-day leave, track status), and **Team Dashboard** (managers/admins
+  only — per-person timesheet completion for a date range, pending leave approvals, decision history).
+- New **role system**: every account is `admin`, `manager`, or `employee` (`userProfiles` Firestore
+  collection, seeded lazily on sign-in via `ensureUserProfile`). `abhishek.g@cliff-services.com` is
+  always admin. Admins manage everyone else's role from a new **Team & roles** card on **Preferences**.
+- **Approval chain**: employee leave is approved by any manager or admin; a manager's own leave can
+  only be approved by an admin — enforced server-side (`decideLeaveRequest`), not just in the UI.
+- **Auth is enforced for this feature**: all new Cloud Functions (`ensureUserProfile`, `listUsers`,
+  `setUserRole`, `saveTimesheetEntry`, `listMyTimesheets`, `listTeamTimesheets`, `requestLeave`,
+  `listMyLeaves`, `listLeaveRequests`, `decideLeaveRequest`) verify the caller's Firebase Auth token and
+  derive identity/role from Firestore rather than trusting client input. The rest of the app is
+  unaffected — it still runs "auth on hold" as before.
+- New `functions/src/timesheets.ts` (roles, timesheet entries, leave requests) and client
+  `src/lib/timesheets.ts`; `AuthContext` now also exposes the caller's role `profile`.
+
 ## Candidate Pool + Preferences (AI toggle) + per-feature usage
 - New **Candidate Pool** tab (`/candidate-pool`): the internally-selected/vetted candidates from the
   Ceipal report, **de-duplicated to one row per candidate**. First load shows all (~572); a **JD box**

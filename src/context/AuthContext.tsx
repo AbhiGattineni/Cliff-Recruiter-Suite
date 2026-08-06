@@ -1,7 +1,7 @@
 // Authentication context — wraps Firebase Auth and exposes the current user
 // plus sign-in / sign-out helpers to the whole app.
 
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, ReactNode } from "react";
 import {
   User,
   onAuthStateChanged,
@@ -10,17 +10,22 @@ import {
   updateProfile,
   signOut as fbSignOut,
 } from "firebase/auth";
-import { auth } from "../firebase";
+import { auth, isPlaceholderConfig } from "../firebase";
 import { isAllowedEmail, ALLOWED_DOMAIN } from "../lib/auth";
+import { ensureUserProfile, UserProfile } from "../lib/timesheets";
 
 const DOMAIN_MSG = `Only @${ALLOWED_DOMAIN} accounts are allowed.`;
 
 interface AuthContextValue {
   user: User | null;
   loading: boolean;
+  /** Role profile (admin/manager/employee) used to gate Timesheets & role management. */
+  profile: UserProfile | null;
+  profileLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, displayName?: string) => Promise<void>;
   signOut: () => Promise<void>;
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -28,14 +33,34 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  const refreshProfile = useCallback(async () => {
+    if (isPlaceholderConfig || !auth.currentUser) {
+      setProfile(null);
+      return;
+    }
+    setProfileLoading(true);
+    try {
+      setProfile(await ensureUserProfile());
+    } catch {
+      // Role-gated UI (Team Dashboard, role management) just stays hidden.
+      setProfile(null);
+    } finally {
+      setProfileLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
+      if (u) void refreshProfile();
+      else setProfile(null);
     });
     return unsub;
-  }, []);
+  }, [refreshProfile]);
 
   const signIn = async (email: string, password: string) => {
     if (!isAllowedEmail(email)) throw new Error(DOMAIN_MSG);
@@ -57,7 +82,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider
+      value={{ user, loading, profile, profileLoading, signIn, signUp, signOut, refreshProfile }}
+    >
       {children}
     </AuthContext.Provider>
   );

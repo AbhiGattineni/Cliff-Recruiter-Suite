@@ -1,26 +1,54 @@
-// Placeholder for the Timesheets tool. The nav entry and route exist so the
-// feature has a home; the actual implementation comes later.
+import { useState } from "react";
+import { useAuth } from "../context/AuthContext";
+import MyTimesheetTab from "../components/timesheets/MyTimesheetTab";
+import MyLeavesTab from "../components/timesheets/MyLeavesTab";
+import TeamDashboardTab from "../components/timesheets/TeamDashboardTab";
+
+type Tab = "mine" | "leaves" | "team";
 
 export default function Timesheets() {
+  const { profile, profileLoading } = useAuth();
+  const [tab, setTab] = useState<Tab>("mine");
+  const canSeeTeam = profile?.role === "admin" || profile?.role === "manager";
+
   return (
     <div>
       <h1>Timesheets</h1>
       <p className="muted" style={{ marginTop: "-0.25rem" }}>
-        Consultant timesheet tracking — not built yet.
+        Log your hours every day and request time off.
+        {canSeeTeam && " Managers and admins can also track the whole team below."}
       </p>
 
-      <div className="card">
-        <div style={{ textAlign: "center", padding: "2.5rem 1rem" }}>
-          <div style={{ fontSize: "2.5rem", lineHeight: 1 }} aria-hidden="true">⏱️</div>
-          {/* A plain div, not an h2 — `.card h2` is display:flex globally, which
-              defeats the centring on this card. */}
-          <div style={{ fontSize: "1.25rem", fontWeight: 700, margin: "0.75rem 0 0.35rem" }}>Coming soon</div>
-          <p className="muted" style={{ maxWidth: 520, margin: "0 auto" }}>
-            This tab is a placeholder. Nothing is stored or calculated here yet — the page exists so the
-            feature has a place to land once we decide what it should do.
-          </p>
+      {profileLoading && !profile ? (
+        <div className="center-load" style={{ minHeight: "30vh" }}>
+          <div className="spinner dark" />
         </div>
-      </div>
+      ) : !profile ? (
+        <div className="alert error">
+          Couldn&#39;t load your profile. Reload the page — if this keeps happening, the Cloud Functions may
+          not be deployed yet.
+        </div>
+      ) : (
+        <>
+          <div className="segmented" style={{ marginBottom: "1rem" }}>
+            <button className={tab === "mine" ? "active" : ""} onClick={() => setTab("mine")}>
+              My Timesheet
+            </button>
+            <button className={tab === "leaves" ? "active" : ""} onClick={() => setTab("leaves")}>
+              My Leaves
+            </button>
+            {canSeeTeam && (
+              <button className={tab === "team" ? "active" : ""} onClick={() => setTab("team")}>
+                Team Dashboard
+              </button>
+            )}
+          </div>
+
+          {tab === "mine" && <MyTimesheetTab />}
+          {tab === "leaves" && <MyLeavesTab />}
+          {tab === "team" && canSeeTeam && <TeamDashboardTab role={profile.role} />}
+        </>
+      )}
     </div>
   );
 }

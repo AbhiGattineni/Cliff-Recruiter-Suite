@@ -1,0 +1,326 @@
+// Timesheets + leave-approval feature: user roles, daily timesheet entries,
+// and leave requests. Business logic lives here; index.ts wires each piece
+// into an onCall handler (auth + role checks happen there).
+
+import { getFirestore, FieldValue, Query } from "firebase-admin/firestore";
+
+export type Role = "admin" | "manager" | "employee";
+
+// This account is always admin, regardless of what's stored in Firestore —
+// it's the seed of the whole role system, since nothing else can grant the
+// very first admin.
+export const PERMANENT_ADMIN_EMAIL = "abhishek.g@cliff-services.com";
+
+export interface UserProfile {
+  uid: string;
+  email: string;
+  displayName: string;
+  role: Role;
+  createdAt: number | null;
+  updatedAt: number | null;
+}
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function toMillis(v: unknown): number | null {
+  const t = v as { toMillis?: () => number } | undefined;
+  return t?.toMillis?.() ?? null;
+}
+
+function rowToProfile(id: string, x: Record<string, unknown>): UserProfile {
+  return {
+    uid: id,
+    email: String(x.email ?? ""),
+    displayName: String(x.displayName ?? ""),
+    role: (x.role as Role) ?? "employee",
+    createdAt: toMillis(x.createdAt),
+    updatedAt: toMillis(x.updatedAt),
+  };
+}
+
+/**
+ * Get the caller's profile, creating one (default role "employee") on first
+ * login. The permanent admin's email is re-asserted as "admin" every time,
+ * even if it was somehow changed directly in Firestore.
+ */
+export async function getOrCreateProfile(uid: string, email: string, displayName: string): Promise<UserProfile> {
+  const db = getFirestore();
+  const ref = db.collection("userProfiles").doc(uid);
+  const snap = await ref.get();
+  const isPermanentAdmin = email.trim().toLowerCase() === PERMANENT_ADMIN_EMAIL;
+
+  if (!snap.exists) {
+    const role: Role = isPermanentAdmin ? "admin" : "employee";
+    await ref.set({
+      email,
+      displayName,
+      role,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    const created = await ref.get();
+    return rowToProfile(uid, created.data()!);
+  }
+
+  const data = snap.data()!;
+  const patch: Record<string, unknown> = {};
+  if (email && data.email !== email) patch.email = email;
+  if (displayName && data.displayName !== displayName) patch.displayName = displayName;
+  if (isPermanentAdmin && data.role !== "admin") patch.role = "admin";
+  if (Object.keys(patch).length) {
+    patch.updatedAt = FieldValue.serverTimestamp();
+    await ref.set(patch, { merge: true });
+    const updated = await ref.get();
+    return rowToProfile(uid, updated.data()!);
+  }
+  return rowToProfile(uid, data);
+}
+
+export async function getProfile(uid: string): Promise<UserProfile | null> {
+  const snap = await getFirestore().collection("userProfiles").doc(uid).get();
+  return snap.exists ? rowToProfile(uid, snap.data()!) : null;
+}
+
+export async function listAllProfiles(): Promise<UserProfile[]> {
+  const snap = await getFirestore().collection("userProfiles").get();
+  return snap.docs
+    .map((d) => rowToProfile(d.id, d.data()))
+    .sort((a, b) => (a.displayName || a.email).localeCompare(b.displayName || b.email));
+}
+
+export async function setRole(targetUid: string, role: Role): Promise<UserProfile> {
+  const db = getFirestore();
+  const ref = db.collection("userProfiles").doc(targetUid);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error("User not found.");
+  const data = snap.data()!;
+  if (String(data.email ?? "").trim().toLowerCase() === PERMANENT_ADMIN_EMAIL && role !== "admin") {
+    throw new Error(`${PERMANENT_ADMIN_EMAIL} must stay an admin.`);
+  }
+  await ref.set({ role, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  return rowToProfile(targetUid, { ...data, role });
+}
+
+// ---- Daily timesheet entries -----------------------------------------------
+
+export interface TimesheetEntry {
+  id: string;
+  uid: string;
+  email: string;
+  displayName: string;
+  date: string; // YYYY-MM-DD
+  hours: number;
+  // Free text today; becomes a select over open Ceipal jobs once that
+  // integration lands, so a job code can slot in without a schema change.
+  workedOn: string;
+  createdAt: number | null;
+  updatedAt: number | null;
+}
+
+function rowToEntry(id: string, x: Record<string, unknown>): TimesheetEntry {
+  return {
+    id,
+    uid: String(x.uid ?? ""),
+    email: String(x.email ?? ""),
+    displayName: String(x.displayName ?? ""),
+    date: String(x.date ?? ""),
+    hours: Number(x.hours) || 0,
+    workedOn: String(x.workedOn ?? ""),
+    createdAt: toMillis(x.createdAt),
+    updatedAt: toMillis(x.updatedAt),
+  };
+}
+
+export async function saveEntry(
+  profile: UserProfile,
+  date: string,
+  hours: number,
+  workedOn: string
+): Promise<TimesheetEntry> {
+  if (!DATE_RE.test(date)) throw new Error("date must be in YYYY-MM-DD format.");
+  if (!(Number.isFinite(hours) && hours >= 0 && hours <= 24)) {
+    throw new Error("hours must be a number between 0 and 24.");
+  }
+  const db = getFirestore();
+  const id = `${profile.uid}_${date}`;
+  const ref = db.collection("timesheetEntries").doc(id);
+  const existing = await ref.get();
+  await ref.set(
+    {
+      uid: profile.uid,
+      email: profile.email,
+      displayName: profile.displayName,
+      date,
+      hours,
+      workedOn: workedOn.slice(0, 500),
+      createdAt: existing.exists ? existing.data()!.createdAt : FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+  const saved = await ref.get();
+  return rowToEntry(id, saved.data()!);
+}
+
+// Equality-only query (no orderBy) so it doesn't need a composite index —
+// per-user entry counts are small, so filtering/sorting in memory is cheap.
+export async function listEntriesForUser(uid: string, from: string, to: string): Promise<TimesheetEntry[]> {
+  const snap = await getFirestore().collection("timesheetEntries").where("uid", "==", uid).limit(2000).get();
+  let entries = snap.docs.map((d) => rowToEntry(d.id, d.data()));
+  if (from) entries = entries.filter((e) => e.date >= from);
+  if (to) entries = entries.filter((e) => e.date <= to);
+  entries.sort((a, b) => b.date.localeCompare(a.date));
+  return entries;
+}
+
+// Range + orderBy on the same field ("date") only — supported by the
+// automatic single-field index, no equality filter involved.
+export async function listAllEntries(from: string, to: string): Promise<TimesheetEntry[]> {
+  const db = getFirestore();
+  let q: Query = db.collection("timesheetEntries");
+  if (from) q = q.where("date", ">=", from);
+  if (to) q = q.where("date", "<=", to);
+  const snap = await q.orderBy("date", "desc").limit(5000).get();
+  return snap.docs.map((d) => rowToEntry(d.id, d.data()));
+}
+
+// ---- Leave requests ---------------------------------------------------------
+
+export type LeaveType = "half" | "full" | "multi";
+export type LeaveStatus = "pending" | "approved" | "rejected";
+
+export interface LeaveRequest {
+  id: string;
+  uid: string;
+  email: string;
+  displayName: string;
+  role: Role; // requester's role at the time of the request — decides the approval chain
+  leaveType: LeaveType;
+  startDate: string;
+  endDate: string;
+  reason: string;
+  status: LeaveStatus;
+  requestedAt: number | null;
+  decidedByUid: string | null;
+  decidedByName: string | null;
+  decidedByEmail: string | null;
+  decidedAt: number | null;
+  decisionNote: string;
+}
+
+function rowToLeave(id: string, x: Record<string, unknown>): LeaveRequest {
+  return {
+    id,
+    uid: String(x.uid ?? ""),
+    email: String(x.email ?? ""),
+    displayName: String(x.displayName ?? ""),
+    role: (x.role as Role) ?? "employee",
+    leaveType: (x.leaveType as LeaveType) ?? "full",
+    startDate: String(x.startDate ?? ""),
+    endDate: String(x.endDate ?? ""),
+    reason: String(x.reason ?? ""),
+    status: (x.status as LeaveStatus) ?? "pending",
+    requestedAt: toMillis(x.requestedAt),
+    decidedByUid: (x.decidedByUid as string) ?? null,
+    decidedByName: (x.decidedByName as string) ?? null,
+    decidedByEmail: (x.decidedByEmail as string) ?? null,
+    decidedAt: toMillis(x.decidedAt),
+    decisionNote: String(x.decisionNote ?? ""),
+  };
+}
+
+export async function createLeaveRequest(
+  profile: UserProfile,
+  leaveType: LeaveType,
+  startDate: string,
+  endDate: string,
+  reason: string
+): Promise<LeaveRequest> {
+  if (leaveType !== "half" && leaveType !== "full" && leaveType !== "multi") {
+    throw new Error("leaveType must be 'half', 'full', or 'multi'.");
+  }
+  if (!DATE_RE.test(startDate) || !DATE_RE.test(endDate)) {
+    throw new Error("Dates must be in YYYY-MM-DD format.");
+  }
+  if (endDate < startDate) throw new Error("End date must be on or after the start date.");
+  if (leaveType !== "multi" && startDate !== endDate) {
+    throw new Error("Half-day and one-day leave use the same start and end date.");
+  }
+  const doc = {
+    uid: profile.uid,
+    email: profile.email,
+    displayName: profile.displayName,
+    role: profile.role,
+    leaveType,
+    startDate,
+    endDate,
+    reason: reason.slice(0, 500),
+    status: "pending" as LeaveStatus,
+    requestedAt: FieldValue.serverTimestamp(),
+    decidedByUid: null,
+    decidedByName: null,
+    decidedByEmail: null,
+    decidedAt: null,
+    decisionNote: "",
+  };
+  const ref = await getFirestore().collection("leaveRequests").add(doc);
+  const saved = await ref.get();
+  return rowToLeave(ref.id, saved.data()!);
+}
+
+export async function listLeavesForUser(uid: string): Promise<LeaveRequest[]> {
+  const snap = await getFirestore().collection("leaveRequests").where("uid", "==", uid).limit(1000).get();
+  return snap.docs
+    .map((d) => rowToLeave(d.id, d.data()))
+    .sort((a, b) => (b.requestedAt ?? 0) - (a.requestedAt ?? 0));
+}
+
+// Small collection (one row per request) — fetched in full and filtered in
+// memory rather than adding another composite index for role-based visibility.
+export async function listLeavesVisibleTo(role: Role): Promise<LeaveRequest[]> {
+  const snap = await getFirestore().collection("leaveRequests").limit(3000).get();
+  let all = snap.docs.map((d) => rowToLeave(d.id, d.data()));
+  if (role === "manager") all = all.filter((l) => l.role === "employee");
+  all.sort((a, b) => (b.requestedAt ?? 0) - (a.requestedAt ?? 0));
+  return all;
+}
+
+/** Employee leave → manager or admin decides. Manager (or admin) leave → admin only. */
+function canDecide(deciderRole: Role, requesterRole: Role): boolean {
+  if (deciderRole === "admin") return true;
+  if (deciderRole === "manager") return requesterRole === "employee";
+  return false;
+}
+
+export async function decideLeave(
+  decider: UserProfile,
+  id: string,
+  decision: "approved" | "rejected",
+  note: string
+): Promise<LeaveRequest> {
+  const db = getFirestore();
+  const ref = db.collection("leaveRequests").doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error("Leave request not found.");
+  const data = snap.data()!;
+  const requesterRole = (data.role as Role) ?? "employee";
+  if (!canDecide(decider.role, requesterRole)) {
+    throw new Error(
+      requesterRole === "employee"
+        ? "Only a manager or admin can decide this request."
+        : "Only an admin can decide a manager's leave request."
+    );
+  }
+  if (data.status !== "pending") throw new Error("This request has already been decided.");
+  const patch = {
+    status: decision,
+    decidedByUid: decider.uid,
+    decidedByName: decider.displayName,
+    decidedByEmail: decider.email,
+    decidedAt: FieldValue.serverTimestamp(),
+    decisionNote: note.slice(0, 500),
+  };
+  await ref.set(patch, { merge: true });
+  const updated = await ref.get();
+  return rowToLeave(id, updated.data()!);
+}
