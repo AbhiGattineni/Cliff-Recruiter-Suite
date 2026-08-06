@@ -3,18 +3,21 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DateTime } from "luxon";
 import { friendlyError } from "../../lib/errors";
 import { listMyTimesheets, saveTimesheetEntry, TimesheetEntry } from "../../lib/timesheets";
+import { useAuth } from "../../context/AuthContext";
 
 const todayIso = () => DateTime.local().toFormat("yyyy-MM-dd");
 const RANGE_DAYS = 30;
 
 export default function MyTimesheetTab() {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const uid = user!.uid;
   const from = DateTime.local().minus({ days: RANGE_DAYS }).toFormat("yyyy-MM-dd");
   const to = todayIso();
 
   const entriesQ = useQuery({
-    queryKey: ["myTimesheets", from, to],
-    queryFn: () => listMyTimesheets(from, to),
+    queryKey: ["myTimesheets", uid, from, to],
+    queryFn: () => listMyTimesheets(uid, from, to),
   });
 
   const byDate = useMemo(() => {

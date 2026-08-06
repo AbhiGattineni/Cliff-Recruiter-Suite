@@ -7,6 +7,42 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
+    // The caller's own role, looked up once per request (Firestore caches
+    // get() results within a single rule evaluation, so this doesn't cost
+    // extra reads per document in a list query).
+    function myRole() {
+      return request.auth != null && exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.role
+        : null;
+    }
+
+    // Timesheets/leave/roles: reads happen directly from the client (cheaper
+    // than a Cloud Function per read, and avoids deploying a Cloud Run
+    // service for every list endpoint). Writes still go through Cloud
+    // Functions only — the admin SDK bypasses these rules, and the
+    // approval-chain / role-assignment logic stays in tested server code
+    // rather than the rules DSL.
+    match /userProfiles/{uid} {
+      allow get: if request.auth != null && (request.auth.uid == uid || myRole() in ["admin", "manager"]);
+      allow list: if myRole() in ["admin", "manager"];
+      allow write: if false;
+    }
+
+    match /timesheetEntries/{entryId} {
+      allow get, list: if request.auth != null &&
+        (resource.data.uid == request.auth.uid || myRole() in ["admin", "manager"]);
+      allow write: if false;
+    }
+
+    match /leaveRequests/{leaveId} {
+      allow get, list: if request.auth != null && (
+        resource.data.uid == request.auth.uid ||
+        myRole() == "admin" ||
+        (myRole() == "manager" && resource.data.role == "employee")
+      );
+      allow write: if false;
+    }
+
     // Shared report/resume run history: any signed-in user of this org may read;
     // writes go through Cloud Functions (admin) only.
     match /runs/{runId} {

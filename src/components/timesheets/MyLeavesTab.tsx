@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DateTime } from "luxon";
 import { friendlyError } from "../../lib/errors";
 import { listMyLeaves, requestLeave, LeaveType } from "../../lib/timesheets";
+import { useAuth } from "../../context/AuthContext";
 
 const todayIso = () => DateTime.local().toFormat("yyyy-MM-dd");
 
@@ -11,7 +12,9 @@ const STATUS_PILL: Record<string, string> = { pending: "amber", approved: "green
 
 export default function MyLeavesTab() {
   const qc = useQueryClient();
-  const leavesQ = useQuery({ queryKey: ["myLeaves"], queryFn: () => listMyLeaves() });
+  const { user } = useAuth();
+  const uid = user!.uid;
+  const leavesQ = useQuery({ queryKey: ["myLeaves", uid], queryFn: () => listMyLeaves(uid) });
 
   const [leaveType, setLeaveType] = useState<LeaveType>("full");
   const [startDate, setStartDate] = useState(todayIso());

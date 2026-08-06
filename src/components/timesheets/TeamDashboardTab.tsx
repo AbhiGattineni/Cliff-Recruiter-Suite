@@ -25,7 +25,7 @@ export default function TeamDashboardTab({ role }: { role: Role }) {
   const [to, setTo] = useState(todayIso());
 
   const tsQ = useQuery({ queryKey: ["teamTimesheets", from, to], queryFn: () => listTeamTimesheets(from, to) });
-  const leavesQ = useQuery({ queryKey: ["allLeaves"], queryFn: () => listLeaveRequests() });
+  const leavesQ = useQuery({ queryKey: ["allLeaves", role], queryFn: () => listLeaveRequests(role) });
 
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [decideError, setDecideError] = useState<string | null>(null);

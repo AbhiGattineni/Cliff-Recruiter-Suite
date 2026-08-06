@@ -35,14 +35,9 @@ import {
   UserProfile,
   getOrCreateProfile,
   getProfile,
-  listAllProfiles,
   setRole,
   saveEntry,
-  listEntriesForUser,
-  listAllEntries,
   createLeaveRequest,
-  listLeavesForUser,
-  listLeavesVisibleTo,
   decideLeave,
 } from "./timesheets.js";
 
@@ -1027,18 +1022,6 @@ export const ensureUserProfile = onCall(
   }
 );
 
-// Read-only roster: admins use it for role management, managers use it to
-// build the team timesheet dashboard.
-export const listUsers = onCall(
-  { ...commonOpts, timeoutSeconds: 15 },
-  async (request) => {
-    const profile = await requireProfile(request.auth);
-    requireRole(profile, ["admin", "manager"]);
-    const users = await listAllProfiles();
-    return { ok: true, users };
-  }
-);
-
 export const setUserRole = onCall(
   { ...commonOpts, timeoutSeconds: 15 },
   async (request) => {
@@ -1075,29 +1058,6 @@ export const saveTimesheetEntry = onCall(
   }
 );
 
-export const listMyTimesheets = onCall(
-  { ...commonOpts, timeoutSeconds: 15 },
-  async (request) => {
-    const profile = await requireProfile(request.auth);
-    const from = String(request.data?.from ?? "");
-    const to = String(request.data?.to ?? "");
-    const entries = await listEntriesForUser(profile.uid, from, to);
-    return { ok: true, entries };
-  }
-);
-
-export const listTeamTimesheets = onCall(
-  { ...commonOpts, timeoutSeconds: 20 },
-  async (request) => {
-    const profile = await requireProfile(request.auth);
-    requireRole(profile, ["admin", "manager"]);
-    const from = String(request.data?.from ?? "");
-    const to = String(request.data?.to ?? "");
-    const [entries, users] = await Promise.all([listAllEntries(from, to), listAllProfiles()]);
-    return { ok: true, entries, users };
-  }
-);
-
 export const requestLeave = onCall(
   { ...commonOpts, timeoutSeconds: 15 },
   async (request) => {
@@ -1112,25 +1072,6 @@ export const requestLeave = onCall(
     } catch (e) {
       throw new HttpsError("invalid-argument", e instanceof Error ? e.message : String(e));
     }
-  }
-);
-
-export const listMyLeaves = onCall(
-  { ...commonOpts, timeoutSeconds: 15 },
-  async (request) => {
-    const profile = await requireProfile(request.auth);
-    const leaves = await listLeavesForUser(profile.uid);
-    return { ok: true, leaves };
-  }
-);
-
-export const listLeaveRequests = onCall(
-  { ...commonOpts, timeoutSeconds: 15 },
-  async (request) => {
-    const profile = await requireProfile(request.auth);
-    requireRole(profile, ["admin", "manager"]);
-    const leaves = await listLeavesVisibleTo(profile.role);
-    return { ok: true, leaves };
   }
 );
 

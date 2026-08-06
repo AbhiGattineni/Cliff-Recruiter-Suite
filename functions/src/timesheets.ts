@@ -1,8 +1,14 @@
 // Timesheets + leave-approval feature: user roles, daily timesheet entries,
 // and leave requests. Business logic lives here; index.ts wires each piece
 // into an onCall handler (auth + role checks happen there).
+//
+// Reads (rosters, timesheet lists, leave lists) go straight from the client
+// to Firestore, governed by firestore.rules — cheaper than a Cloud Function
+// per read and avoids deploying a Cloud Run service for every list endpoint.
+// Only mutations stay here, where identity-derivation and the approval-chain
+// logic are easier to get right (and test) than in the rules DSL.
 
-import { getFirestore, FieldValue, Query } from "firebase-admin/firestore";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
 export type Role = "admin" | "manager" | "employee";
 
@@ -81,13 +87,6 @@ export async function getProfile(uid: string): Promise<UserProfile | null> {
   return snap.exists ? rowToProfile(uid, snap.data()!) : null;
 }
 
-export async function listAllProfiles(): Promise<UserProfile[]> {
-  const snap = await getFirestore().collection("userProfiles").get();
-  return snap.docs
-    .map((d) => rowToProfile(d.id, d.data()))
-    .sort((a, b) => (a.displayName || a.email).localeCompare(b.displayName || b.email));
-}
-
 export async function setRole(targetUid: string, role: Role): Promise<UserProfile> {
   const db = getFirestore();
   const ref = db.collection("userProfiles").doc(targetUid);
@@ -160,28 +159,6 @@ export async function saveEntry(
   );
   const saved = await ref.get();
   return rowToEntry(id, saved.data()!);
-}
-
-// Equality-only query (no orderBy) so it doesn't need a composite index —
-// per-user entry counts are small, so filtering/sorting in memory is cheap.
-export async function listEntriesForUser(uid: string, from: string, to: string): Promise<TimesheetEntry[]> {
-  const snap = await getFirestore().collection("timesheetEntries").where("uid", "==", uid).limit(2000).get();
-  let entries = snap.docs.map((d) => rowToEntry(d.id, d.data()));
-  if (from) entries = entries.filter((e) => e.date >= from);
-  if (to) entries = entries.filter((e) => e.date <= to);
-  entries.sort((a, b) => b.date.localeCompare(a.date));
-  return entries;
-}
-
-// Range + orderBy on the same field ("date") only — supported by the
-// automatic single-field index, no equality filter involved.
-export async function listAllEntries(from: string, to: string): Promise<TimesheetEntry[]> {
-  const db = getFirestore();
-  let q: Query = db.collection("timesheetEntries");
-  if (from) q = q.where("date", ">=", from);
-  if (to) q = q.where("date", "<=", to);
-  const snap = await q.orderBy("date", "desc").limit(5000).get();
-  return snap.docs.map((d) => rowToEntry(d.id, d.data()));
 }
 
 // ---- Leave requests ---------------------------------------------------------
@@ -266,23 +243,6 @@ export async function createLeaveRequest(
   const ref = await getFirestore().collection("leaveRequests").add(doc);
   const saved = await ref.get();
   return rowToLeave(ref.id, saved.data()!);
-}
-
-export async function listLeavesForUser(uid: string): Promise<LeaveRequest[]> {
-  const snap = await getFirestore().collection("leaveRequests").where("uid", "==", uid).limit(1000).get();
-  return snap.docs
-    .map((d) => rowToLeave(d.id, d.data()))
-    .sort((a, b) => (b.requestedAt ?? 0) - (a.requestedAt ?? 0));
-}
-
-// Small collection (one row per request) — fetched in full and filtered in
-// memory rather than adding another composite index for role-based visibility.
-export async function listLeavesVisibleTo(role: Role): Promise<LeaveRequest[]> {
-  const snap = await getFirestore().collection("leaveRequests").limit(3000).get();
-  let all = snap.docs.map((d) => rowToLeave(d.id, d.data()));
-  if (role === "manager") all = all.filter((l) => l.role === "employee");
-  all.sort((a, b) => (b.requestedAt ?? 0) - (a.requestedAt ?? 0));
-  return all;
 }
 
 /** Employee leave → manager or admin decides. Manager (or admin) leave → admin only. */

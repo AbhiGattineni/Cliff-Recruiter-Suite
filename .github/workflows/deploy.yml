@@ -75,4 +75,6 @@ jobs:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
       - name: Deploy to Firebase
-        run: npx firebase-tools@13 deploy --only functions,hosting --project cliff-services --non-interactive
+        # --force: deploy also deletes any function removed from the codebase,
+        # which normally needs an interactive confirmation.
+        run: npx firebase-tools@13 deploy --only functions,hosting,firestore:rules --project cliff-services --non-interactive --force

@@ -2,6 +2,16 @@
 
 Chronological record of notable changes. Newest first.
 
+## Timesheets: fewer Cloud Functions, reads via Firestore rules
+- The 5 read-only Timesheets/Leave/Roles endpoints (`listUsers`, `listMyTimesheets`,
+  `listTeamTimesheets`, `listMyLeaves`, `listLeaveRequests`) are no longer Cloud Functions —
+  the client reads Firestore directly, governed by new rules in `firestore.rules` (a `myRole()`
+  helper looks up the caller's own role once per request to gate access). Cuts the feature's
+  Cloud Run footprint from 10 services to 5 and removes the per-project CPU-quota contention
+  hit during deploy. Writes (`saveTimesheetEntry`, `requestLeave`, `decideLeaveRequest`,
+  `setUserRole`, `ensureUserProfile`) stay as Cloud Functions, where identity-derivation and
+  the approval-chain logic are easier to get right than in the rules DSL.
+
 ## Timesheets + leave approval + role-based access
 - New **Timesheets** tab (`/timesheets`, ⏱️) replaces the placeholder with three tabs: **My Timesheet**
   (log hours + what you worked on per day, last-30-days view, missing-day warning), **My Leaves**

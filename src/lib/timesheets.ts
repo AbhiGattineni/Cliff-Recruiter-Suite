@@ -1,8 +1,23 @@
 // Client wrappers around the Timesheets + leave-approval + role-management
-// Cloud Functions.
+// feature.
+//
+// Reads (rosters, timesheet lists, leave lists) go straight to Firestore —
+// governed by firestore.rules — rather than through a Cloud Function. That's
+// cheaper (no Cloud Run service per read endpoint) and avoids the per-project
+// CPU quota that a large batch of Cloud Functions competes for on deploy.
+// Writes still go through Cloud Functions, where identity-derivation and the
+// approval-chain logic are easier to get right than in the rules DSL.
 
 import { httpsCallable } from "firebase/functions";
-import { functions } from "../firebase";
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+  Timestamp,
+  type DocumentData,
+} from "firebase/firestore";
+import { functions, db } from "../firebase";
 import { ensureConfigured } from "./errors";
 
 export type Role = "admin" | "manager" | "employee";
@@ -16,6 +31,21 @@ export interface UserProfile {
   updatedAt: number | null;
 }
 
+function toMillis(v: unknown): number | null {
+  return v instanceof Timestamp ? v.toMillis() : null;
+}
+
+function rowToProfile(id: string, x: DocumentData): UserProfile {
+  return {
+    uid: id,
+    email: String(x.email ?? ""),
+    displayName: String(x.displayName ?? ""),
+    role: (x.role as Role) ?? "employee",
+    createdAt: toMillis(x.createdAt),
+    updatedAt: toMillis(x.updatedAt),
+  };
+}
+
 export async function ensureUserProfile(): Promise<UserProfile> {
   ensureConfigured();
   const callable = httpsCallable<Record<string, never>, { ok: boolean; profile: UserProfile }>(
@@ -26,14 +56,13 @@ export async function ensureUserProfile(): Promise<UserProfile> {
   return res.data.profile;
 }
 
+/** Full roster — admins use it for role management, managers for the team dashboard. */
 export async function listUsers(): Promise<UserProfile[]> {
   ensureConfigured();
-  const callable = httpsCallable<Record<string, never>, { ok: boolean; users: UserProfile[] }>(
-    functions,
-    "listUsers"
-  );
-  const res = await callable({});
-  return res.data.users ?? [];
+  const snap = await getDocs(collection(db, "userProfiles"));
+  return snap.docs
+    .map((d) => rowToProfile(d.id, d.data()))
+    .sort((a, b) => (a.displayName || a.email).localeCompare(b.displayName || b.email));
 }
 
 export async function setUserRole(uid: string, role: Role): Promise<UserProfile> {
@@ -58,6 +87,20 @@ export interface TimesheetEntry {
   updatedAt: number | null;
 }
 
+function rowToEntry(id: string, x: DocumentData): TimesheetEntry {
+  return {
+    id,
+    uid: String(x.uid ?? ""),
+    email: String(x.email ?? ""),
+    displayName: String(x.displayName ?? ""),
+    date: String(x.date ?? ""),
+    hours: Number(x.hours) || 0,
+    workedOn: String(x.workedOn ?? ""),
+    createdAt: toMillis(x.createdAt),
+    updatedAt: toMillis(x.updatedAt),
+  };
+}
+
 export async function saveTimesheetEntry(date: string, hours: number, workedOn: string): Promise<TimesheetEntry> {
   ensureConfigured();
   const callable = httpsCallable<
@@ -68,27 +111,34 @@ export async function saveTimesheetEntry(date: string, hours: number, workedOn: 
   return res.data.entry;
 }
 
-export async function listMyTimesheets(from: string, to: string): Promise<TimesheetEntry[]> {
+export async function listMyTimesheets(uid: string, from: string, to: string): Promise<TimesheetEntry[]> {
   ensureConfigured();
-  const callable = httpsCallable<{ from: string; to: string }, { ok: boolean; entries: TimesheetEntry[] }>(
-    functions,
-    "listMyTimesheets"
-  );
-  const res = await callable({ from, to });
-  return res.data.entries ?? [];
+  const snap = await getDocs(query(collection(db, "timesheetEntries"), where("uid", "==", uid)));
+  let entries = snap.docs.map((d) => rowToEntry(d.id, d.data()));
+  if (from) entries = entries.filter((e) => e.date >= from);
+  if (to) entries = entries.filter((e) => e.date <= to);
+  entries.sort((a, b) => b.date.localeCompare(a.date));
+  return entries;
 }
 
+// Manager/admin only — enforced by firestore.rules (myRole() check), not by
+// this query. Unfiltered on purpose: everyone's entries in range.
 export async function listTeamTimesheets(
   from: string,
   to: string
 ): Promise<{ entries: TimesheetEntry[]; users: UserProfile[] }> {
   ensureConfigured();
-  const callable = httpsCallable<
-    { from: string; to: string },
-    { ok: boolean; entries: TimesheetEntry[]; users: UserProfile[] }
-  >(functions, "listTeamTimesheets");
-  const res = await callable({ from, to });
-  return { entries: res.data.entries ?? [], users: res.data.users ?? [] };
+  const constraints = [];
+  if (from) constraints.push(where("date", ">=", from));
+  if (to) constraints.push(where("date", "<=", to));
+  const [entriesSnap, usersSnap] = await Promise.all([
+    getDocs(query(collection(db, "timesheetEntries"), ...constraints)),
+    getDocs(collection(db, "userProfiles")),
+  ]);
+  return {
+    entries: entriesSnap.docs.map((d) => rowToEntry(d.id, d.data())),
+    users: usersSnap.docs.map((d) => rowToProfile(d.id, d.data())),
+  };
 }
 
 export type LeaveType = "half" | "full" | "multi";
@@ -113,6 +163,27 @@ export interface LeaveRequest {
   decisionNote: string;
 }
 
+function rowToLeave(id: string, x: DocumentData): LeaveRequest {
+  return {
+    id,
+    uid: String(x.uid ?? ""),
+    email: String(x.email ?? ""),
+    displayName: String(x.displayName ?? ""),
+    role: (x.role as Role) ?? "employee",
+    leaveType: (x.leaveType as LeaveType) ?? "full",
+    startDate: String(x.startDate ?? ""),
+    endDate: String(x.endDate ?? ""),
+    reason: String(x.reason ?? ""),
+    status: (x.status as LeaveStatus) ?? "pending",
+    requestedAt: toMillis(x.requestedAt),
+    decidedByUid: (x.decidedByUid as string) ?? null,
+    decidedByName: (x.decidedByName as string) ?? null,
+    decidedByEmail: (x.decidedByEmail as string) ?? null,
+    decidedAt: toMillis(x.decidedAt),
+    decisionNote: String(x.decisionNote ?? ""),
+  };
+}
+
 export async function requestLeave(
   leaveType: LeaveType,
   startDate: string,
@@ -128,24 +199,24 @@ export async function requestLeave(
   return res.data.leave;
 }
 
-export async function listMyLeaves(): Promise<LeaveRequest[]> {
+export async function listMyLeaves(uid: string): Promise<LeaveRequest[]> {
   ensureConfigured();
-  const callable = httpsCallable<Record<string, never>, { ok: boolean; leaves: LeaveRequest[] }>(
-    functions,
-    "listMyLeaves"
-  );
-  const res = await callable({});
-  return res.data.leaves ?? [];
+  const snap = await getDocs(query(collection(db, "leaveRequests"), where("uid", "==", uid)));
+  return snap.docs
+    .map((d) => rowToLeave(d.id, d.data()))
+    .sort((a, b) => (b.requestedAt ?? 0) - (a.requestedAt ?? 0));
 }
 
-export async function listLeaveRequests(): Promise<LeaveRequest[]> {
+// Admin sees every request; a manager's query is constrained to role=="employee"
+// to match firestore.rules (a manager can't list manager/admin leave at all).
+export async function listLeaveRequests(role: Role): Promise<LeaveRequest[]> {
   ensureConfigured();
-  const callable = httpsCallable<Record<string, never>, { ok: boolean; leaves: LeaveRequest[] }>(
-    functions,
-    "listLeaveRequests"
-  );
-  const res = await callable({});
-  return res.data.leaves ?? [];
+  const base = collection(db, "leaveRequests");
+  const q = role === "manager" ? query(base, where("role", "==", "employee")) : query(base);
+  const snap = await getDocs(q);
+  return snap.docs
+    .map((d) => rowToLeave(d.id, d.data()))
+    .sort((a, b) => (b.requestedAt ?? 0) - (a.requestedAt ?? 0));
 }
 
 export async function decideLeaveRequest(
