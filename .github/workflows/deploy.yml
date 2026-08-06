@@ -1,0 +1,78 @@
+name: Deploy
+
+# Builds the web app + Cloud Functions and deploys them to Firebase.
+# Runs on every push to main, and can be triggered by hand from the Actions
+# tab for a manual redeploy (e.g. after adding/rotating a secret).
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   FIREBASE_SERVICE_ACCOUNT   JSON key for a service account with deploy
+#                              rights on the Firebase project (Firebase Admin,
+#                              Cloud Functions Admin, Firebase Hosting Admin,
+#                              Service Account User, Cloud Build Editor).
+#   VITE_FIREBASE_API_KEY
+#   VITE_FIREBASE_AUTH_DOMAIN
+#   VITE_FIREBASE_PROJECT_ID
+#   VITE_FIREBASE_STORAGE_BUCKET
+#   VITE_FIREBASE_MESSAGING_SENDER_ID
+#   VITE_FIREBASE_APP_ID
+#   VITE_FIREBASE_MEASUREMENT_ID   (optional)
+#     — the Firebase web config from .env.example. These aren't secret in the
+#     sense of being sensitive (they're safe to ship in the browser bundle),
+#     but they still need to be real values for the deployed site to work,
+#     so they're stored as repo secrets rather than committed.
+#
+# Cloud Functions secrets (CEIPAL_PASSWORD, LLM_API_KEY, etc.) are managed
+# separately via `firebase functions:secrets:set` — this workflow does not
+# touch them.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build + deploy to Firebase
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install web deps
+        run: npm ci
+
+      - name: Build web app
+        run: npx vite build
+        env:
+          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
+          VITE_FIREBASE_MEASUREMENT_ID: ${{ secrets.VITE_FIREBASE_MEASUREMENT_ID }}
+          VITE_FUNCTIONS_REGION: us-central1
+
+      - name: Install functions deps
+        working-directory: functions
+        run: npm ci
+
+      - name: Build functions
+        working-directory: functions
+        run: npm run build
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Deploy to Firebase
+        run: npx firebase-tools@13 deploy --only functions,hosting --project cliff-services --non-interactive
