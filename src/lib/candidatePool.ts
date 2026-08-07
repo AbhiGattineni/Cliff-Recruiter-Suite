@@ -3,6 +3,7 @@
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../firebase";
 import { ensureConfigured } from "./errors";
+import { callAi } from "./ai";
 
 export interface PoolCandidate {
   name: string;
@@ -32,14 +33,12 @@ export async function getCandidatePool(): Promise<PoolCandidate[]> {
 /** LLM semantic match: returns the pool role titles relevant to the JD. */
 export async function matchCandidatesToJd(jobDescription: string, roles: string[]): Promise<string[]> {
   ensureConfigured();
-  const callable = httpsCallable<{ jobDescription: string; roles: string[] }, { ok: boolean; relevant?: string[]; error?: string }>(
-    functions,
-    "matchCandidatesToJd",
-    { timeout: 120_000 }
-  );
-  const res = await callable({ jobDescription, roles });
-  if (!res.data?.ok) throw new Error(res.data?.error || "Matching failed.");
-  return res.data?.relevant ?? [];
+  const data = await callAi<
+    { jobDescription: string; roles: string[] },
+    { ok: boolean; relevant?: string[]; error?: string }
+  >("matchCandidatesToJd", { jobDescription, roles }, { timeout: 120_000 });
+  if (!data?.ok) throw new Error(data?.error || "Matching failed.");
+  return data?.relevant ?? [];
 }
 
 /** Free keyword fallback (no LLM): a role is relevant if it shares a word with the JD. */

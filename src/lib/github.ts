@@ -4,6 +4,7 @@ import { httpsCallable } from "firebase/functions";
 import { functions } from "../firebase";
 import { ensureConfigured } from "./errors";
 import { ProviderId, TokenUsage } from "./resume";
+import { callAi } from "./ai";
 
 export interface GithubProfile {
   login: string;
@@ -53,13 +54,12 @@ export interface PortfolioResult {
 /** Search GitHub for likely profiles for a candidate (recruiter confirms the match). */
 export async function searchGithubUsers(name: string, email: string): Promise<GithubProfile[]> {
   ensureConfigured();
-  const callable = httpsCallable<{ name: string; email: string }, { ok: boolean; matches?: GithubProfile[]; error?: string }>(
-    functions,
-    "githubSearch"
+  const data = await callAi<{ name: string; email: string }, { ok: boolean; matches?: GithubProfile[]; error?: string }>(
+    "githubSearch",
+    { name, email }
   );
-  const res = await callable({ name, email });
-  if (!res.data?.ok) throw new Error(res.data?.error || "GitHub search failed.");
-  return res.data.matches ?? [];
+  if (!data?.ok) throw new Error(data?.error || "GitHub search failed.");
+  return data.matches ?? [];
 }
 
 /** Fetch a GitHub profile's portfolio and assess it against the job description. */
@@ -70,15 +70,14 @@ export async function assessGithubPortfolio(
   model: string
 ): Promise<PortfolioResult> {
   ensureConfigured();
-  const callable = httpsCallable<
+  const data = await callAi<
     { github: string; jobDescription: string; provider: ProviderId; model: string },
     { ok: boolean; profile?: GithubProfile; portfolio?: PortfolioAssessment; usage?: TokenUsage; error?: string }
-  >(functions, "githubPortfolio", { timeout: 300_000 });
-  const res = await callable({ github, jobDescription, provider, model });
-  if (!res.data?.ok || !res.data.portfolio || !res.data.profile) {
-    throw new Error(res.data?.error || "Portfolio assessment failed.");
+  >("githubPortfolio", { github, jobDescription, provider, model }, { timeout: 300_000 });
+  if (!data?.ok || !data.portfolio || !data.profile) {
+    throw new Error(data?.error || "Portfolio assessment failed.");
   }
-  return { profile: res.data.profile, portfolio: res.data.portfolio, usage: res.data.usage ?? null };
+  return { profile: data.profile, portfolio: data.portfolio, usage: data.usage ?? null };
 }
 
 export interface ResumeReportPatch {

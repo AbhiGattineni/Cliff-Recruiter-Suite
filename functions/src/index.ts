@@ -1,7 +1,5 @@
 // Cloud Functions entry point.
 // Callable functions:
-//   - requestSignupOtp({ email, password, displayName }): start domain-locked signup, email an OTP.
-//   - verifySignupOtp({ email, otp }): verify OTP, enable the account.
 //   - ceipalReport({ report }): proxies a Ceipal custom report (auth required).
 //   - parseResume({ resumeText, jobDescription }): LLM fit assessment (auth required).
 
@@ -16,20 +14,6 @@ import { readCache, readCacheMeta, writeCache, cacheEnvelope } from "./ceipalCac
 import { assessResume, matchRolesToJd, assessPortfolio } from "./llm.js";
 import { searchUsers, buildPortfolio, parseGithubUsername } from "./github.js";
 import { fetchLinkedinSignals, providerConfigured, EMPTY_SIGNALS } from "./linkedin.js";
-import {
-  isAllowedEmail,
-  allowedDomain,
-  normalizeEmail,
-  generateOtp,
-  makeSalt,
-  hashOtp,
-  hashesEqual,
-  sendOtpEmail,
-  smtpConfigured,
-  OTP_TTL_MS,
-  RESEND_COOLDOWN_MS,
-  MAX_ATTEMPTS,
-} from "./otp.js";
 import {
   Role,
   UserProfile,
@@ -47,7 +31,6 @@ initializeApp();
 const CEIPAL_PASSWORD = defineSecret("CEIPAL_PASSWORD");
 const LLM_API_KEY = defineSecret("LLM_API_KEY"); // Ollama Cloud key
 const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY"); // OpenAI key
-const SMTP_PASS = defineSecret("SMTP_PASS");
 // Optional GitHub PAT — raises the API rate limit from 60 to 5000 req/hr.
 // A "PLACEHOLDER" value means unauthenticated requests are used.
 const GITHUB_TOKEN = defineSecret("GITHUB_TOKEN");
@@ -171,141 +154,6 @@ async function findDuplicate(emailNorm: string, phoneNorm: string): Promise<Dupl
   }
   return null;
 }
-
-// ---- Self-service signup with emailed OTP (domain-locked) ------------------
-
-const OTP_DEV_MODE = () => process.env.OTP_DEV_MODE === "true";
-
-export const requestSignupOtp = onCall(
-  { ...commonOpts, secrets: [SMTP_PASS], timeoutSeconds: 60 },
-  async (request) => {
-    const email = normalizeEmail(request.data?.email ?? "");
-    const password: string = request.data?.password ?? "";
-    const displayName: string = (request.data?.displayName ?? "").toString().slice(0, 80);
-
-    // Authoritative domain lock — the browser check is only for UX.
-    if (!isAllowedEmail(email)) {
-      throw new HttpsError(
-        "permission-denied",
-        `Only @${allowedDomain()} email addresses can register.`
-      );
-    }
-    if (password.length < 6) {
-      throw new HttpsError("invalid-argument", "Password must be at least 6 characters.");
-    }
-
-    const auth = getAuth();
-    const db = getFirestore();
-    const emailKey = email;
-
-    // Look up any existing account for this email.
-    let uid: string;
-    try {
-      const existing = await auth.getUserByEmail(email);
-      if (existing.emailVerified && !existing.disabled) {
-        throw new HttpsError("already-exists", "An account already exists. Please sign in instead.");
-      }
-      // Unverified/disabled account — update the password and keep it disabled until OTP passes.
-      await auth.updateUser(existing.uid, { password, displayName: displayName || undefined, disabled: true });
-      uid = existing.uid;
-    } catch (err: unknown) {
-      const code = (err as { code?: string; errorInfo?: { code?: string } })?.code
-        ?? (err as { errorInfo?: { code?: string } })?.errorInfo?.code;
-      if (err instanceof HttpsError) throw err;
-      if (code === "auth/user-not-found") {
-        const created = await auth.createUser({
-          email,
-          password,
-          displayName: displayName || undefined,
-          emailVerified: false,
-          disabled: true, // enabled only after OTP verification
-        });
-        uid = created.uid;
-      } else {
-        throw new HttpsError("internal", "Could not start signup. Please try again.");
-      }
-    }
-
-    // Resend cooldown.
-    const ref = db.collection("signupOtps").doc(emailKey);
-    const snap = await ref.get();
-    if (snap.exists) {
-      const createdAt = (snap.data()?.createdAt as number) ?? 0;
-      if (Date.now() - createdAt < RESEND_COOLDOWN_MS) {
-        throw new HttpsError("resource-exhausted", "Please wait a moment before requesting another code.");
-      }
-    }
-
-    // Generate + store a hashed OTP.
-    const otp = generateOtp();
-    const salt = makeSalt();
-    await ref.set({
-      uid,
-      otpHash: hashOtp(otp, salt),
-      salt,
-      createdAt: Date.now(),
-      expiresAt: Date.now() + OTP_TTL_MS,
-      attempts: 0,
-    });
-
-    // Deliver the code.
-    if (smtpConfigured()) {
-      try {
-        await sendOtpEmail(email, otp, SMTP_PASS.value());
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        throw new HttpsError("internal", `Could not send the verification email: ${msg}`);
-      }
-      return { ok: true };
-    }
-
-    // No SMTP configured. In dev mode, return the code so local testing works.
-    if (OTP_DEV_MODE()) {
-      return { ok: true, devOtp: otp };
-    }
-    throw new HttpsError("failed-precondition", "Email sending is not configured. Set the SMTP secrets.");
-  }
-);
-
-export const verifySignupOtp = onCall(
-  { ...commonOpts, timeoutSeconds: 30 },
-  async (request) => {
-    const email = normalizeEmail(request.data?.email ?? "");
-    const otp: string = (request.data?.otp ?? "").toString().trim();
-    if (!isAllowedEmail(email) || !/^\d{6}$/.test(otp)) {
-      throw new HttpsError("invalid-argument", "Enter the 6-digit code sent to your email.");
-    }
-
-    const db = getFirestore();
-    const auth = getAuth();
-    const ref = db.collection("signupOtps").doc(email);
-    const snap = await ref.get();
-    if (!snap.exists) {
-      throw new HttpsError("not-found", "No pending verification. Please request a new code.");
-    }
-    const data = snap.data()!;
-
-    if (Date.now() > (data.expiresAt as number)) {
-      await ref.delete();
-      throw new HttpsError("deadline-exceeded", "The code has expired. Please request a new one.");
-    }
-    if ((data.attempts as number) >= MAX_ATTEMPTS) {
-      await ref.delete();
-      throw new HttpsError("resource-exhausted", "Too many incorrect attempts. Please request a new code.");
-    }
-
-    const ok = hashesEqual(data.otpHash as string, hashOtp(otp, data.salt as string));
-    if (!ok) {
-      await ref.update({ attempts: (data.attempts as number) + 1 });
-      throw new HttpsError("invalid-argument", "Incorrect code. Please try again.");
-    }
-
-    // Success — enable and verify the account, then clean up.
-    await auth.updateUser(data.uid as string, { emailVerified: true, disabled: false });
-    await ref.delete();
-    return { ok: true };
-  }
-);
 
 // Live-fetch both reports from Ceipal and store them in the cache.
 async function refreshCeipalReport(report: "job_duration" | "submissions", password: string) {
@@ -595,100 +443,14 @@ export const candidatePool = onCall(
 
 // Match a pasted JD to the pool's distinct role titles (LLM). Returns the relevant
 // titles; the client filters candidates by them. Usage is logged for the metrics.
-export const matchCandidatesToJd = onCall(
-  { ...commonOpts, secrets: [LLM_API_KEY, OPENAI_API_KEY], timeoutSeconds: 120, memory: "512MiB" },
-  async (request) => {
-    void request;
-    const jd = String(request.data?.jobDescription ?? "");
-    const roles = Array.isArray(request.data?.roles)
-      ? (request.data.roles as unknown[]).map((r) => String(r)).filter((r) => r.trim())
-      : [];
-    if (jd.trim().length < 15) throw new HttpsError("invalid-argument", "Provide a job description.");
-    if (!roles.length) return { ok: true, relevant: [] as string[] };
-    const config = pickLlm();
-    try {
-      const { relevant, usage } = await matchRolesToJd(jd, roles, config);
-      await logLlmCall("Candidate matching", config.provider, config.model, usage);
-      return { ok: true, relevant, usage };
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
-    }
-  }
-);
 
-export const parseResume = onCall(
-  { ...commonOpts, secrets: [LLM_API_KEY, OPENAI_API_KEY], timeoutSeconds: 120 },
-  async (request) => {
-    // AUTH ON HOLD: the app runs in open mode, so callers aren't signed in.
-    // Re-enable requireAuth(request.auth) once authentication is turned back on.
-    void request; // (auth intentionally not enforced yet)
-    const resumeText: string = request.data?.resumeText ?? "";
-    const jobDescription: string = request.data?.jobDescription ?? "";
-    const provider: ProviderId = request.data?.provider === "openai" ? "openai" : "ollama";
-    const model: string = request.data?.model ?? "";
-    if (resumeText.trim().length < 30 || jobDescription.trim().length < 20) {
-      throw new HttpsError("invalid-argument", "Provide both resume text and a job description.");
-    }
-    const config = resolveLlm(provider, model); // throws failed-precondition if not configured
-    try {
-      const { assessment, usage } = await assessResume(resumeText, jobDescription, config);
-      // Duplicate check by email/phone — flag before saving; the client decides.
-      const emailNorm = normEmail(assessment.extracted?.email);
-      const phoneNorm = normPhone(assessment.extracted?.phone);
-      const duplicate = await findDuplicate(emailNorm, phoneNorm);
-      return { ok: true, assessment, usage, provider, model: config.model, duplicate };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return { ok: false, error: msg };
-    }
-  }
-);
 
 // ---- GitHub portfolio -------------------------------------------------------
 
 // Search GitHub for likely profiles for a candidate (email first, then name).
 // The recruiter confirms the right match in the UI before anything is attached.
-export const githubSearch = onCall(
-  { ...commonOpts, secrets: [GITHUB_TOKEN], timeoutSeconds: 60 },
-  async (request) => {
-    void request; // auth on hold (open mode)
-    const name = String(request.data?.name ?? "").trim();
-    const email = String(request.data?.email ?? "").trim();
-    if (!name && !email) {
-      throw new HttpsError("invalid-argument", "Provide a candidate name or email to search GitHub.");
-    }
-    try {
-      const matches = await searchUsers(name, email, GITHUB_TOKEN.value());
-      return { ok: true, matches };
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
-    }
-  }
-);
 
 // Fetch a GitHub profile's repos/READMEs and assess the portfolio against a JD.
-export const githubPortfolio = onCall(
-  { ...commonOpts, secrets: [GITHUB_TOKEN, LLM_API_KEY, OPENAI_API_KEY], timeoutSeconds: 180, memory: "512MiB" },
-  async (request) => {
-    void request; // auth on hold (open mode)
-    const github = String(request.data?.github ?? "");
-    const jobDescription = String(request.data?.jobDescription ?? "");
-    const provider: ProviderId = request.data?.provider === "openai" ? "openai" : "ollama";
-    const model: string = request.data?.model ?? "";
-    const username = parseGithubUsername(github);
-    if (!username) throw new HttpsError("invalid-argument", "Provide a GitHub profile URL or username.");
-    if (jobDescription.trim().length < 20) throw new HttpsError("invalid-argument", "Provide the job description.");
-    const config = resolveLlm(provider, model); // throws failed-precondition if not configured
-    try {
-      const data = await buildPortfolio(username, GITHUB_TOKEN.value());
-      const { portfolio, usage } = await assessPortfolio(data.summaryText, jobDescription, config);
-      await logLlmCall("Portfolio assessment", provider, config.model, usage);
-      return { ok: true, profile: data.profile, portfolio, usage };
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
-    }
-  }
-);
 
 // Auto-fill LinkedIn credibility signals from a commercial data provider, when
 // one is configured. Without a provider this reports configured:false and the
@@ -741,6 +503,114 @@ export const updateResumeReport = onCall(
     patch.updatedAt = FieldValue.serverTimestamp();
     await getFirestore().collection("resumeReports").doc(id).set(patch, { merge: true });
     return { ok: true };
+  }
+);
+
+
+// ---- AI / enrichment: one function, five actions ---------------------------
+// These all do the same shape of work — take JSON, call an LLM or the GitHub
+// API, return JSON — and each `onCall` is a separate Cloud Run service with its
+// own reserved CPU. The project kept hitting the region's allowable-CPU quota,
+// so they share one service and branch on `action`. Settings are the widest of
+// the five (the portfolio fetch is the long pole).
+type AiAction = "parseResume" | "matchCandidatesToJd" | "githubPortfolio" | "githubSearch" | "llmAvailability";
+
+export const ai = onCall(
+  {
+    ...commonOpts,
+    secrets: [GITHUB_TOKEN, LLM_API_KEY, OPENAI_API_KEY],
+    timeoutSeconds: 300,
+    memory: "512MiB",
+  },
+  async (request) => {
+    const action = String(request.data?.action ?? "") as AiAction;
+    switch (action) {
+      case "parseResume": {
+        // AUTH ON HOLD: the app runs in open mode, so callers aren't signed in.
+        // Re-enable requireAuth(request.auth) once authentication is turned back on.
+        void request; // (auth intentionally not enforced yet)
+        const resumeText: string = request.data?.resumeText ?? "";
+        const jobDescription: string = request.data?.jobDescription ?? "";
+        const provider: ProviderId = request.data?.provider === "openai" ? "openai" : "ollama";
+        const model: string = request.data?.model ?? "";
+        if (resumeText.trim().length < 30 || jobDescription.trim().length < 20) {
+          throw new HttpsError("invalid-argument", "Provide both resume text and a job description.");
+        }
+        const config = resolveLlm(provider, model); // throws failed-precondition if not configured
+        try {
+          const { assessment, usage } = await assessResume(resumeText, jobDescription, config);
+          // Duplicate check by email/phone — flag before saving; the client decides.
+          const emailNorm = normEmail(assessment.extracted?.email);
+          const phoneNorm = normPhone(assessment.extracted?.phone);
+          const duplicate = await findDuplicate(emailNorm, phoneNorm);
+          return { ok: true, assessment, usage, provider, model: config.model, duplicate };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return { ok: false, error: msg };
+        }
+      }
+      case "matchCandidatesToJd": {
+        void request;
+        const jd = String(request.data?.jobDescription ?? "");
+        const roles = Array.isArray(request.data?.roles)
+          ? (request.data.roles as unknown[]).map((r) => String(r)).filter((r) => r.trim())
+          : [];
+        if (jd.trim().length < 15) throw new HttpsError("invalid-argument", "Provide a job description.");
+        if (!roles.length) return { ok: true, relevant: [] as string[] };
+        const config = pickLlm();
+        try {
+          const { relevant, usage } = await matchRolesToJd(jd, roles, config);
+          await logLlmCall("Candidate matching", config.provider, config.model, usage);
+          return { ok: true, relevant, usage };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      }
+      case "githubPortfolio": {
+        void request; // auth on hold (open mode)
+        const github = String(request.data?.github ?? "");
+        const jobDescription = String(request.data?.jobDescription ?? "");
+        const provider: ProviderId = request.data?.provider === "openai" ? "openai" : "ollama";
+        const model: string = request.data?.model ?? "";
+        const username = parseGithubUsername(github);
+        if (!username) throw new HttpsError("invalid-argument", "Provide a GitHub profile URL or username.");
+        if (jobDescription.trim().length < 20) throw new HttpsError("invalid-argument", "Provide the job description.");
+        const config = resolveLlm(provider, model); // throws failed-precondition if not configured
+        try {
+          const data = await buildPortfolio(username, GITHUB_TOKEN.value());
+          const { portfolio, usage } = await assessPortfolio(data.summaryText, jobDescription, config);
+          await logLlmCall("Portfolio assessment", provider, config.model, usage);
+          return { ok: true, profile: data.profile, portfolio, usage };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      }
+      case "githubSearch": {
+        void request; // auth on hold (open mode)
+        const name = String(request.data?.name ?? "").trim();
+        const email = String(request.data?.email ?? "").trim();
+        if (!name && !email) {
+          throw new HttpsError("invalid-argument", "Provide a candidate name or email to search GitHub.");
+        }
+        try {
+          const matches = await searchUsers(name, email, GITHUB_TOKEN.value());
+          return { ok: true, matches };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      }
+      case "llmAvailability": {
+        return {
+          ok: true,
+          providers: {
+            ollama: keyConfigured(LLM_API_KEY.value()),
+            openai: keyConfigured(OPENAI_API_KEY.value()),
+          },
+        };
+      }
+      default:
+        throw new HttpsError("invalid-argument", `Unknown action "${action}".`);
+    }
   }
 );
 
@@ -823,18 +693,6 @@ export const listResumeReports = onCall(
 
 // Which LLM providers are configured (have a real API key). The UI uses this to
 // enable/disable providers in the model picker. Never returns key values.
-export const llmAvailability = onCall(
-  { ...commonOpts, secrets: [LLM_API_KEY, OPENAI_API_KEY], timeoutSeconds: 15 },
-  async () => {
-    return {
-      ok: true,
-      providers: {
-        ollama: keyConfigured(LLM_API_KEY.value()),
-        openai: keyConfigured(OPENAI_API_KEY.value()),
-      },
-    };
-  }
-);
 
 // Cumulative LLM token usage & cost across all saved resume assessments, with an
 // optional monthly budget (LLM_BUDGET_USD env) to show the remaining balance.
@@ -1050,7 +908,7 @@ export const saveTimesheetEntry = onCall(
     const hours = Number(request.data?.hours);
     const workedOn = String(request.data?.workedOn ?? "");
     try {
-      const entry = await saveEntry(profile, date, hours, workedOn);
+      const entry = await saveEntry(profile, date, hours, workedOn, request.data?.jobs);
       return { ok: true, entry };
     } catch (e) {
       throw new HttpsError("invalid-argument", e instanceof Error ? e.message : String(e));

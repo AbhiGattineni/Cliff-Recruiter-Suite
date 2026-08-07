@@ -6,8 +6,7 @@
 
 import { jsPDF } from "jspdf";
 import { ResumeReport } from "./resumeReports";
-import { normalizeAiLines, aiPercentOf } from "./resume";
-import { aiShare } from "./resumeLines";
+import { normalizeAiLines, aiHeadline } from "./resume";
 import { highlightKeywords } from "./highlight";
 
 type RGB = [number, number, number];
@@ -441,14 +440,12 @@ export function buildResumeReportPdf(r: ResumeReport): { doc: jsPDF; filename: s
   }
 
   // ---- AI signal ----------------------------------------------------------
-  const modelPct = aiPercentOf(r);
+  // Same helper as the screen, so the PDF can't quote a different number.
+  const ai = aiHeadline(r);
+  const modelPct = ai.modelPct;
   const aiLines = normalizeAiLines(r.aiGeneratedLines);
-  const share = aiShare(aiLines.length, r.totalLines);
-  const headlinePct = share ? share.share : modelPct;
-  const aiColor =
-    headlinePct != null
-      ? headlinePct > 65 ? RED : headlinePct >= 30 ? AMBER : GREEN
-      : r.aiGeneratedLikelihood === "Low" ? GREEN : r.aiGeneratedLikelihood === "High" ? RED : AMBER;
+  const share = ai.measured;
+  const aiColor = ai.tone === "red" ? RED : ai.tone === "amber" ? AMBER : GREEN;
 
   section(
     "AI-written content signal",

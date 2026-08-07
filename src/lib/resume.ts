@@ -4,6 +4,8 @@ import { httpsCallable } from "firebase/functions";
 import { functions } from "../firebase";
 import { ensureConfigured } from "./errors";
 import { currentActor, Actor } from "./auth";
+import { aiShare, AiShare } from "./resumeLines";
+import { callAi } from "./ai";
 
 export interface SkillMatch {
   skill: string;
@@ -53,6 +55,44 @@ export function normalizeAiLines(lines: unknown): AiFlaggedLine[] {
       return { text: t, score: Number.isFinite(s) ? s : NaN };
     })
     .filter((l) => l.text.trim().length > 0);
+}
+
+export interface AiHeadline {
+  /** The number to show. Measured share when we have a denominator, else the model's estimate. */
+  pct: number | null;
+  /** Present only when the resume's scoreable-line count was recorded. */
+  measured: AiShare | null;
+  /** The model's own holistic estimate, kept for context. */
+  modelPct: number | null;
+  tone: "green" | "amber" | "red";
+  /** Short form for a pill: "13%", or the likelihood word when nothing is numeric. */
+  label: string;
+}
+
+/**
+ * The single AI-content figure to display, wherever it's displayed.
+ *
+ * The reports table and the detail view used to compute this independently —
+ * the table showed the model's holistic guess while the detail showed the
+ * measured flagged-over-total, so the same report read "85%" in the list and
+ * "13%" once opened. Both now call this.
+ */
+export function aiHeadline(a: ResumeAssessment): AiHeadline {
+  const flagged = normalizeAiLines(a.aiGeneratedLines).length;
+  const measured = aiShare(flagged, a.totalLines);
+  const modelPct = aiPercentOf(a);
+  const pct = measured ? measured.share : modelPct;
+  const tone: AiHeadline["tone"] =
+    pct != null
+      ? pct > 65 ? "red" : pct >= 30 ? "amber" : "green"
+      : a.aiGeneratedLikelihood === "Low" ? "green" : a.aiGeneratedLikelihood === "High" ? "red" : "amber";
+  return {
+    pct,
+    measured,
+    modelPct,
+    tone,
+    label: pct != null ? `${pct}%` : String(a.aiGeneratedLikelihood ?? "—"),
+  };
 }
 
 /** Overall AI percentage — from the stored value, else derived from line scores. */
@@ -167,12 +207,8 @@ interface AvailabilityResponse {
 /** Ask the backend which providers have an API key configured. */
 export async function getLlmAvailability(): Promise<Record<ProviderId, boolean>> {
   ensureConfigured();
-  const callable = httpsCallable<Record<string, never>, AvailabilityResponse>(
-    functions,
-    "llmAvailability"
-  );
-  const res = await callable({});
-  return res.data?.providers ?? { ollama: false, openai: false };
+  const data = await callAi<Record<string, never>, AvailabilityResponse>("llmAvailability", {});
+  return data?.providers ?? { ollama: false, openai: false };
 }
 
 /**
@@ -186,12 +222,10 @@ export async function assessResume(
   model: string
 ): Promise<AssessResult> {
   ensureConfigured();
-  const callable = httpsCallable<
+  const payload = await callAi<
     { resumeText: string; jobDescription: string; provider: ProviderId; model: string },
     ParseResponse
-  >(functions, "parseResume");
-  const res = await callable({ resumeText, jobDescription, provider, model });
-  const payload = res.data;
+  >("parseResume", { resumeText, jobDescription, provider, model }, { timeout: 300_000 });
   if (!payload?.ok || !payload.assessment) {
     throw new Error(payload?.error || "Resume parsing failed.");
   }

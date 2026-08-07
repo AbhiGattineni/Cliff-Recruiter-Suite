@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildResumeReportPdf } from "./resumeReportPdf";
+import { aiHeadline } from "./resume";
 import { ResumeReport } from "./resumeReports";
 import { scoreLinkedin } from "./linkedinScore";
 
@@ -104,5 +105,61 @@ describe("buildResumeReportPdf", () => {
     r.aiGeneratedLines = ["An older report stored plain strings here."];
     const { doc } = buildResumeReportPdf(r);
     expect(doc.getNumberOfPages()).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ---- One AI number everywhere ----------------------------------------------
+// The reports table showed the model's holistic guess while the detail view and
+// PDF showed the measured flagged-over-total, so the same report read e.g. 85%
+// in the list and 13% once opened.
+
+describe("aiHeadline", () => {
+  it("prefers the measured share over the model's estimate", () => {
+    const r = base();
+    r.totalLines = 70;
+    r.aiGeneratedPercent = 85; // model's guess
+    r.aiGeneratedLines = Array.from({ length: 9 }, (_, i) => ({ text: `Line ${i}`, score: 70 }));
+    const ai = aiHeadline(r);
+    expect(ai.measured).toEqual({ flagged: 9, total: 70, share: 13 });
+    expect(ai.pct).toBe(13);
+    expect(ai.modelPct).toBe(85);
+    expect(ai.label).toBe("13%");
+  });
+
+  it("falls back to the model's estimate when no line count was recorded", () => {
+    const r = base();
+    r.totalLines = undefined;
+    r.aiGeneratedPercent = 85;
+    const ai = aiHeadline(r);
+    expect(ai.measured).toBeNull();
+    expect(ai.pct).toBe(85);
+  });
+
+  it("tones by the displayed number, not the model's", () => {
+    const r = base();
+    r.totalLines = 70;
+    r.aiGeneratedPercent = 85; // red on its own
+    r.aiGeneratedLines = [{ text: "One line", score: 70 }];
+    expect(aiHeadline(r).tone).toBe("green"); // 1/70 = 1%
+  });
+
+  it("never reports more flagged lines than the resume has", () => {
+    const r = base();
+    r.totalLines = 3;
+    r.aiGeneratedLines = Array.from({ length: 9 }, (_, i) => ({ text: `Line ${i}`, score: 70 }));
+    const ai = aiHeadline(r);
+    expect(ai.measured!.flagged).toBe(3);
+    expect(ai.pct).toBe(100);
+  });
+
+  it("uses the likelihood word when there is no number at all", () => {
+    const r = base();
+    r.totalLines = undefined;
+    r.aiGeneratedPercent = undefined;
+    r.aiGeneratedLines = [];
+    r.aiGeneratedLikelihood = "Medium";
+    const ai = aiHeadline(r);
+    expect(ai.pct).toBeNull();
+    expect(ai.label).toBe("Medium");
   });
 });

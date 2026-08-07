@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { listResumeReports, ResumeReport } from "../lib/resumeReports";
-import { aiPercentOf, getLlmUsageSummary } from "../lib/resume";
+import { aiHeadline, getLlmUsageSummary } from "../lib/resume";
 import { downloadResumeReportPdf } from "../lib/resumeReportPdf";
 import { friendlyError } from "../lib/errors";
 import AssessmentDetail from "../components/AssessmentDetail";
@@ -105,9 +105,23 @@ export default function ResumeReports() {
                       <td><span className={`pill ${ratingPill(r.rating)}`}>{r.rating}</span></td>
                       <td>
                         {(() => {
-                          const p = aiPercentOf(r);
-                          const cls = p != null ? (p > 65 ? "red" : p >= 30 ? "amber" : "green") : aiPill(r.aiGeneratedLikelihood);
-                          return <span className={`pill ${cls}`}>{p != null ? `${p}%` : r.aiGeneratedLikelihood}</span>;
+                          // Same helper the detail view uses, so the list and the
+                          // opened report can't show two different numbers.
+                          const ai = aiHeadline(r);
+                          return (
+                            <span
+                              className={`pill ${ai.tone}`}
+                              title={
+                                ai.measured
+                                  ? `${ai.measured.flagged} of ${ai.measured.total} scoreable lines flagged` +
+                                    (ai.modelPct != null ? ` · model's own estimate ${ai.modelPct}%` : "")
+                                  : "Model's own estimate — this report predates the line count"
+                              }
+                            >
+                              {ai.label}
+                              {!ai.measured && ai.pct != null && "*"}
+                            </span>
+                          );
                         })()}
                       </td>
                       <td className="muted" style={{ fontSize: "0.8rem" }}>{r.provider} / {r.model}</td>

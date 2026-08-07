@@ -1,4 +1,5 @@
 import { Fragment, ReactNode, useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { DateTime } from "luxon";
 import { fetchCeipalReport, reportMeta } from "../lib/ceipal";
 import { parseSubmissionsFromApi, parseJobsFromApi } from "../lib/report/parseSource";
@@ -23,6 +24,16 @@ import PieChart from "../components/PieChart";
 import Modal from "../components/Modal";
 import Pagination, { usePagination } from "../components/Pagination";
 import ActiveJobsCard from "../components/ActiveJobsCard";
+import { listTeamTimesheets } from "../lib/timesheets";
+import {
+  buildEffortIndex,
+  effortFor,
+  hoursOnJob,
+  effortWithoutOutput,
+  subsPerHour,
+  EffortIndex,
+  PersonEffort,
+} from "../lib/timesheetStats";
 import IndexGuide from "../components/IndexGuide";
 
 const fmtDt = (d: DateTime | null) => (d ? d.toFormat("MM/dd/yyyy hh:mm a") : "—");
@@ -139,6 +150,18 @@ export default function RecruiterPerformance() {
       submittedTo ? DateTime.fromISO(submittedTo).endOf("day") : null
     );
   }, [subs, submittedFrom, submittedTo]);
+
+  // Logged hours for the same window. Readable by admins/managers only (see
+  // firestore.rules), so a plain employee just sees no hours rather than an error.
+  const effortQ = useQuery({
+    queryKey: ["teamTimesheets", submittedFrom, submittedTo],
+    queryFn: () => listTeamTimesheets(submittedFrom, submittedTo),
+    retry: false,
+  });
+  const effort: EffortIndex = useMemo(
+    () => buildEffortIndex(effortQ.data?.entries ?? []),
+    [effortQ.data]
+  );
 
   const { stats: allStats, statuses } = useMemo(
     () =>
@@ -307,6 +330,8 @@ export default function RecruiterPerformance() {
                         <th style={{ textAlign: "right" }}>Profiles</th>
                         <th style={{ minWidth: 200 }}>Current status of profiles</th>
                         <th style={{ textAlign: "right" }}>Client/Vendor</th>
+                        <th style={{ textAlign: "right" }} title="Hours logged on timesheets in this range">Hours</th>
+                        <th style={{ textAlign: "right" }} title="Client/vendor submissions per hour logged">Per hour</th>
                         <th style={{ textAlign: "right" }}>Index</th>
                       </tr>
                     </thead>
@@ -324,6 +349,21 @@ export default function RecruiterPerformance() {
                               {s.clientCount}
                               <span className="muted" style={{ fontSize: "0.78rem" }}> · {pct(s.clientRate)}</span>
                             </td>
+                            {(() => {
+                              const e = effortFor(effort, s.name);
+                              const h = e?.totalHours ?? 0;
+                              const per = subsPerHour(s.clientCount, h);
+                              return (
+                                <>
+                                  <td style={{ textAlign: "right" }} className={h ? "" : "muted"}>
+                                    {h ? `${h}h` : "—"}
+                                  </td>
+                                  <td style={{ textAlign: "right" }} className="muted">
+                                    {per != null ? per.toFixed(2) : "—"}
+                                  </td>
+                                </>
+                              );
+                            })()}
                             <td style={{ textAlign: "right" }}>
                               <span
                                 className={`pill ${indexPill(s.index)}`}
@@ -365,6 +405,7 @@ export default function RecruiterPerformance() {
                 activityLoading={activityLoading}
                 activityError={activityError}
                 onLoadActivity={loadActivity}
+                effort={effort}
               />
             )}
           </Modal>
@@ -392,6 +433,7 @@ function RecruiterModal({
   activityLoading,
   activityError,
   onLoadActivity,
+  effort,
 }: {
   stat: RecruiterStat;
   statuses: StatusMeta[];
@@ -403,12 +445,24 @@ function RecruiterModal({
   activityLoading: boolean;
   activityError: string | null;
   onLoadActivity: () => void;
+  effort: EffortIndex;
 }) {
   const present = statuses.filter((st) => (stat.counts[st.label] ?? 0) > 0);
   const pieData = present.map((st) => ({ label: st.label, value: stat.counts[st.label], color: st.color }));
   const colorByStatus = new Map(statuses.map((s) => [s.label, s.color]));
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const jobs = stat.jobGroups;
+  const myEffort: PersonEffort | null = effortFor(effort, stat.name);
+  // Requirements with hours logged but nothing sent to a client in this period.
+  const noOutput = useMemo(() => {
+    const subsByCode = new Map<string, number>();
+    for (const g of jobs) {
+      if (!g.jobCode) continue;
+      const clientSubs = g.submissions.filter((r) => /client|vendor|offer|placed|placement/i.test(r.status)).length;
+      subsByCode.set(g.jobCode, clientSubs);
+    }
+    return effortWithoutOutput(myEffort, subsByCode);
+  }, [myEffort, jobs]);
   const submittedReqs = jobs.length - stat.noSubCount;
 
   // Screening pass/fail over this recruiter's profiles in the selected range.
@@ -459,7 +513,34 @@ function RecruiterModal({
         <Stat label="Requirements worked" value={stat.requirements} />
         <Stat label="Client/vendor submissions" value={`${stat.clientCount} of ${stat.clientTarget} target`} />
         <Stat label="Reached interview+" value={pct(stat.progressRate)} />
+        {myEffort && <Stat label="Hours logged" value={`${myEffort.totalHours}h over ${myEffort.days}d`} />}
+        {myEffort && subsPerHour(stat.clientCount, myEffort.totalHours) != null && (
+          <Stat
+            label="Client/vendor per hour"
+            value={String(subsPerHour(stat.clientCount, myEffort.totalHours)!.toFixed(2))}
+          />
+        )}
       </div>
+
+      {myEffort && noOutput.length > 0 && (
+        <div className="alert warn" style={{ marginBottom: "1rem" }}>
+          <strong>Hours with no client submission.</strong>{" "}
+          {noOutput.length} requirement{noOutput.length === 1 ? "" : "s"} had time logged but nothing sent to a
+          client or vendor in this period:{" "}
+          {noOutput.slice(0, 6).map((j) => (
+            <span className="pill amber" key={j.jobCode} style={{ marginRight: "0.3rem" }}>
+              {j.jobCode} · {j.hours}h
+            </span>
+          ))}
+          {noOutput.length > 6 && <span className="muted">+{noOutput.length - 6} more</span>}
+        </div>
+      )}
+      {myEffort && myEffort.attributedHours < myEffort.totalHours && (
+        <p className="muted" style={{ fontSize: "0.82rem", marginTop: "-0.5rem" }}>
+          {Math.round((myEffort.totalHours - myEffort.attributedHours) * 100) / 100}h of the{" "}
+          {myEffort.totalHours}h logged wasn&#39;t booked to a requirement.
+        </p>
+      )}
 
       {/* Weekly activity — the numbers tracked from Ceipal (+ coming-soon sources) */}
       <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "0.9rem 1rem", marginBottom: "1.25rem" }}>
@@ -550,6 +631,7 @@ function RecruiterModal({
               <th>Job posted on</th>
               <th>First submission</th>
               <th>Time to 1st submission</th>
+              <th style={{ textAlign: "right" }} title="Hours logged against this requirement">Hours</th>
               <th style={{ textAlign: "right" }}>Submissions</th>
             </tr>
           </thead>
@@ -570,6 +652,14 @@ function RecruiterModal({
                     <td style={{ whiteSpace: "nowrap" }}>{fmtDt(j.jobCreatedOn)}</td>
                     <td style={{ whiteSpace: "nowrap" }}>{j.assignedOnly ? "—" : fmtDt(j.firstSubmission)}</td>
                     <td style={{ whiteSpace: "nowrap" }}>{j.assignedOnly ? "—" : j.timeToFirst || "—"}</td>
+                    {(() => {
+                      const h = hoursOnJob(effort, stat.name, j.jobCode);
+                      return (
+                        <td style={{ textAlign: "right" }} className={h ? "" : "muted"}>
+                          {h ? `${h}h` : "—"}
+                        </td>
+                      );
+                    })()}
                     <td style={{ textAlign: "right", fontWeight: 700 }}>
                       {j.assignedOnly ? <span className="pill amber">No submissions</span> : j.submissions.length}
                     </td>
