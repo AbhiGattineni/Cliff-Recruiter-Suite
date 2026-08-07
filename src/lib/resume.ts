@@ -5,6 +5,7 @@ import { functions } from "../firebase";
 import { ensureConfigured } from "./errors";
 import { currentActor, Actor } from "./auth";
 import { aiShare, AiShare } from "./resumeLines";
+import { callAi } from "./ai";
 
 export interface SkillMatch {
   skill: string;
@@ -206,12 +207,8 @@ interface AvailabilityResponse {
 /** Ask the backend which providers have an API key configured. */
 export async function getLlmAvailability(): Promise<Record<ProviderId, boolean>> {
   ensureConfigured();
-  const callable = httpsCallable<Record<string, never>, AvailabilityResponse>(
-    functions,
-    "llmAvailability"
-  );
-  const res = await callable({});
-  return res.data?.providers ?? { ollama: false, openai: false };
+  const data = await callAi<Record<string, never>, AvailabilityResponse>("llmAvailability", {});
+  return data?.providers ?? { ollama: false, openai: false };
 }
 
 /**
@@ -225,12 +222,10 @@ export async function assessResume(
   model: string
 ): Promise<AssessResult> {
   ensureConfigured();
-  const callable = httpsCallable<
+  const payload = await callAi<
     { resumeText: string; jobDescription: string; provider: ProviderId; model: string },
     ParseResponse
-  >(functions, "parseResume");
-  const res = await callable({ resumeText, jobDescription, provider, model });
-  const payload = res.data;
+  >("parseResume", { resumeText, jobDescription, provider, model }, { timeout: 300_000 });
   if (!payload?.ok || !payload.assessment) {
     throw new Error(payload?.error || "Resume parsing failed.");
   }

@@ -44,35 +44,3 @@ export async function requestPasswordReset(email: string): Promise<void> {
   await sendPasswordResetEmail(auth, email.trim());
 }
 
-interface RequestOtpResult {
-  ok: boolean;
-  devOtp?: string; // only present when the backend runs in OTP_DEV_MODE
-}
-
-interface VerifyResult {
-  ok: boolean;
-}
-
-export async function requestSignupOtp(
-  email: string,
-  password: string,
-  displayName: string
-): Promise<RequestOtpResult> {
-  ensureConfigured();
-  const callable = httpsCallable<
-    { email: string; password: string; displayName: string },
-    RequestOtpResult
-  >(functions, "requestSignupOtp");
-  const res = await callable({ email: email.trim(), password, displayName: displayName.trim() });
-  return res.data;
-}
-
-export async function verifySignupOtp(email: string, otp: string): Promise<VerifyResult> {
-  ensureConfigured();
-  const callable = httpsCallable<{ email: string; otp: string }, VerifyResult>(
-    functions,
-    "verifySignupOtp"
-  );
-  const res = await callable({ email: email.trim(), otp: otp.trim() });
-  return res.data;
-}
