@@ -1,6 +1,5 @@
-import { ResumeAssessment, normalizeAiLines, aiPercentOf } from "../lib/resume";
+import { ResumeAssessment, normalizeAiLines, aiHeadline } from "../lib/resume";
 import { highlightKeywords } from "../lib/highlight";
-import { aiShare } from "../lib/resumeLines";
 import Section from "./Section";
 
 // Fit assessment detail — used inline on Resume Parsing and inside the Resume
@@ -10,15 +9,11 @@ import Section from "./Section";
 export default function AssessmentDetail({ a, startIndex = 0 }: { a: ResumeAssessment; startIndex?: number }) {
   const aiLines = normalizeAiLines(a.aiGeneratedLines);
   const jdKeywords = (a.skillMatches ?? []).map((s) => s.skill);
-  const modelPct = aiPercentOf(a); // the model's own holistic estimate
-  // Measured share = flagged lines / scoreable lines in the resume. Absent on
-  // reports saved before the line count was recorded.
-  const share = aiShare(aiLines.length, a.totalLines);
-  const headline = share ? share.share : modelPct;
-  const aiClass =
-    headline != null
-      ? headline > 65 ? "red" : headline >= 30 ? "amber" : "green"
-      : a.aiGeneratedLikelihood === "Low" ? "green" : a.aiGeneratedLikelihood === "High" ? "red" : "amber";
+  // One helper drives this everywhere — the reports table shows the same figure.
+  const ai = aiHeadline(a);
+  const modelPct = ai.modelPct; // the model's own holistic estimate
+  const share = ai.measured; // measured flagged / scoreable lines, when recorded
+  const aiClass = ai.tone;
 
   const skills = a.skillMatches ?? [];
   const matched = skills.filter((s) => s.status === "matched").length;
