@@ -9,17 +9,16 @@ name: Deploy
 #                              rights on the Firebase project (Firebase Admin,
 #                              Cloud Functions Admin, Firebase Hosting Admin,
 #                              Service Account User, Cloud Build Editor).
-#   VITE_FIREBASE_API_KEY
-#   VITE_FIREBASE_AUTH_DOMAIN
-#   VITE_FIREBASE_PROJECT_ID
-#   VITE_FIREBASE_STORAGE_BUCKET
-#   VITE_FIREBASE_MESSAGING_SENDER_ID
-#   VITE_FIREBASE_APP_ID
-#   VITE_FIREBASE_MEASUREMENT_ID   (optional)
-#     — the Firebase web config from .env.example. These aren't secret in the
-#     sense of being sensitive (they're safe to ship in the browser bundle),
-#     but they still need to be real values for the deployed site to work,
-#     so they're stored as repo secrets rather than committed.
+#   VITE_FIREBASE_CONFIG       The Firebase web config, pasted as-is from the
+#                              Firebase console ("Project settings" → "Your
+#                              apps" → the `firebaseConfig` snippet). Either
+#                              the raw JS object literal or the whole code
+#                              snippet works — the "Load Firebase web config"
+#                              step below extracts and parses it. Not secret
+#                              in the sense of being sensitive (it's safe to
+#                              ship in the browser bundle), but it still needs
+#                              to be the real value for the deployed site to
+#                              work, so it's a repo secret rather than committed.
 #
 # Cloud Functions secrets (CEIPAL_PASSWORD, LLM_API_KEY, etc.) are managed
 # separately via `firebase functions:secrets:set` — this workflow does not
@@ -49,16 +48,52 @@ jobs:
       - name: Install web deps
         run: npm ci
 
+      - name: Load Firebase web config
+        # Accepts either the raw firebaseConfig object literal or the whole
+        # code snippet copied from the Firebase console (imports, comments,
+        # unquoted keys, trailing commas and all) — extracts the object,
+        # turns it into valid JSON, and writes each field as a VITE_FIREBASE_*
+        # env var for the build step below.
+        run: |
+          node -e '
+            const raw = (process.env.VITE_FIREBASE_CONFIG || "").trim();
+            if (!raw) {
+              console.error("VITE_FIREBASE_CONFIG secret is empty.");
+              process.exit(1);
+            }
+            const snippetMatch = raw.match(/firebaseConfig\s*=\s*(\{[\s\S]*?\n\})/);
+            let objSrc = snippetMatch ? snippetMatch[1] : raw;
+            objSrc = objSrc
+              .replace(/\/\/.*$/gm, "")
+              .replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g, "$1\"$2\":")
+              .replace(/,(\s*[}\]])/g, "$1");
+            let cfg;
+            try {
+              cfg = JSON.parse(objSrc);
+            } catch (e) {
+              console.error("Could not parse VITE_FIREBASE_CONFIG:", e.message);
+              console.error("Extracted text was:", objSrc);
+              process.exit(1);
+            }
+            const fs = require("fs");
+            const lines = [
+              `VITE_FIREBASE_API_KEY=${cfg.apiKey || ""}`,
+              `VITE_FIREBASE_AUTH_DOMAIN=${cfg.authDomain || ""}`,
+              `VITE_FIREBASE_PROJECT_ID=${cfg.projectId || ""}`,
+              `VITE_FIREBASE_STORAGE_BUCKET=${cfg.storageBucket || ""}`,
+              `VITE_FIREBASE_MESSAGING_SENDER_ID=${cfg.messagingSenderId || ""}`,
+              `VITE_FIREBASE_APP_ID=${cfg.appId || ""}`,
+              `VITE_FIREBASE_MEASUREMENT_ID=${cfg.measurementId || ""}`,
+            ];
+            fs.appendFileSync(process.env.GITHUB_ENV, lines.join("\n") + "\n");
+            console.log("Parsed Firebase config for project:", cfg.projectId || "(missing projectId)");
+          '
+        env:
+          VITE_FIREBASE_CONFIG: ${{ secrets.VITE_FIREBASE_CONFIG }}
+
       - name: Build web app
         run: npx vite build
         env:
-          VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
-          VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
-          VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
-          VITE_FIREBASE_STORAGE_BUCKET: ${{ secrets.VITE_FIREBASE_STORAGE_BUCKET }}
-          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
-          VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
-          VITE_FIREBASE_MEASUREMENT_ID: ${{ secrets.VITE_FIREBASE_MEASUREMENT_ID }}
           VITE_FUNCTIONS_REGION: us-central1
 
       - name: Install functions deps
