@@ -75,13 +75,24 @@ export async function setUserRole(uid: string, role: Role): Promise<UserProfile>
   return res.data.user;
 }
 
+/** Hours booked against one requirement on a given day. */
+export interface JobHours {
+  jobCode: string;
+  jobTitle: string;
+  client: string;
+  hours: number;
+}
+
 export interface TimesheetEntry {
   id: string;
   uid: string;
   email: string;
   displayName: string;
   date: string; // YYYY-MM-DD
+  /** Total for the day — the sum of `jobs` when any are booked. */
   hours: number;
+  /** Per-requirement split. Empty on older entries. */
+  jobs: JobHours[];
   workedOn: string;
   createdAt: number | null;
   updatedAt: number | null;
@@ -95,19 +106,32 @@ function rowToEntry(id: string, x: DocumentData): TimesheetEntry {
     displayName: String(x.displayName ?? ""),
     date: String(x.date ?? ""),
     hours: Number(x.hours) || 0,
+    jobs: Array.isArray(x.jobs)
+      ? (x.jobs as DocumentData[]).map((j) => ({
+          jobCode: String(j?.jobCode ?? ""),
+          jobTitle: String(j?.jobTitle ?? ""),
+          client: String(j?.client ?? ""),
+          hours: Number(j?.hours) || 0,
+        }))
+      : [],
     workedOn: String(x.workedOn ?? ""),
     createdAt: toMillis(x.createdAt),
     updatedAt: toMillis(x.updatedAt),
   };
 }
 
-export async function saveTimesheetEntry(date: string, hours: number, workedOn: string): Promise<TimesheetEntry> {
+export async function saveTimesheetEntry(
+  date: string,
+  hours: number,
+  workedOn: string,
+  jobs: JobHours[] = []
+): Promise<TimesheetEntry> {
   ensureConfigured();
   const callable = httpsCallable<
-    { date: string; hours: number; workedOn: string },
+    { date: string; hours: number; workedOn: string; jobs: JobHours[] },
     { ok: boolean; entry: TimesheetEntry }
   >(functions, "saveTimesheetEntry");
-  const res = await callable({ date, hours, workedOn });
+  const res = await callable({ date, hours, workedOn, jobs });
   return res.data.entry;
 }
 

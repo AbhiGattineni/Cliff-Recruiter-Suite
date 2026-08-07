@@ -102,15 +102,25 @@ export async function setRole(targetUid: string, role: Role): Promise<UserProfil
 
 // ---- Daily timesheet entries -----------------------------------------------
 
+/** Hours booked against one requirement on a given day. */
+export interface JobHours {
+  jobCode: string;
+  jobTitle: string;
+  client: string;
+  hours: number;
+}
+
 export interface TimesheetEntry {
   id: string;
   uid: string;
   email: string;
   displayName: string;
   date: string; // YYYY-MM-DD
+  /** Total for the day. Derived from `jobs` when any are booked. */
   hours: number;
-  // Free text today; becomes a select over open Ceipal jobs once that
-  // integration lands, so a job code can slot in without a schema change.
+  /** Per-requirement split. Empty on older entries and on non-requirement days. */
+  jobs: JobHours[];
+  /** Free-text note. Was the only record of what was worked on before `jobs`. */
   workedOn: string;
   createdAt: number | null;
   updatedAt: number | null;
@@ -124,22 +134,65 @@ function rowToEntry(id: string, x: Record<string, unknown>): TimesheetEntry {
     displayName: String(x.displayName ?? ""),
     date: String(x.date ?? ""),
     hours: Number(x.hours) || 0,
+    jobs: Array.isArray(x.jobs)
+      ? (x.jobs as Record<string, unknown>[]).map((j) => ({
+          jobCode: String(j?.jobCode ?? ""),
+          jobTitle: String(j?.jobTitle ?? ""),
+          client: String(j?.client ?? ""),
+          hours: Number(j?.hours) || 0,
+        }))
+      : [],
     workedOn: String(x.workedOn ?? ""),
     createdAt: toMillis(x.createdAt),
     updatedAt: toMillis(x.updatedAt),
   };
 }
 
+const MAX_JOBS_PER_DAY = 20;
+
+/** Validate and normalise the per-requirement split. */
+function cleanJobs(raw: unknown): JobHours[] {
+  if (!Array.isArray(raw)) return [];
+  const out: JobHours[] = [];
+  for (const item of raw.slice(0, MAX_JOBS_PER_DAY)) {
+    const o = (item ?? {}) as Record<string, unknown>;
+    const jobCode = String(o.jobCode ?? "").trim().slice(0, 60);
+    if (!jobCode) continue;
+    const h = Number(o.hours);
+    if (!(Number.isFinite(h) && h > 0 && h <= 24)) {
+      throw new Error(`Hours for ${jobCode} must be between 0 and 24.`);
+    }
+    // One row per requirement — merge a repeated code rather than storing it twice.
+    const existing = out.find((x) => x.jobCode === jobCode);
+    if (existing) {
+      existing.hours += h;
+      continue;
+    }
+    out.push({
+      jobCode,
+      jobTitle: String(o.jobTitle ?? "").trim().slice(0, 200),
+      client: String(o.client ?? "").trim().slice(0, 120),
+      hours: h,
+    });
+  }
+  return out;
+}
+
 export async function saveEntry(
   profile: UserProfile,
   date: string,
   hours: number,
-  workedOn: string
+  workedOn: string,
+  jobsRaw?: unknown
 ): Promise<TimesheetEntry> {
   if (!DATE_RE.test(date)) throw new Error("date must be in YYYY-MM-DD format.");
-  if (!(Number.isFinite(hours) && hours >= 0 && hours <= 24)) {
-    throw new Error("hours must be a number between 0 and 24.");
+  const jobs = cleanJobs(jobsRaw);
+  // When a split is given it IS the day's total, so the two can never disagree.
+  const total = jobs.length ? jobs.reduce((sum, j) => sum + j.hours, 0) : hours;
+  if (!(Number.isFinite(total) && total >= 0 && total <= 24)) {
+    throw new Error("Total hours for a day must be between 0 and 24.");
   }
+  hours = Math.round(total * 100) / 100;
   const db = getFirestore();
   const id = `${profile.uid}_${date}`;
   const ref = db.collection("timesheetEntries").doc(id);
@@ -151,6 +204,7 @@ export async function saveEntry(
       displayName: profile.displayName,
       date,
       hours,
+      jobs,
       workedOn: workedOn.slice(0, 500),
       createdAt: existing.exists ? existing.data()!.createdAt : FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),

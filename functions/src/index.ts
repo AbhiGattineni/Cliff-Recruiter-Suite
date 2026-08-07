@@ -1050,7 +1050,7 @@ export const saveTimesheetEntry = onCall(
     const hours = Number(request.data?.hours);
     const workedOn = String(request.data?.workedOn ?? "");
     try {
-      const entry = await saveEntry(profile, date, hours, workedOn);
+      const entry = await saveEntry(profile, date, hours, workedOn, request.data?.jobs);
       return { ok: true, entry };
     } catch (e) {
       throw new HttpsError("invalid-argument", e instanceof Error ? e.message : String(e));

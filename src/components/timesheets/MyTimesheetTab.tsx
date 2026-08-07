@@ -2,7 +2,9 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DateTime } from "luxon";
 import { friendlyError } from "../../lib/errors";
-import { listMyTimesheets, saveTimesheetEntry, TimesheetEntry } from "../../lib/timesheets";
+import { listMyTimesheets, saveTimesheetEntry, TimesheetEntry, JobHours } from "../../lib/timesheets";
+import { listOpenJobs } from "../../lib/openJobs";
+import JobHoursPicker from "./JobHoursPicker";
 import { useAuth } from "../../context/AuthContext";
 
 const todayIso = () => DateTime.local().toFormat("yyyy-MM-dd");
@@ -26,9 +28,13 @@ export default function MyTimesheetTab() {
     return m;
   }, [entriesQ.data]);
 
+  // Open requirements for the picker — cached, so switching dates doesn't refetch.
+  const openJobsQ = useQuery({ queryKey: ["openJobs"], queryFn: listOpenJobs, staleTime: 10 * 60_000 });
+
   const [date, setDate] = useState(todayIso());
   const [hours, setHours] = useState("8");
   const [workedOn, setWorkedOn] = useState("");
+  const [jobs, setJobs] = useState<JobHours[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -40,16 +46,20 @@ export default function MyTimesheetTab() {
     const existing = byDate.get(d);
     setHours(existing ? String(existing.hours) : "8");
     setWorkedOn(existing?.workedOn ?? "");
+    setJobs(existing?.jobs ?? []);
   };
 
   const selected = byDate.get(date);
+  const jobTotal = Math.round(jobs.reduce((s, j) => s + (Number(j.hours) || 0), 0) * 100) / 100;
+  // Block saving a requirement row left at zero — it reads as "worked on, no time".
+  const jobsIncomplete = jobs.length > 0 && jobs.some((j) => !(Number(j.hours) > 0));
 
   const submit = async () => {
     setSaving(true);
     setError(null);
     setSaved(false);
     try {
-      await saveTimesheetEntry(date, Number(hours), workedOn);
+      await saveTimesheetEntry(date, Number(hours), workedOn, jobs);
       await qc.invalidateQueries({ queryKey: ["myTimesheets"] });
       await qc.invalidateQueries({ queryKey: ["teamTimesheets"] });
       setSaved(true);
@@ -85,16 +95,32 @@ export default function MyTimesheetTab() {
             <input type="date" max={todayIso()} value={date} onChange={(e) => pickDate(e.target.value)} />
           </div>
           <div className="field">
-            <label>Hours worked</label>
-            <input type="number" min={0} max={24} step={0.5} value={hours} onChange={(e) => setHours(e.target.value)} />
+            <label>Hours worked{jobs.length > 0 && <span className="muted"> — from the split below</span>}</label>
+            <input
+              type="number"
+              min={0}
+              max={24}
+              step={0.5}
+              value={jobs.length > 0 ? String(jobTotal) : hours}
+              disabled={jobs.length > 0}
+              onChange={(e) => setHours(e.target.value)}
+            />
           </div>
         </div>
+
+        <JobHoursPicker
+          jobs={jobs}
+          options={openJobsQ.data ?? []}
+          loading={openJobsQ.isLoading}
+          error={openJobsQ.error ? friendlyError(openJobsQ.error) : null}
+          onChange={setJobs}
+        />
         <div className="field">
-          <label>What did you work on?</label>
+          <label>Notes (optional)</label>
           <textarea
             rows={3}
             style={{ minHeight: 70 }}
-            placeholder="e.g. Java Developer req for Acme Corp — sourcing + 3 submissions"
+            placeholder="Anything worth noting — calls, screening, admin, or work not tied to a requirement."
             value={workedOn}
             onChange={(e) => setWorkedOn(e.target.value)}
           />
@@ -104,7 +130,7 @@ export default function MyTimesheetTab() {
             You already logged {selected.hours}h for this date — saving will update it.
           </p>
         )}
-        <button className="btn" onClick={submit} disabled={saving || !hours}>
+        <button className="btn" onClick={submit} disabled={saving || (jobs.length === 0 && !hours) || jobsIncomplete}>
           {saving ? <span className="spinner" /> : "Save"}
         </button>
       </div>
@@ -132,7 +158,8 @@ export default function MyTimesheetTab() {
                 <tr>
                   <th>Date</th>
                   <th style={{ textAlign: "right" }}>Hours</th>
-                  <th>Worked on</th>
+                  <th>Requirements</th>
+                  <th>Notes</th>
                 </tr>
               </thead>
               <tbody>
@@ -140,12 +167,23 @@ export default function MyTimesheetTab() {
                   <tr key={e.id} style={{ cursor: "pointer" }} onClick={() => pickDate(e.date)}>
                     <td>{e.date}</td>
                     <td style={{ textAlign: "right" }}>{e.hours}</td>
+                    <td style={{ whiteSpace: "normal" }}>
+                      {e.jobs?.length ? (
+                        e.jobs.map((j) => (
+                          <span className="pill grey" key={j.jobCode} style={{ marginRight: "0.3rem" }}>
+                            {j.jobCode} · {j.hours}h
+                          </span>
+                        ))
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
                     <td style={{ whiteSpace: "normal" }}>{e.workedOn || <span className="muted">—</span>}</td>
                   </tr>
                 ))}
                 {(entriesQ.data ?? []).length === 0 && (
                   <tr>
-                    <td colSpan={3} className="muted" style={{ textAlign: "center", padding: "1rem" }}>
+                    <td colSpan={4} className="muted" style={{ textAlign: "center", padding: "1rem" }}>
                       No entries yet.
                     </td>
                   </tr>
