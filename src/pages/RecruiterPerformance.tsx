@@ -13,9 +13,11 @@ import {
   RecruiterStat,
   StatusMeta,
   SortKey,
+  INDEX_WEIGHTS,
 } from "../lib/recruiterStats";
 import { getRecruiterActivity, RecruiterActivity, ActivityCounts, activityNameKey } from "../lib/recruiterActivity";
 import { extensionFor } from "../lib/extensions";
+import { GUIDE, readLang } from "../lib/indexGuide";
 import StageBar, { StageLegend } from "../components/StageBar";
 import PieChart from "../components/PieChart";
 import Modal from "../components/Modal";
@@ -41,6 +43,25 @@ const targetBasis = (s: RecruiterStat) =>
   s.targetBasis === "assigned"
     ? `${s.targetBaseCount} assigned requirement${s.targetBaseCount === 1 ? "" : "s"}`
     : `${s.targetBaseCount} requirement${s.targetBaseCount === 1 ? "" : "s"} worked in this period`;
+
+// Hover text for the Index pill — the same weights/metrics IndexGuide shows in
+// the detail modal, sorted weakest-contributor-first so the thing dragging the
+// score down the most is the first thing a recruiter reads.
+const indexBreakdown = (s: RecruiterStat) => {
+  const t = GUIDE[readLang()];
+  const rows = t.metrics
+    .map((m) => {
+      const weight = INDEX_WEIGHTS[m.key];
+      const achieved = s.indexParts[m.key];
+      return { name: m.name, achieved: Math.round(achieved * 100), points: Math.round(weight * achieved * 100) };
+    })
+    .sort((a, b) => a.points - b.points);
+  return [
+    `Performance Index: ${s.index}/100 (lowest-scoring first)`,
+    ...rows.map((r) => `${r.name}: ${r.achieved}% achieved → ${r.points} pts`),
+    "Click the row for the full breakdown and how to improve it.",
+  ].join("\n");
+};
 
 export default function RecruiterPerformance() {
   const [subs, setSubs] = useState<SubmissionEvent[] | null>(null);
@@ -304,7 +325,13 @@ export default function RecruiterPerformance() {
                               <span className="muted" style={{ fontSize: "0.78rem" }}> · {pct(s.clientRate)}</span>
                             </td>
                             <td style={{ textAlign: "right" }}>
-                              <span className={`pill ${indexPill(s.index)}`}>{s.index}</span>
+                              <span
+                                className={`pill ${indexPill(s.index)}`}
+                                style={{ cursor: "help" }}
+                                title={indexBreakdown(s)}
+                              >
+                                {s.index}
+                              </span>
                             </td>
                           </tr>
                         );

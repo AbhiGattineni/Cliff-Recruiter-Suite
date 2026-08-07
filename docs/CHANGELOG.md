@@ -2,6 +2,13 @@
 
 Chronological record of notable changes. Newest first.
 
+## Recruiter Performance: hover the Index for a breakdown
+- Hovering the **Index** pill in the Recruiter Performance leaderboard now shows a tooltip
+  with each of the 5 weighted metrics, sorted weakest first — so the metric dragging the
+  score down the most is the first thing read, without needing to click into the row's
+  detail modal. Same numbers `IndexGuide` already computes, in whichever language (EN/TE/HI)
+  is currently selected.
+
 ## Timesheets: fewer Cloud Functions, reads via Firestore rules
 - The 5 read-only Timesheets/Leave/Roles endpoints (`listUsers`, `listMyTimesheets`,
   `listTeamTimesheets`, `listMyLeaves`, `listLeaveRequests`) are no longer Cloud Functions —
