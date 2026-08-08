@@ -660,34 +660,58 @@ export const ai = onCall(
         const question = String(request.data?.question ?? "").trim().slice(0, 500);
         const plan = request.data?.plan;
         if (!name || !plan) throw new HttpsError("invalid-argument", "name and plan are required.");
+        // Who sees this is decided here, from the caller's own role — never
+        // from anything the client sent. An admin saves for the team; a
+        // manager's saved question is their own, because it can be about one
+        // recruiter and that isn't everyone's business.
         const doc = await getFirestore().collection("askQueries").add({
           name,
           question,
           plan,
+          shared: profile.role === "admin",
           createdByUid: profile.uid,
           createdByName: profile.displayName || profile.email,
           createdAt: FieldValue.serverTimestamp(),
         });
-        return { ok: true, id: doc.id };
+        return { ok: true, id: doc.id, shared: profile.role === "admin" };
       }
       case "askList": {
         const profile = await requireProfile(request.auth);
         requireRole(profile, ["admin", "manager"]);
-        // Shared library — any admin/manager sees every saved query, since this
-        // is a team tool and today's saved query is tomorrow's suggested prompt.
-        const snap = await getFirestore().collection("askQueries").orderBy("createdAt", "desc").limit(200).get();
-        const queries = snap.docs.map((d) => {
+        // Everything an admin shared, plus your own. Two reads merged in memory
+        // rather than one `or` query: no composite index to deploy, and at a
+        // couple of hundred saved questions the difference is noise.
+        const col = getFirestore().collection("askQueries");
+        const [sharedSnap, mineSnap] = await Promise.all([
+          col.where("shared", "==", true).limit(200).get(),
+          col.where("createdByUid", "==", profile.uid).limit(200).get(),
+        ]);
+        const byId = new Map<string, Record<string, unknown>>();
+        for (const d of [...sharedSnap.docs, ...mineSnap.docs]) {
           const x = d.data() as Record<string, unknown>;
           const createdAt = x.createdAt as { toMillis?: () => number } | undefined;
-          return { id: d.id, ...x, createdAt: createdAt?.toMillis?.() ?? null };
-        });
-        return { ok: true, queries };
+          byId.set(d.id, { ...x, id: d.id, createdAt: createdAt?.toMillis?.() ?? null });
+        }
+        const queries = Array.from(byId.values()).sort(
+          (a, b) => Number(b.createdAt ?? 0) - Number(a.createdAt ?? 0)
+        );
+        return { ok: true, queries: queries.slice(0, 200) };
       }
       case "askDelete": {
         const profile = await requireProfile(request.auth);
         requireRole(profile, ["admin", "manager"]);
         const id = String(request.data?.id ?? "");
-        if (id) await getFirestore().collection("askQueries").doc(id).delete();
+        if (!id) return { ok: true };
+        const ref = getFirestore().collection("askQueries").doc(id);
+        const snap = await ref.get();
+        if (!snap.exists) return { ok: true };
+        // Your own, always. Anyone else's — including the shared library — only
+        // if you're an admin, so a manager can't delete what the team relies on.
+        const owner = String(snap.data()?.createdByUid ?? "");
+        if (owner !== profile.uid && profile.role !== "admin") {
+          throw new HttpsError("permission-denied", "You can only delete the queries you saved.");
+        }
+        await ref.delete();
         return { ok: true };
       }
 

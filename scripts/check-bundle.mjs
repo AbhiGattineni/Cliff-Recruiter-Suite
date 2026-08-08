@@ -12,7 +12,13 @@ import { join } from "node:path";
 const DIR = "dist/assets";
 
 // Strings that only exist in the dev harness.
-const FORBIDDEN = ["Sample Recruiter", "Priya Raghavan", "Design preview", "designPreviewDemo"];
+const FORBIDDEN = [
+  "Sample Recruiter",
+  "Priya Raghavan",
+  "Design preview",
+  "designPreviewDemo",
+  "Ask Anything preview recruiter",
+];
 
 let files;
 try {

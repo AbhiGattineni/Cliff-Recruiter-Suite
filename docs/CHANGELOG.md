@@ -2,6 +2,33 @@
 
 Chronological record of notable changes. Newest first.
 
+## Ask Anything: plain-English questions over the app's own data
+- New **Ask Anything** page (`/ask`, 🔎, admin/manager only) and a matching ask box on the
+  dashboard that hands the question over via `?q=`. Ask something in English, get a summary,
+  a chart and a table back, with prebuilt prompt chips for a quick start.
+- **The AI never sees a data row and never states a number of its own.** `askPlan` turns the
+  question into a small JSON query plan (which table, which filters, group by what); the plan
+  is sanitised against the catalog, so anything hallucinated is dropped; `askEngine.runPlan()`
+  then computes every number in plain TypeScript from data already loaded in the browser.
+  `askNarrative` only phrases the aggregate `runPlan` already produced, in English, Telugu or
+  Hindi — it can reword a number, it has no way to invent one.
+- **Editing an answer costs nothing.** Changing a card's table, dates, grouping, measure,
+  columns or chart — or removing a filter pill — re-runs the query in the browser and skips
+  the planning call entirely. A re-run replaces the summary rather than leaving a stale
+  sentence next to new numbers, and waits 700ms so a burst of edits costs one call, not six.
+- **Saved queries re-run instantly** on the same no-AI path — today's question becomes tomorrow's
+  dashboard. Who sees one is decided by the saver's role, server-side: **an admin's save is
+  published to everyone** who can use the page, **anyone else's is private to them**, since a
+  saved question can be about one named recruiter. You can always delete your own; only an admin
+  can delete someone else's, or the shared set. The built-in prompt chips are generic and the
+  same for everyone. Any result downloads as CSV or Excel.
+- Covers all six tables from day one: submissions, requirements, recruiters, clients, resume
+  assessments and timesheets. Only the raw sources a question actually needs are loaded, cached
+  five minutes per source.
+- The five new actions (`askPlan`, `askNarrative`, `askSave`, `askList`, `askDelete`) are cases
+  inside the existing merged `ai` callable, not new Cloud Functions — the Cloud Run CPU quota
+  is why that callable was merged in the first place. All five are role-gated server-side.
+
 ## Recruiter Performance: hover the Index for a breakdown
 - Hovering the **Index** pill in the Recruiter Performance leaderboard now shows a tooltip
   with each of the 5 weighted metrics, sorted weakest first — so the metric dragging the

@@ -1,7 +1,7 @@
 # Ask Anything — handoff notes
 
-Status: **backend + deterministic engine done and tested; UI page not built yet.**
-This feature is paused mid-build for a session handoff. Read this whole file
+Status: **feature complete and wired into the app; not yet deployed, and not
+yet tested against real data by a signed-in admin.** Read this whole file
 before touching the code — the architecture has a hard rule that's easy to
 accidentally violate.
 
@@ -57,12 +57,17 @@ hallucinate numbers on anything past a few hundred rows. Don't do that.
   language via `askNarrative`, grounded on `AskResult.facts`. Reuses the
   `Lang` / `LANGS` types from `src/lib/indexGuide.ts` — don't reinvent them.
 
-One choice I made without asking, flag it to the user when this ships:
-**saved queries are team-shared** (any admin/manager sees every saved query,
-`askList` has no per-user filter) — matches the "go-to place for everyone"
-framing, but say so explicitly in case they'd rather it be private-per-user.
+- **Saved-query visibility** (confirmed with the user after the first cut
+  shipped them team-wide): the built-in `SUGGESTED_PROMPTS` chips are generic
+  and stay the same for everyone. Beyond those, **an admin's saved query is
+  published to everyone** who can use the page, and **anyone else's is
+  private to them** — a manager's saved question can be about one named
+  recruiter, and that isn't the whole team's business. `askSave` sets
+  `shared` from the caller's own role, never from client input; `askList`
+  returns `shared == true` plus your own; `askDelete` allows your own always
+  and anyone else's only for admins.
 
-## What's done (compiles, tested, NOT wired into the app yet)
+## What's done
 
 | File | State |
 |---|---|
@@ -72,87 +77,46 @@ framing, but say so explicitly in case they'd rather it be private-per-user.
 | `src/lib/ask.ts` | Client wrappers (`askPlan`, `askNarrative`, `saveAskQuery`, `listAskQueries`, `deleteAskQuery`) + raw dataset loaders (`loadSubmissions`, `loadJobs`, `loadResumes`, `loadTimesheets`) + `sourcesFor(table)` (which raw sources a table needs) + `rowsForPlan()`. |
 | `src/lib/askExport.ts` | Generic CSV + Excel (ExcelJS) download for any `{columns, rows}` — not tied to the specialised report-generation exporter. |
 | `src/components/BarChart.tsx` | Done. Hand-rolled horizontal bar chart matching `PieChart.tsx`'s style, for groupings too large for a pie. |
-| `src/components/ask/AskCard.tsx` | Written, type-checks, **not visually verified — CSS classes it uses don't exist yet** (see below). One result card: editable table/date/groupBy/columns/chart chips (edits re-run **without** calling the LLM again), removable filter pills, language-switchable summary, chart, paginated table, save/CSV/Excel/dismiss. |
+| `src/components/ask/AskCard.tsx` | Done, visually verified in the dev harness at 1280px and 400px. One result card: editable table/date/groupBy/columns/chart chips (edits re-run **without** calling `askPlan`), removable filter pills, language-switchable summary, chart, paginated table, save/CSV/Excel/dismiss. |
+| `src/index.css` | Done — the `.ask-*` section, modelled on the `.guide-*` block (`.ask-summary` mirrors `.guide-your`). Includes the ≤768px rules that stack the chips one per row. |
+| `src/pages/AskAnything.tsx` | Done. The feed page: role gate, per-source lazy loading, `ask` / re-run / saved-query paths, prompt chips, saved-query list, `?q=` launcher handling. |
+| `src/components/Layout.tsx`, `src/App.tsx` | Nav entry (`🔎 Ask Anything`, visible to everyone) and the `/ask` route inside the protected layout group. |
+| `src/pages/Home.tsx` | Dashboard launcher — an ask box that navigates to `/ask?q=…`. |
+| `src/pages/DesignPreview.tsx` | `AskChromeDemo` (ask bar, prompt chips, saved list) and `AskDemo` (a live `AskCard` over 96 local rows). Demo rows are built inside `useMemo`, never at module level. |
+| `scripts/check-bundle.mjs` | `"Ask Anything preview recruiter"` added to `FORBIDDEN`, so a leak of the new harness fails CI like the old one does. |
 | `src/lib/ai.ts` | `AiAction` union extended with the 5 new action names. |
 | `functions/src/llm.ts` | `planAskQuery()` and `narrateAskResult()` added, same shape as the existing `matchRolesToJd()`. |
 | `functions/src/index.ts` | `AiAction` type extended; 5 new `case` branches (`askPlan`, `askNarrative`, `askSave`, `askList`, `askDelete`) added **inside the existing merged `ai` callable** — see "function count discipline" below. |
 
-Verified this session: `npx tsc -b` clean, `npx vitest run` → **138/138
-passing**, `npx vite build` succeeds. **Not deployed to Firebase.**
+Verified: `npx tsc -b` clean, `npx vitest run` → **138/138 passing**,
+`npx vite build` succeeds, `node scripts/check-bundle.mjs` clean, and the card
++ page chrome screenshotted at 1280px and 400px with no console errors and no
+horizontal page overflow. **Not deployed to Firebase, and not yet exercised
+against real data by a signed-in admin.**
 
-## What's NOT done — build in this order
+Two behaviours decided while wiring the page up, worth knowing before changing them:
 
-1. **CSS** in `src/index.css`. `AskCard.tsx` references classes that don't
-   exist yet: `.ask-card`, `.ask-q`, `.ask-chips`, `.ask-chip-field`,
-   `.ask-filters`, `.ask-filter-x`, `.ask-summary`. Look at the `.guide-*`
-   classes (added for `IndexGuide.tsx`) for the closest existing visual
-   language — `.ask-summary` in particular should probably look like
-   `.guide-your` (tinted box, `--brand-light` background).
+- **A re-run drops the old summary and re-narrates after a 700ms pause**
+  (`NARRATE_DEBOUNCE_MS` in `AskAnything.tsx`). Editing a chip changes the
+  numbers, so keeping the old sentence would leave a stale claim on screen —
+  but a date field fires a change per keystroke, so an undebounced re-narrate
+  would bill several LLM calls per edit. The table and chart update instantly
+  either way; only the sentence waits. `askPlan` is still never re-called.
+- **Each card carries a run token** (`runToken`), bumped on every run. A slow
+  data load or narrative that resolves against an old token is dropped, so a
+  burst of edits can't land an earlier answer on top of a later one.
 
-2. **`src/pages/AskAnything.tsx`** — the orchestration page. `AskCard.tsx`'s
-   props already define the contract it needs to satisfy:
-   - Role-gate the whole page (see above).
-   - Feed state: `items` (an array, newest first — `unshift`, not `push`),
-     each holding `{ id, question, result: AskResult|null, loading, error,
-     narratives: Partial<Record<Lang,string>>, narrativeLang }`.
-   - `lastPlan` (the most recently run plan) — pass it as `priorPlan` to
-     `askPlan()` so "now split by month" follow-ups work.
-   - Load raw sources lazily via `useQueryClient().ensureQueryData(...)` per
-     source (`["askRaw","submissions"]` etc.), driven by
-     `sourcesFor(plan.table)` — **don't** eagerly load all four sources for
-     every question, only what the chosen table needs. `staleTime` ~5min is
-     reasonable since Ceipal data is itself cached server-side already.
-   - `ask(question)`: new item → `askPlan()` → `sanitizePlan()` → load
-     needed raw sources → `rowsForPlan()` → `runPlan()` → update item →
-     kick off an English `askNarrative()` in the background → update
-     `lastPlan`.
-   - `rerun(itemId, editedPlan)` (called by `AskCard`'s `onRerun`): **the
-     same pipeline minus the `askPlan()` call** — this is what makes editing
-     a card's chips free and instant. Don't accidentally route edits back
-     through the LLM.
-   - `runSaved(saved)`: a new feed item built directly from
-     `saved.plan` — same no-LLM instant path. This is what makes saved
-     queries work as instant dashboards.
-   - Prompt chips row from `SUGGESTED_PROMPTS` (askCatalog.ts), each calling
-     `ask(promptText)`.
-   - Saved-queries list/sidebar: `useQuery(["askQueries"], listAskQueries)`,
-     click → `runSaved`, small delete button → `deleteAskQuery` + refetch.
-   - Read `?q=` on mount (`useSearchParams`) for the Home-page launcher,
-     auto-run it once, then clear the param.
+## What's NOT done
 
-3. **Nav entry** — add to the `NAV` array in `src/components/Layout.tsx`:
-   `{ to: "/ask", icon: "🔎", label: "Ask Anything" }`. Visible to everyone
-   (matches how Timesheets' nav entry works), page gates content itself.
+1. **Manual test** once logged in as an admin/manager: ask a real question,
+   edit a card's table/dates/groupBy/columns (the table and chart must
+   redraw instantly, with **no `askPlan` call** — only a single debounced
+   `askNarrative` should follow), remove a filter pill, save a query, re-run
+   a saved query, switch the summary language both ways, download CSV and
+   Excel. Watch the network tab: a burst of chip edits should cost at most
+   one `ai` call.
 
-4. **Route** — add `<Route path="/ask" element={<AskAnything />} />` in
-   `src/App.tsx`, inside the **protected** layout group (next to
-   `/timesheets`, `/recruiters`), not the public `/login` group.
-
-5. **Home.tsx launcher** — a compact "Ask anything…" input + button that
-   does `navigate('/ask?q=' + encodeURIComponent(text))`.
-
-6. **Verify without logging in.** Claude cannot type a password into the
-   login form — this bit repeatedly this session. The established
-   workaround is `src/pages/DesignPreview.tsx`, a dev-only route gated on
-   `import.meta.env.DEV` (see its registration in `App.tsx`). Add a mock
-   `AskResult` there and render `<AskCard>` against it so the UI can
-   actually be looked at.
-
-   **Known trap, hit twice already**: sample/demo data computed at *module*
-   level (outside the component function) is a Rollup side-effect that
-   defeats tree-shaking and leaks the entire dev harness into the
-   **production** bundle. Always compute demo data lazily inside the
-   component (`useMemo(() => {...}, [])`), and run
-   `node scripts/check-bundle.mjs` after every build, before every deploy,
-   to confirm the harness stayed out.
-
-7. **Manual test** once logged in as an admin/manager: ask a real question,
-   edit a card's table/dates/groupBy/columns (confirm it does **not** hit
-   the network/LLM — instant), remove a filter pill, save a query, re-run a
-   saved query, switch the summary language both ways, download CSV and
-   Excel.
-
-8. **Deploy.** The `ai` Cloud Function is already live in production serving
+2. **Deploy.** The `ai` Cloud Function is already live in production serving
    other working features (resume parsing, GitHub portfolio, etc.) —
    redeploying it is what ships these 5 new actions, so test thoroughly
    first. `firebase deploy --only functions:ai`, hosting separately via
@@ -165,7 +129,7 @@ passing**, `npx vite build` succeeds. **Not deployed to Firebase.**
    fails on quota, wait and retry rather than batching more functions into
    the same attempt.
 
-9. Run `npx vitest run` and `node scripts/check-bundle.mjs` before every
+3. Run `npx vitest run` and `node scripts/check-bundle.mjs` before every
    deploy — standing project discipline, see `.github/workflows/ci.yml`.
 
 ## Gotchas specific to this feature
@@ -193,6 +157,14 @@ passing**, `npx vite build` succeeds. **Not deployed to Firebase.**
   field is picked (`agg: "sum"` is hardcoded there); `askEngine.ts` already
   supports `"avg"` too, it's just not exposed in that UI yet — cheap
   follow-up if wanted.
+- **The dev harness must stay out of the production bundle.** Sample data
+  computed at *module* level in `DesignPreview.tsx` is a Rollup side effect
+  that defeats tree-shaking and drags the whole harness into the shipped
+  bundle — this has bitten twice. Build demo data lazily inside the
+  component (`useMemo(() => …, [])`), as `demoAskRows` does, and run
+  `node scripts/check-bundle.mjs` after every build. Any new harness section
+  should add a string of its own to that script's `FORBIDDEN` list,
+  otherwise a leak passes unnoticed.
 - No Firestore rules changes are needed for the new `askQueries` collection
   — all reads/writes go through the Cloud Function's admin SDK
   (`askSave`/`askList`/`askDelete`), never touched directly by the client,

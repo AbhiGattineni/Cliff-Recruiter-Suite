@@ -369,7 +369,7 @@ export function runPlan(rawRows: Row[], plan: AskPlan): AskResult {
       plan,
       columns: [
         { key: "label", label: columnByKey(cat, plan.groupBy)?.label ?? plan.groupBy, type: "string" },
-        { key: "value", label: metricLabel, type: "number" },
+        { key: "value", label: metricLabel.charAt(0).toUpperCase() + metricLabel.slice(1), type: "number" },
       ],
       rows: capped.map((g) => ({ label: g.label, value: g.value })),
       totalRows: grouped.length,
