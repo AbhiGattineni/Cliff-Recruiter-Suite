@@ -296,6 +296,76 @@ table.data th.colf-th { padding-right: 0.35rem; }
 .guide-h { margin: 1rem 0 0.5rem; font-size: 0.92rem; }
 .guide-bands { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.9rem; }
 
+/* ---------- Ask Anything ---------- */
+/* The ask box, at the top of /ask and (compact) on the dashboard. */
+.ask-bar { display: flex; gap: 0.6rem; align-items: stretch; }
+.ask-bar input {
+  flex: 1; min-width: 0; margin: 0; padding: 0.7rem 0.9rem; border: 1px solid #cbd5e1;
+  border-radius: 10px; font: inherit;
+}
+.ask-bar .btn { flex-shrink: 0; }
+.ask-prompts { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.7rem; }
+.ask-prompt {
+  background: var(--brand-light); color: var(--brand); border: 1px solid #cddef0;
+  border-radius: 999px; padding: 0.28rem 0.75rem; font: inherit; font-size: 0.8rem;
+  font-weight: 600; cursor: pointer; line-height: 1.4;
+}
+.ask-prompt:hover:not(:disabled) { background: #d8e6f4; }
+.ask-prompt:disabled { opacity: 0.55; cursor: default; }
+
+/* One result in the feed. The left edge marks it as an answer, not a form. */
+.ask-card { border-left: 3px solid var(--brand); }
+.ask-q { font-size: 0.82rem; color: var(--muted); font-weight: 600; overflow-wrap: anywhere; }
+.ask-q::before { content: "“"; }
+.ask-q::after { content: "”"; }
+
+/* Editable plan chips — every edit re-runs in the browser, never via the LLM. */
+.ask-chips { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: flex-end; margin: 0.8rem 0 0.6rem; }
+.ask-chip-field { display: inline-flex; flex-direction: column; gap: 0.15rem; }
+.ask-chip-field > span { font-size: 0.7rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.02em; }
+.ask-chip-field select,
+.ask-chip-field input {
+  margin: 0; padding: 0.35rem 0.5rem; border: 1px solid #cbd5e1; border-radius: 8px;
+  font: inherit; font-size: 0.85rem; background: #fff; max-width: 240px;
+}
+.ask-chip-cols { min-width: 220px; max-width: 280px; }
+.ask-filters { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.8rem; }
+.ask-filters .pill { display: inline-flex; align-items: center; gap: 0.35rem; max-width: 100%; }
+.ask-filter-x {
+  background: none; border: none; padding: 0; cursor: pointer; color: inherit;
+  font-size: 0.95rem; line-height: 1; opacity: 0.7;
+}
+.ask-filter-x:hover { opacity: 1; }
+
+/* The one place an LLM sentence appears — phrased from computed numbers only. */
+.ask-summary {
+  background: var(--brand-light); border-radius: 8px; padding: 0.6rem 0.8rem;
+  font-size: 0.92rem; margin: 0 0 1rem;
+}
+.ask-summary .guide-langs { margin-bottom: 0.5rem; }
+
+/* Saved queries — shared across admins/managers, re-run with no LLM call. */
+.ask-saved { display: flex; flex-direction: column; gap: 0.35rem; }
+.ask-saved-item { display: flex; align-items: center; gap: 0.4rem; }
+.ask-saved-item > button:first-child {
+  flex: 1; min-width: 0; text-align: left; background: #fff; border: 1px solid var(--line);
+  border-radius: 8px; padding: 0.4rem 0.6rem; font: inherit; font-size: 0.85rem; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink);
+}
+.ask-saved-item > button:first-child:hover { background: var(--brand-light); border-color: #cddef0; }
+.ask-saved-del {
+  flex-shrink: 0; background: none; border: none; cursor: pointer; color: var(--muted);
+  font-size: 0.9rem; line-height: 1; padding: 0.25rem;
+}
+.ask-saved-del:hover { color: var(--danger); }
+
+@media (max-width: 768px) {
+  .ask-bar { flex-wrap: wrap; }
+  .ask-bar input { flex-basis: 100%; }
+  .ask-chip-field, .ask-chip-cols { flex: 1 1 100%; min-width: 0; max-width: 100%; }
+  .ask-chip-field select, .ask-chip-field input { max-width: 100%; }
+}
+
 /* ---------- Alerts ---------- */
 .alert { padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.9rem; }
 .alert.info { background: #eaf2fb; color: #1c4e80; border: 1px solid #c5dbf2; }

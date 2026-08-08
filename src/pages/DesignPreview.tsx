@@ -19,6 +19,10 @@ import ColumnFilter from "../components/ColumnFilter";
 import { applyColumnFilters, optionsForColumn, activeFilterCount, ColumnSelections } from "../lib/columnFilter";
 import { downloadResumeReportPdf } from "../lib/resumeReportPdf";
 import { scoreLinkedin, verdictClass } from "../lib/linkedinScore";
+import AskCard from "../components/ask/AskCard";
+import { AskPlan, Row, runPlan, sanitizePlan } from "../lib/askEngine";
+import { SUGGESTED_PROMPTS } from "../lib/askCatalog";
+import { Lang } from "../lib/indexGuide";
 
 // Enough rows to exercise every page size in the footer dropdown.
 const DEMO_ROWS = Array.from({ length: 137 }, (_, i) => ({
@@ -266,6 +270,110 @@ function demoStat() {
 ).stats[0];
 }
 
+// Ask Anything harness. Everything here is built lazily inside the component —
+// see scripts/check-bundle.mjs for why a module-level call would be a problem.
+function demoAskRows(): Row[] {
+  const clients = ["Acme Health", "Northwind", "Globex", "Initech", "Umbrella", "Soylent", "Vandelay"];
+  const statuses = ["Submitted", "Submitted To Client", "Client Interview", "Rejected", "Offer"];
+  const recruiters = ["Ask Anything preview recruiter A", "Ask Anything preview recruiter B"];
+  return Array.from({ length: 96 }, (_, i) => ({
+    applicantName: `Candidate ${i + 1}`,
+    jobCode: `REQ-${100 + (i % 12)}`,
+    jobTitle: `Requirement ${1 + (i % 12)}`,
+    client: clients[i % clients.length],
+    recruiter: recruiters[i % recruiters.length],
+    status: statuses[i % statuses.length],
+    submittedOn: `2026-08-${String(1 + (i % 28)).padStart(2, "0")}`,
+    statusChangedOn: `2026-08-${String(1 + (i % 28)).padStart(2, "0")}`,
+    accountManager: "AM",
+  }));
+}
+
+// The page furniture around the cards. Mirrors AskAnything.tsx's markup so the
+// ask bar, prompt chips and saved-query list can be checked without signing in
+// (the real page is behind the login gate and an admin/manager role).
+function AskChromeDemo() {
+  const [q, setQ] = useState("");
+  return (
+    <div className="card">
+      <h3 style={{ marginTop: 0 }}>Ask Anything page chrome</h3>
+      <div className="ask-bar">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="e.g. Requirements received per client this month"
+          aria-label="Ask a question about the data"
+        />
+        <button className="btn" type="button" disabled={!q.trim()}>🔎 Ask</button>
+      </div>
+      <div className="ask-prompts">
+        {SUGGESTED_PROMPTS.map((p) => (
+          <button key={p} type="button" className="ask-prompt" onClick={() => setQ(p)}>{p}</button>
+        ))}
+      </div>
+      <h4 style={{ margin: "1rem 0 0.4rem", fontSize: "0.95rem" }}>Saved queries</h4>
+      <div className="ask-saved">
+        {["Clients to reconsider", "Hours logged per recruiter", "Open reqs with zero submissions"].map((n) => (
+          <div className="ask-saved-item" key={n}>
+            <button type="button">📌 {n}<span className="muted"> · Preview user</span></button>
+            <button type="button" className="ask-saved-del" aria-label={`Delete saved query ${n}`}>🗑</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AskDemo() {
+  const rows = useMemo(demoAskRows, []);
+  const initial = useMemo(
+    () =>
+      sanitizePlan({
+        table: "submissions",
+        title: "Submissions by status",
+        groupBy: "status",
+        chart: "pie",
+        dateFrom: "2026-08-01",
+        dateTo: "2026-08-31",
+        filters: [{ field: "client", op: "in", value: ["Acme Health", "Northwind", "Globex"] }],
+      }),
+    []
+  );
+  const [plan, setPlan] = useState<AskPlan | null>(null);
+  const [lang, setLang] = useState<Lang>("en");
+  const current = plan ?? initial;
+  const result = useMemo(() => runPlan(rows, current), [rows, current]);
+
+  return (
+    <div className="card">
+      <h3 style={{ marginTop: 0 }}>Ask Anything result card</h3>
+      <p className="muted" style={{ marginTop: "-0.25rem", fontSize: "0.85rem" }}>
+        Sample rows, no network. The chips re-run the query in the browser exactly as they do in the
+        real page — the AI is never called for an edit.
+      </p>
+      <AskCard
+        question="How are submissions going this month?"
+        result={result}
+        loading={false}
+        error={null}
+        narratives={{
+          en: result.facts.topGroups.length
+            ? `Across ${result.facts.totalRows} submissions this month, the largest group is ${result.facts.topGroups[0].label} with ${result.facts.topGroups[0].value}.`
+            : `${result.facts.totalRows} submissions match this month.`,
+          te: "ఈ నెల సబ్మిషన్లలో అతిపెద్ద విభాగం పైన చూపబడింది.",
+          hi: "इस महीने के सबमिशन में सबसे बड़ा समूह ऊपर दिखाया गया है।",
+        }}
+        narrativeLang={lang}
+        narrativeLoading={false}
+        onLangChange={setLang}
+        onRerun={setPlan}
+        onSave={() => undefined}
+        onDismiss={() => undefined}
+      />
+    </div>
+  );
+}
+
 export default function DesignPreview() {
   const DEMO_STAT = useMemo(demoStat, []);
   const pf = SAMPLE.portfolio!;
@@ -283,6 +391,10 @@ export default function DesignPreview() {
       </div>
 
       <PaginationDemo />
+
+      <AskChromeDemo />
+
+      <AskDemo />
 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Performance index guide</h3>

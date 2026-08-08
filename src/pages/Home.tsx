@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getDashboardStats } from "../lib/dashboard";
@@ -6,6 +7,7 @@ import LlmUsagePanel from "../components/LlmUsagePanel";
 
 export default function Home() {
   const navigate = useNavigate();
+  const [ask, setAsk] = useState("");
   const statsQ = useQuery({ queryKey: ["dashboardStats"], queryFn: () => getDashboardStats() });
   const usageQ = useQuery({ queryKey: ["llmUsageSummary"], queryFn: () => getLlmUsageSummary() });
   const stats = statsQ.data ?? null;
@@ -17,6 +19,26 @@ export default function Home() {
       <p className="muted" style={{ marginTop: "-0.25rem" }}>
         Cliff Services recruiter suite — pick a tool to begin.
       </p>
+
+      {/* Launcher for Ask Anything. The question travels as ?q= and is answered there. */}
+      <div className="card" style={{ marginTop: "1.25rem" }}>
+        <form
+          className="ask-bar"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const q = ask.trim();
+            navigate(q ? `/ask?q=${encodeURIComponent(q)}` : "/ask");
+          }}
+        >
+          <input
+            value={ask}
+            onChange={(e) => setAsk(e.target.value)}
+            placeholder="Ask anything about your data… e.g. submissions by status this week"
+            aria-label="Ask anything about your data"
+          />
+          <button className="btn" type="submit">🔎 Ask</button>
+        </form>
+      </div>
 
       {/* Stats */}
       <div className="stat-grid" style={{ marginTop: "1.25rem", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>

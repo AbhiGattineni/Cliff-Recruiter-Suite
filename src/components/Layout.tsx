@@ -5,6 +5,7 @@ import { isPlaceholderConfig } from "../firebase";
 
 const NAV = [
   { to: "/", end: true, icon: "🏠", label: "Dashboard" },
+  { to: "/ask", icon: "🔎", label: "Ask Anything" },
   { to: "/resume", icon: "📄", label: "Resume Parsing" },
   { to: "/resume-reports", icon: "🗂️", label: "Resume Reports" },
   { to: "/reports", icon: "📊", label: "Report Generation" },

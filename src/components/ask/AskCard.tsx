@@ -75,8 +75,8 @@ export default function AskCard({
 
   return (
     <div className="card ask-card">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.6rem" }}>
-        <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.6rem", flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0 }}>
           <div className="ask-q">{question}</div>
           <h3 style={{ margin: "0.2rem 0 0" }}>{plan.title}</h3>
         </div>
@@ -143,7 +143,7 @@ export default function AskCard({
           </>
         )}
         {!plan.groupBy && (
-          <div style={{ minWidth: 220 }}>
+          <div className="ask-chip-cols">
             <MultiSelect
               label="Columns"
               options={cat.columns.map((c) => c.label)}
