@@ -19,7 +19,10 @@ export type AiAction =
   | "askNarrative"
   | "askSave"
   | "askList"
-  | "askDelete";
+  | "askDelete"
+  | "askDebugWrite"
+  | "askDebugList"
+  | "askDebugClear";
 
 /** Invoke one action on the shared AI function. */
 export async function callAi<TIn extends object, TOut>(

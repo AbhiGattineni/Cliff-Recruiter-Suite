@@ -75,6 +75,54 @@ export async function deleteAskQuery(id: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Debug log — a shared (Firestore-backed, not per-browser) record of every
+// question run: the exact plan the AI produced and how many rows it matched.
+// So a "why did this come back empty" report from anyone can be diagnosed by
+// any admin/manager, not just reproduced live in the reporter's own browser.
+// ---------------------------------------------------------------------------
+
+export interface DebugLogEntry {
+  id: string;
+  createdAt: number | null;
+  createdByUid?: string;
+  createdByName?: string;
+  question: string;
+  source?: "ask" | "saved" | "edit";
+  table?: string | null;
+  /** The plan straight from the LLM, before sanitizePlan. Lets you tell "the AI picked a bad filter" apart from "sanitizePlan dropped a valid one". */
+  rawPlan?: unknown;
+  /** The plan actually executed. */
+  plan?: AskPlan | null;
+  rowsLoaded?: number | null;
+  /** Set only when the plan grouped — the number of groups produced. */
+  groups?: number | null;
+  /** Rows that matched the plan's filters — the number that actually matters for "why is this empty". */
+  rowsMatched?: number | null;
+  error?: string | null;
+}
+
+export type DebugLogWrite = Omit<DebugLogEntry, "id" | "createdAt" | "createdByUid" | "createdByName">;
+
+/** Fire-and-forget: a logging failure must never surface as a user-facing error. */
+export async function writeDebugLog(entry: DebugLogWrite): Promise<void> {
+  try {
+    await callAi<DebugLogWrite, { ok: boolean }>("askDebugWrite", entry);
+  } catch {
+    // Best effort only.
+  }
+}
+
+export async function listDebugLog(): Promise<DebugLogEntry[]> {
+  const r = await callAi<Record<string, never>, { ok: boolean; entries?: DebugLogEntry[] }>("askDebugList", {});
+  return r.entries ?? [];
+}
+
+/** Admin-only server-side — clears the shared log for everyone. */
+export async function clearDebugLog(): Promise<void> {
+  await callAi<Record<string, never>, { ok: boolean; cleared?: number }>("askDebugClear", {});
+}
+
+// ---------------------------------------------------------------------------
 // Raw dataset loaders — one per underlying source, independently cacheable so
 // asking two questions about "submissions" doesn't refetch Ceipal twice.
 // ---------------------------------------------------------------------------

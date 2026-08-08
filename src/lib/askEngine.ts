@@ -135,17 +135,61 @@ function isIsoDate(v: unknown): boolean {
 
 const iso = (d: DateTime | null | undefined): string | null => (d && d.isValid ? d.toISODate() : null);
 
+/** Latest of statusChangedOn / submittedOn, as millis — -Infinity when neither is set so an undated event never outranks a dated one. */
+const eventTs = (s: SubmissionEvent): number => (s.statusChangedOn ?? s.submittedOn)?.toMillis() ?? -Infinity;
+const earlierOf = (a: DateTime | null, b: DateTime | null): DateTime | null =>
+  a && b ? (a.toMillis() <= b.toMillis() ? a : b) : a ?? b;
+
+interface FoldedSubmission {
+  jobCode: string; jobTitle: string; applicantName: string; client: string;
+  recruiter: string; accountManager: string; submittedOn: DateTime | null;
+  status: string; statusChangedOn: DateTime | null; _bestTs: number;
+}
+
+// The Ceipal export is a status-change history — one row per event a candidate
+// passed through on a requirement (Waiting for Evaluation, then Submitted To
+// Client, ...), not one row per submission. The catalog promises "one row per
+// candidate submission ... at its current status" (matching how Recruiter
+// Performance already counts these — see report/transform.ts's
+// groupCandidates), so fold to the latest event per (job, candidate) instead
+// of surfacing the whole history as if each status change were a separate
+// submission.
 export function submissionsToRows(subs: SubmissionEvent[]): Row[] {
-  return subs.map((s) => ({
-    applicantName: s.applicantName || "",
-    jobCode: s.jobCode || "",
-    jobTitle: s.jobTitle || "",
-    client: s.client || "",
-    recruiter: s.submittedBy || "",
-    status: s.submissionStatus || "",
-    submittedOn: iso(s.submittedOn),
-    statusChangedOn: iso(s.statusChangedOn),
-    accountManager: s.accountManager || "",
+  const byKey = new Map<string, FoldedSubmission>();
+  for (const s of subs) {
+    const key = `${(s.jobCode || "").toLowerCase()}|${(s.applicantName || "").toLowerCase().trim()}`;
+    const ts = eventTs(s);
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, {
+        jobCode: s.jobCode || "", jobTitle: s.jobTitle || "", applicantName: s.applicantName || "",
+        client: s.client || "", recruiter: s.submittedBy || "", accountManager: s.accountManager || "",
+        submittedOn: s.submittedOn, status: s.submissionStatus || "", statusChangedOn: s.statusChangedOn,
+        _bestTs: ts,
+      });
+      continue;
+    }
+    existing.jobTitle ||= s.jobTitle || "";
+    existing.client ||= s.client || "";
+    existing.recruiter ||= s.submittedBy || "";
+    existing.accountManager ||= s.accountManager || "";
+    existing.submittedOn = earlierOf(existing.submittedOn, s.submittedOn);
+    if (ts >= existing._bestTs) {
+      existing._bestTs = ts;
+      existing.status = s.submissionStatus || existing.status;
+      existing.statusChangedOn = s.statusChangedOn ?? existing.statusChangedOn;
+    }
+  }
+  return Array.from(byKey.values()).map((f) => ({
+    applicantName: f.applicantName,
+    jobCode: f.jobCode,
+    jobTitle: f.jobTitle,
+    client: f.client,
+    recruiter: f.recruiter,
+    status: f.status,
+    submittedOn: iso(f.submittedOn),
+    statusChangedOn: iso(f.statusChangedOn),
+    accountManager: f.accountManager,
   }));
 }
 

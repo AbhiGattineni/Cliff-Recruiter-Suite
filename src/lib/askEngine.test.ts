@@ -79,10 +79,13 @@ describe("sanitizePlan", () => {
 });
 
 describe("submissionsToRows + runPlan filtering", () => {
+  // Distinct applicantName per event — submissionsToRows folds a candidate's
+  // status-change history to one row per (job, candidate), so these need to
+  // read as three different candidates to stay three different submissions.
   const rows = submissionsToRows([
-    ev({ client: "IBM", submissionStatus: "Submitted To Client", submittedOn: DateTime.fromISO("2026-08-01") }),
-    ev({ client: "IBM", submissionStatus: "Rejected", submittedOn: DateTime.fromISO("2026-08-02") }),
-    ev({ client: "Apple", submissionStatus: "Submitted To Client", submittedOn: DateTime.fromISO("2026-07-01") }),
+    ev({ applicantName: "A1", client: "IBM", submissionStatus: "Submitted To Client", submittedOn: DateTime.fromISO("2026-08-01") }),
+    ev({ applicantName: "A2", client: "IBM", submissionStatus: "Rejected", submittedOn: DateTime.fromISO("2026-08-02") }),
+    ev({ applicantName: "A3", client: "Apple", submissionStatus: "Submitted To Client", submittedOn: DateTime.fromISO("2026-07-01") }),
   ]);
 
   it("filters by an eq clause", () => {
@@ -110,6 +113,21 @@ describe("submissionsToRows + runPlan filtering", () => {
     const plan = sanitizePlan({ ...emptyPlan("submissions"), filters: [{ field: "client", op: "eq", value: "ibm" }] });
     expect(runPlan(rows, plan).totalRows).toBe(2);
   });
+
+  it("folds a candidate's status-change history on one job into a single row at their current status", () => {
+    const folded = submissionsToRows([
+      ev({ submissionStatus: "Waiting for Evaluation", submittedOn: DateTime.fromISO("2026-08-06"), statusChangedOn: DateTime.fromISO("2026-08-06") }),
+      ev({ submissionStatus: "Submitted To Client", submittedOn: DateTime.fromISO("2026-08-06"), statusChangedOn: DateTime.fromISO("2026-08-07") }),
+    ]);
+    expect(folded).toHaveLength(1);
+    expect(folded[0].status).toBe("Submitted To Client");
+    expect(folded[0].submittedOn).toBe("2026-08-06");
+  });
+
+  it("keeps a candidate's events on two different jobs as two separate rows", () => {
+    const folded = submissionsToRows([ev({ jobCode: "J1" }), ev({ jobCode: "J2" })]);
+    expect(folded).toHaveLength(2);
+  });
 });
 
 describe("runPlan grouped metric aggregation", () => {
@@ -130,7 +148,7 @@ describe("runPlan grouped metric aggregation", () => {
 
   it("caps chart slices and buckets the remainder as Other", () => {
     const many = Array.from({ length: 12 }, (_, i) =>
-      ev({ client: `Client${i}`, submittedOn: DateTime.fromISO("2026-08-01") })
+      ev({ applicantName: `Cand${i}`, client: `Client${i}`, submittedOn: DateTime.fromISO("2026-08-01") })
     );
     const rows = submissionsToRows(many);
     const plan = sanitizePlan({ ...emptyPlan("submissions"), groupBy: "client", chart: "pie" });
@@ -199,7 +217,7 @@ describe("runPlan non-grouped table", () => {
   });
 
   it("respects the row limit while reporting the true total", () => {
-    const rows = submissionsToRows(Array.from({ length: 5 }, () => ev({})));
+    const rows = submissionsToRows(Array.from({ length: 5 }, (_, i) => ev({ applicantName: `Cand${i}` })));
     const plan = sanitizePlan({ ...emptyPlan("submissions"), limit: 2 });
     const res = runPlan(rows, plan);
     expect(res.rows).toHaveLength(2);

@@ -17,12 +17,12 @@ import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../context/AuthContext";
 import { useLang } from "../context/LangContext";
-import { useDebugLog } from "../context/DebugLogContext";
 import AskCard from "../components/ask/AskCard";
 import { AskPlan, AskResult, runPlan, sanitizePlan } from "../lib/askEngine";
 import { SUGGESTED_PROMPTS } from "../lib/askCatalog";
 import { Lang } from "../lib/indexGuide";
 import {
+  DebugLogWrite,
   RawBundle,
   SavedAskQuery,
   askNarrative,
@@ -36,6 +36,7 @@ import {
   rowsForPlan,
   saveAskQuery,
   sourcesFor,
+  writeDebugLog,
 } from "../lib/ask";
 
 interface FeedItem {
@@ -71,13 +72,22 @@ export default function Home() {
   // their own. Decided server-side too — this only shapes what the UI promises.
   const isAdmin = profile?.role === "admin";
 
-  const debugLog = useDebugLog();
   const qc = useQueryClient();
   const [items, setItems] = useState<FeedItem[]>([]);
   const [text, setText] = useState("");
   // Passed to askPlan as priorPlan so "now split that by month" works. A ref,
   // not state — nothing renders it, and callbacks must read the latest value.
   const lastPlan = useRef<AskPlan | null>(null);
+
+  // Fire-and-forget: writes to the shared (Firestore) debug log, then wakes up
+  // the panel's query if it's open. Never awaited by the caller — a logging
+  // hiccup must never delay or fail the actual question being asked.
+  const logDebug = useCallback(
+    (entry: DebugLogWrite) => {
+      void writeDebugLog(entry).then(() => qc.invalidateQueries({ queryKey: ["askDebugLog"] }));
+    },
+    [qc]
+  );
 
   const savedQ = useQuery({ queryKey: ["askQueries"], queryFn: listAskQueries, enabled: canAsk });
 
@@ -146,7 +156,7 @@ export default function Home() {
    * log, since that's the one place rowsLoaded/rowsMatched are already known.
    */
   const run = useCallback(
-    async (id: string, plan: AskPlan, meta?: { question: string; rawPlan?: unknown }) => {
+    async (id: string, plan: AskPlan, meta?: { question: string; source: "ask" | "saved" | "edit"; rawPlan?: unknown }) => {
       const token = (runToken.current.get(id) ?? 0) + 1;
       runToken.current.set(id, token);
       patchItem(id, { loading: true, error: null });
@@ -160,13 +170,14 @@ export default function Home() {
         // whatever language the floating switcher is currently set to.
         patchItem(id, { result, loading: false, error: null, narratives: {}, narrativeLang: lang });
         if (meta) {
-          debugLog.push({
+          logDebug({
             question: meta.question,
+            source: meta.source,
             table: plan.table,
             rawPlan: meta.rawPlan,
             plan,
             rowsLoaded: sourceRows.length,
-            groups: result.grouped ? result.totalRows : undefined,
+            groups: result.grouped ? result.totalRows : null,
             rowsMatched: result.grouped ? result.facts.totalRows : result.totalRows,
           });
         }
@@ -178,10 +189,10 @@ export default function Home() {
         if (runToken.current.get(id) !== token) return;
         const message = errText(e);
         patchItem(id, { loading: false, error: message });
-        if (meta) debugLog.push({ question: meta.question, table: plan.table, rawPlan: meta.rawPlan, plan, error: message });
+        if (meta) logDebug({ question: meta.question, source: meta.source, table: plan.table, rawPlan: meta.rawPlan, plan, error: message });
       }
     },
-    [loadRaw, narrate, patchItem, lang, debugLog]
+    [loadRaw, narrate, patchItem, lang, logDebug]
   );
 
   const addItem = useCallback(
@@ -211,21 +222,21 @@ export default function Home() {
       const id = addItem(q);
       try {
         const { plan: raw } = await askPlan(q, lastPlan.current);
-        await run(id, sanitizePlan(raw), { question: q, rawPlan: raw });
+        await run(id, sanitizePlan(raw), { question: q, source: "ask", rawPlan: raw });
       } catch (e) {
         const message = errText(e);
         patchItem(id, { loading: false, error: message });
-        debugLog.push({ question: q, error: message });
+        logDebug({ question: q, source: "ask", error: message });
       }
     },
-    [addItem, canAsk, patchItem, run, debugLog]
+    [addItem, canAsk, patchItem, run, logDebug]
   );
 
   const runSaved = useCallback(
     (saved: SavedAskQuery) => {
       const question = saved.question || saved.name;
       const id = addItem(question);
-      void run(id, sanitizePlan(saved.plan), { question });
+      void run(id, sanitizePlan(saved.plan), { question, source: "saved" });
     },
     [addItem, run]
   );
@@ -373,7 +384,7 @@ export default function Home() {
                 narratives={item.narratives}
                 narrativeLang={item.narrativeLang}
                 narrativeLoading={item.narrativeLoading}
-                onRerun={(plan) => void run(item.id, plan, { question: item.question })}
+                onRerun={(plan) => void run(item.id, plan, { question: item.question, source: "edit" })}
                 savesShared={!!isAdmin}
                 onSave={(name) => void save(item, name)}
                 onDismiss={() => setItems((cur) => cur.filter((it) => it.id !== item.id))}

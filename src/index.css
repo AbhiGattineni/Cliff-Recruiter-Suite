@@ -683,10 +683,6 @@ table.data th.colf-th { padding-right: 0.35rem; }
   transition: transform 0.15s ease, background 0.15s ease;
 }
 .debug-fab:hover { background: #f1f5f9; transform: translateY(-1px); }
-.debug-fab-count {
-  background: var(--brand); color: #fff; border-radius: 999px; min-width: 18px; height: 18px;
-  display: inline-flex; align-items: center; justify-content: center; font-size: 0.7rem; padding: 0 0.3rem;
-}
 @media (max-width: 768px) {
   .debug-fab { left: 0.85rem; bottom: 0.85rem; }
 }

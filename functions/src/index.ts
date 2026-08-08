@@ -523,7 +523,10 @@ type AiAction =
   | "askNarrative"
   | "askSave"
   | "askList"
-  | "askDelete";
+  | "askDelete"
+  | "askDebugWrite"
+  | "askDebugList"
+  | "askDebugClear";
 
 export const ai = onCall(
   {
@@ -713,6 +716,57 @@ export const ai = onCall(
         }
         await ref.delete();
         return { ok: true };
+      }
+
+      // A per-query record of what the AI actually planned and how many rows it
+      // matched -- shared across admins/managers (not per-browser) so a "why did
+      // this come back empty" report from anyone can be diagnosed by anyone,
+      // without needing to reproduce it live in that person's own browser.
+      case "askDebugWrite": {
+        const profile = await requireProfile(request.auth);
+        requireRole(profile, ["admin", "manager"]);
+        const question = String(request.data?.question ?? "").trim().slice(0, 500);
+        if (!question) return { ok: true };
+        const clamp = (v: unknown, max = 4000): unknown => {
+          if (v === undefined || v === null) return null;
+          const s = JSON.stringify(v);
+          return s && s.length > max ? { truncated: true, preview: s.slice(0, max) } : v;
+        };
+        await getFirestore().collection("askDebugLog").add({
+          question,
+          source: String(request.data?.source ?? ""),
+          table: request.data?.table ? String(request.data.table).slice(0, 60) : null,
+          rawPlan: clamp(request.data?.rawPlan),
+          plan: clamp(request.data?.plan),
+          rowsLoaded: Number.isFinite(request.data?.rowsLoaded) ? Number(request.data.rowsLoaded) : null,
+          groups: Number.isFinite(request.data?.groups) ? Number(request.data.groups) : null,
+          rowsMatched: Number.isFinite(request.data?.rowsMatched) ? Number(request.data.rowsMatched) : null,
+          error: request.data?.error ? String(request.data.error).slice(0, 500) : null,
+          createdByUid: profile.uid,
+          createdByName: profile.displayName || profile.email,
+          createdAt: FieldValue.serverTimestamp(),
+        });
+        return { ok: true };
+      }
+      case "askDebugList": {
+        const profile = await requireProfile(request.auth);
+        requireRole(profile, ["admin", "manager"]);
+        const snap = await getFirestore().collection("askDebugLog").orderBy("createdAt", "desc").limit(100).get();
+        const entries = snap.docs.map((d) => {
+          const x = d.data() as Record<string, unknown>;
+          const createdAt = x.createdAt as { toMillis?: () => number } | undefined;
+          return { ...x, id: d.id, createdAt: createdAt?.toMillis?.() ?? null };
+        });
+        return { ok: true, entries };
+      }
+      case "askDebugClear": {
+        const profile = await requireProfile(request.auth);
+        requireRole(profile, ["admin"]);
+        const snap = await getFirestore().collection("askDebugLog").limit(500).get();
+        const batch = getFirestore().batch();
+        snap.docs.forEach((d) => batch.delete(d.ref));
+        await batch.commit();
+        return { ok: true, cleared: snap.size };
       }
 
       default:
