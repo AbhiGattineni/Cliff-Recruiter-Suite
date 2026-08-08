@@ -347,6 +347,7 @@ table.data th.colf-th { padding-right: 0.35rem; }
 /* Saved queries — shared across admins/managers, re-run with no LLM call. */
 .ask-saved { display: flex; flex-direction: column; gap: 0.35rem; }
 .ask-saved-item { display: flex; align-items: center; gap: 0.4rem; }
+.ask-saved-item > .pill { flex-shrink: 0; }
 .ask-saved-item > button:first-child {
   flex: 1; min-width: 0; text-align: left; background: #fff; border: 1px solid var(--line);
   border-radius: 8px; padding: 0.4rem 0.6rem; font: inherit; font-size: 0.85rem; cursor: pointer;

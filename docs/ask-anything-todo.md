@@ -57,10 +57,15 @@ hallucinate numbers on anything past a few hundred rows. Don't do that.
   language via `askNarrative`, grounded on `AskResult.facts`. Reuses the
   `Lang` / `LANGS` types from `src/lib/indexGuide.ts` — don't reinvent them.
 
-One choice I made without asking, flag it to the user when this ships:
-**saved queries are team-shared** (any admin/manager sees every saved query,
-`askList` has no per-user filter) — matches the "go-to place for everyone"
-framing, but say so explicitly in case they'd rather it be private-per-user.
+- **Saved-query visibility** (confirmed with the user after the first cut
+  shipped them team-wide): the built-in `SUGGESTED_PROMPTS` chips are generic
+  and stay the same for everyone. Beyond those, **an admin's saved query is
+  published to everyone** who can use the page, and **anyone else's is
+  private to them** — a manager's saved question can be about one named
+  recruiter, and that isn't the whole team's business. `askSave` sets
+  `shared` from the caller's own role, never from client input; `askList`
+  returns `shared == true` plus your own; `askDelete` allows your own always
+  and anyone else's only for admins.
 
 ## What's done
 

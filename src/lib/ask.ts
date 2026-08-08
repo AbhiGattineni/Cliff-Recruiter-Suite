@@ -25,6 +25,8 @@ export interface SavedAskQuery {
   name: string;
   question: string;
   plan: AskPlan;
+  /** Set server-side from the saver's role: an admin saves for the team, anyone else saves for themselves. */
+  shared?: boolean;
   createdByUid?: string;
   createdByName?: string;
   createdAt: number | null;

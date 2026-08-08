@@ -16,9 +16,12 @@ Chronological record of notable changes. Newest first.
   columns or chart — or removing a filter pill — re-runs the query in the browser and skips
   the planning call entirely. A re-run replaces the summary rather than leaving a stale
   sentence next to new numbers, and waits 700ms so a burst of edits costs one call, not six.
-- **Saved queries are shared** with every admin and manager, and re-run instantly on the same
-  no-AI path — today's question becomes tomorrow's dashboard. Any result downloads as CSV or
-  Excel.
+- **Saved queries re-run instantly** on the same no-AI path — today's question becomes tomorrow's
+  dashboard. Who sees one is decided by the saver's role, server-side: **an admin's save is
+  published to everyone** who can use the page, **anyone else's is private to them**, since a
+  saved question can be about one named recruiter. You can always delete your own; only an admin
+  can delete someone else's, or the shared set. The built-in prompt chips are generic and the
+  same for everyone. Any result downloads as CSV or Excel.
 - Covers all six tables from day one: submissions, requirements, recruiters, clients, resume
   assessments and timesheets. Only the raw sources a question actually needs are loaded, cached
   five minutes per source.

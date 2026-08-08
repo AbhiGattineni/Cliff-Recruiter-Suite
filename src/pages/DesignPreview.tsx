@@ -313,9 +313,14 @@ function AskChromeDemo() {
       </div>
       <h4 style={{ margin: "1rem 0 0.4rem", fontSize: "0.95rem" }}>Saved queries</h4>
       <div className="ask-saved">
-        {["Clients to reconsider", "Hours logged per recruiter", "Open reqs with zero submissions"].map((n) => (
+        {[
+          { n: "Clients to reconsider", shared: true },
+          { n: "Hours logged per recruiter", shared: false },
+          { n: "Open reqs with zero submissions", shared: false },
+        ].map(({ n, shared }) => (
           <div className="ask-saved-item" key={n}>
-            <button type="button">📌 {n}<span className="muted"> · Preview user</span></button>
+            <button type="button">📌 {n}{shared && <span className="muted"> · Preview admin</span>}</button>
+            <span className={`pill ${shared ? "green" : "grey"}`}>{shared ? "Shared" : "Private"}</span>
             <button type="button" className="ask-saved-del" aria-label={`Delete saved query ${n}`}>🗑</button>
           </div>
         ))}
@@ -367,6 +372,7 @@ function AskDemo() {
         narrativeLoading={false}
         onLangChange={setLang}
         onRerun={setPlan}
+        savesShared
         onSave={() => undefined}
         onDismiss={() => undefined}
       />

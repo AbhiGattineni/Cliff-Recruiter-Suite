@@ -22,6 +22,7 @@ export default function AskCard({
   narrativeLoading,
   onLangChange,
   onRerun,
+  savesShared,
   onSave,
   onDismiss,
 }: {
@@ -34,6 +35,8 @@ export default function AskCard({
   narrativeLoading: boolean;
   onLangChange: (lang: Lang) => void;
   onRerun: (plan: AskPlan) => void;
+  /** Admins publish to the team; everyone else saves privately. Decided server-side — this is only what we promise. */
+  savesShared: boolean;
   onSave: (name: string) => void;
   onDismiss: () => void;
 }) {
@@ -250,10 +253,14 @@ export default function AskCard({
       >
         <div className="field" style={{ marginBottom: 0 }}>
           <label>Name</label>
-          <input value={saveName} onChange={(e) => setSaveName(e.target.value)} placeholder="e.g. Clients to reconsider" />
+          {/* type="text" is load-bearing: the global input styling keys off the attribute. */}
+          <input type="text" value={saveName} onChange={(e) => setSaveName(e.target.value)} placeholder="e.g. Clients to reconsider" />
         </div>
         <p className="muted" style={{ fontSize: "0.8rem", marginTop: "0.6rem", marginBottom: 0 }}>
-          Saved queries are shared with every admin and manager, and re-run instantly — no AI call needed.
+          {savesShared
+            ? "As an admin, this is saved for everyone who can use this page."
+            : "Only you will see this one."}{" "}
+          Either way it re-runs instantly — no AI call needed.
         </p>
       </Modal>
     </div>

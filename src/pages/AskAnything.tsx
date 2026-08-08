@@ -58,8 +58,11 @@ const newId = () => `ask-${++nextId}`;
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export default function AskAnything() {
-  const { profile, profileLoading } = useAuth();
+  const { user, profile, profileLoading } = useAuth();
   const canAsk = profile?.role === "admin" || profile?.role === "manager";
+  // An admin saving a query publishes it to the team; everyone else's saves are
+  // their own. Decided server-side too — this only shapes what the UI promises.
+  const isAdmin = profile?.role === "admin";
 
   const qc = useQueryClient();
   const [items, setItems] = useState<FeedItem[]>([]);
@@ -288,26 +291,34 @@ export default function AskAnything() {
         <div className="card">
           <h2 style={{ fontSize: "1.05rem" }}>Saved queries</h2>
           <p className="muted" style={{ marginTop: "-0.25rem", fontSize: "0.85rem" }}>
-            Shared with every admin and manager. Re-running one is instant — it skips the AI and goes
-            straight to the data.
+            The ones you saved, plus the shared set an admin publishes for everyone. Re-running one is
+            instant — it skips the AI and goes straight to the data.
           </p>
           <div className="ask-saved">
-            {saved.map((s) => (
-              <div className="ask-saved-item" key={s.id}>
-                <button type="button" onClick={() => runSaved(s)} title={s.question || s.name}>
-                  📌 {s.name}
-                  {s.createdByName && <span className="muted"> · {s.createdByName}</span>}
-                </button>
-                <button
-                  type="button"
-                  className="ask-saved-del"
-                  aria-label={`Delete saved query ${s.name}`}
-                  onClick={() => void remove(s.id)}
-                >
-                  🗑
-                </button>
-              </div>
-            ))}
+            {saved.map((s) => {
+              const mine = s.createdByUid === user?.uid;
+              return (
+                <div className="ask-saved-item" key={s.id}>
+                  <button type="button" onClick={() => runSaved(s)} title={s.question || s.name}>
+                    📌 {s.name}
+                    {s.shared && !mine && s.createdByName && <span className="muted"> · {s.createdByName}</span>}
+                  </button>
+                  <span className={`pill ${s.shared ? "green" : "grey"}`} title={s.shared ? "Everyone with access to this page can see this" : "Only you can see this"}>
+                    {s.shared ? "Shared" : "Private"}
+                  </span>
+                  {(mine || isAdmin) && (
+                    <button
+                      type="button"
+                      className="ask-saved-del"
+                      aria-label={`Delete saved query ${s.name}`}
+                      onClick={() => void remove(s.id)}
+                    >
+                      🗑
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -336,6 +347,7 @@ export default function AskAnything() {
             if (item.result && !item.narratives[lang]) void narrate(item.id, lang, item.result.facts);
           }}
           onRerun={(plan) => void run(item.id, plan)}
+          savesShared={!!isAdmin}
           onSave={(name) => void save(item, name)}
           onDismiss={() => setItems((cur) => cur.filter((it) => it.id !== item.id))}
         />
