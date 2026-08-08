@@ -109,7 +109,24 @@ jobs:
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
-      - name: Deploy to Firebase
-        # --force: deploy also deletes any function removed from the codebase,
-        # which normally needs an interactive confirmation.
-        run: npx firebase-tools@13 deploy --only functions,hosting,firestore:rules --project cliff-services --non-interactive --force
+      # Two steps, deliberately, and the site goes first.
+      #
+      # us-central1 keeps refusing a Cloud Run revision for one function or
+      # another — "Quota exceeded for total allowable CPU per project per
+      # region". As a single `deploy --only functions,hosting,...` that aborts
+      # the whole run before hosting is released, so the site silently stays on
+      # an older build for a reason that has nothing to do with the site. The
+      # quota failure is still a red build below; it just can't take hosting
+      # down with it any more.
+      #
+      # The order does mean a new UI can be live for a minute or two before the
+      # function it calls. That's the cheaper failure: a brief error on one
+      # page, rather than a deploy that looks done and shipped nothing.
+      #
+      # --force: deploy also deletes any function removed from the codebase,
+      # which normally needs an interactive confirmation.
+      - name: Deploy hosting + Firestore rules
+        run: npx firebase-tools@13 deploy --only hosting,firestore:rules --project cliff-services --non-interactive --force
+
+      - name: Deploy Cloud Functions
+        run: npx firebase-tools@13 deploy --only functions --project cliff-services --non-interactive --force

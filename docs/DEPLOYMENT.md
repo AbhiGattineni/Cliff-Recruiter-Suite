@@ -51,6 +51,13 @@ firebase deploy --only firestore:rules,storage
 firebase deploy
 ```
 
+CI (`.github/workflows/deploy.yml`, on every push to `main`) deploys in two steps —
+`hosting,firestore:rules` first, then `functions`. That order is on purpose: this project's
+region keeps hitting *"Quota exceeded for total allowable CPU per project per region"* on one
+Cloud Run service or another, and a combined deploy aborts before releasing hosting, leaving the
+site on an older build with no obvious reason. Deploy by hand the same way when the quota is
+playing up: get the site out, then retry functions.
+
 ## Hosting config
 `firebase.json` serves `dist/` and rewrites all routes to `/index.html` (SPA). After a hosting
 deploy the app is live at:
