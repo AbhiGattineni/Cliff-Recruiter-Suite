@@ -44,9 +44,18 @@ h2 { font-size: 1.25rem; }
   flex-direction: column;
   padding: 1.25rem 0;
   flex-shrink: 0;
-  transition: width 0.15s ease;
+  transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .sidebar.collapsed { width: 66px; }
+
+/* Nav labels fade/widen instead of display:none<->inline, which can't be
+   animated at all and used to pop the text in the instant :hover matched,
+   out of step with the width transition around it. */
+.sidebar .nav-label {
+  display: inline-block; opacity: 1; max-width: 160px; overflow: hidden;
+  white-space: nowrap; transition: opacity 0.16s ease, max-width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.sidebar.collapsed .nav-label { opacity: 0; max-width: 0; }
 
 /* Collapsed rail: hovering (or tabbing into) it slides the labels out.
    The rail is taken out of the flex row and the content reserves its 66px, so
@@ -54,7 +63,8 @@ h2 { font-size: 1.25rem; }
 @media (min-width: 769px) {
   .app-shell.rail .sidebar.collapsed {
     position: fixed; top: 0; left: 0; height: 100%; width: 66px; z-index: 900;
-    overflow-x: hidden;
+    overflow-x: hidden; box-shadow: 4px 0 24px rgba(16, 24, 40, 0);
+    transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.22s ease;
   }
   .app-shell.rail .main { margin-left: 66px; }
 
@@ -64,7 +74,7 @@ h2 { font-size: 1.25rem; }
     box-shadow: 4px 0 24px rgba(16, 24, 40, 0.28);
   }
   .app-shell.rail .sidebar.collapsed:hover .nav-label,
-  .app-shell.rail .sidebar.collapsed:focus-within .nav-label { display: inline; }
+  .app-shell.rail .sidebar.collapsed:focus-within .nav-label { opacity: 1; max-width: 160px; transition-delay: 0.05s; }
   .app-shell.rail .sidebar.collapsed:hover nav a,
   .app-shell.rail .sidebar.collapsed:focus-within nav a { justify-content: flex-start; padding: 0.7rem 1.25rem; }
   .app-shell.rail .sidebar.collapsed:hover nav a.active,
@@ -83,7 +93,6 @@ h2 { font-size: 1.25rem; }
 .sidebar.collapsed .brand { padding: 0 0 1rem; text-align: center; }
 .sidebar.collapsed nav a { justify-content: center; padding: 0.7rem 0; }
 .sidebar.collapsed nav a.active { border-left: none; }
-.sidebar.collapsed .nav-label { display: none; }
 .collapse-btn {
   background: none; border: none; font-size: 1.15rem; cursor: pointer; color: var(--muted);
   padding: 0.25rem 0.5rem; border-radius: 6px; line-height: 1; margin-right: 0.75rem;
@@ -313,6 +322,24 @@ table.data th.colf-th { padding-right: 0.35rem; }
 .ask-prompt:hover:not(:disabled) { background: #d8e6f4; }
 .ask-prompt:disabled { opacity: 0.55; cursor: default; }
 
+/* Dashboard — the ask bar and nothing else, centred like a search-engine home. */
+.home-center {
+  min-height: 62vh; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; text-align: center; padding: 2rem 1rem;
+}
+.home-mark { font-size: 2.1rem; font-weight: 700; color: var(--brand); margin-bottom: 0.35rem; letter-spacing: -0.01em; }
+.home-tagline { margin: 0 0 1.75rem; font-size: 1rem; max-width: 480px; }
+.home-ask-bar { width: 100%; max-width: 620px; }
+.home-ask-bar input {
+  border-radius: 999px; padding: 0.85rem 1.35rem; font-size: 1rem;
+  box-shadow: 0 2px 10px rgba(16, 24, 40, 0.08); border: 1px solid var(--line);
+}
+.home-ask-bar input:focus { box-shadow: 0 2px 14px rgba(31, 78, 120, 0.18); }
+.home-ask-bar .btn { border-radius: 999px; padding: 0 1.6rem; }
+@media (max-width: 480px) {
+  .home-mark { font-size: 1.6rem; }
+}
+
 /* One result in the feed. The left edge marks it as an answer, not a form. */
 .ask-card { border-left: 3px solid var(--brand); }
 .ask-q { font-size: 0.82rem; color: var(--muted); font-weight: 600; overflow-wrap: anywhere; }
@@ -503,7 +530,7 @@ table.data th.colf-th { padding-right: 0.35rem; }
 
 @media (prefers-reduced-motion: reduce) {
   .rise, .skel { animation: none; }
-  .sec-caret, .verdict-fill, .tool-card, .sidebar { transition: none; }
+  .sec-caret, .verdict-fill, .tool-card, .sidebar, .sidebar .nav-label, .app-shell.rail .sidebar.collapsed, .app-shell.rail .main { transition: none; }
   .skel { background: #eef2f7; }
 }
 
@@ -562,7 +589,7 @@ table.data th.colf-th { padding-right: 0.35rem; }
   }
   .sidebar.collapsed { width: 82vw; max-width: 300px; } /* drawer is always full */
   .sidebar.mobile-open { transform: translateX(0); }
-  .sidebar.collapsed .nav-label { display: inline; }
+  .sidebar.collapsed .nav-label { opacity: 1; max-width: none; }
   .sidebar.collapsed nav a { justify-content: flex-start; padding: 0.75rem 1.25rem; }
   .sidebar-backdrop { display: block; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); z-index: 1050; }
 
@@ -581,4 +608,35 @@ table.data th.colf-th { padding-right: 0.35rem; }
   body { font-size: 14px; }
   .content { padding: 0.75rem; }
   .card { padding: 0.85rem; }
+}
+
+/* ---------- Floating language switcher ---------- */
+.lang-fab-wrap { position: fixed; right: 1.25rem; bottom: 1.25rem; z-index: 1300; }
+.lang-fab {
+  display: inline-flex; align-items: center; gap: 0.35rem; background: var(--brand); color: #fff;
+  border: none; border-radius: 999px; padding: 0.6rem 0.9rem; font-weight: 700; font-size: 0.85rem;
+  cursor: pointer; box-shadow: 0 6px 18px rgba(16, 24, 40, 0.22); transition: transform 0.15s ease, background 0.15s ease;
+}
+.lang-fab:hover { background: var(--brand-dark); transform: translateY(-1px); }
+.lang-fab-code { letter-spacing: 0.02em; }
+.lang-fab-menu {
+  position: absolute; bottom: calc(100% + 0.6rem); right: 0; background: #fff; color: var(--ink);
+  border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px rgba(16, 24, 40, 0.2);
+  padding: 0.35rem; min-width: 150px; display: flex; flex-direction: column; gap: 0.15rem;
+  animation: lang-menu-in 0.15s ease both;
+}
+@keyframes lang-menu-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.lang-fab-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+  background: none; border: none; border-radius: 6px; padding: 0.5rem 0.65rem; font: inherit;
+  font-size: 0.88rem; text-align: left; cursor: pointer; color: var(--ink);
+}
+.lang-fab-item:hover { background: #f1f5f9; }
+.lang-fab-item.active { font-weight: 700; color: var(--brand); }
+
+@media (max-width: 768px) {
+  .lang-fab-wrap { right: 0.85rem; bottom: 0.85rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lang-fab-menu { animation: none; }
 }

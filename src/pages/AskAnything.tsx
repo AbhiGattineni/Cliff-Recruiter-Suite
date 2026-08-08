@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../context/AuthContext";
+import { useLang } from "../context/LangContext";
 import AskCard from "../components/ask/AskCard";
 import { AskPlan, AskResult, runPlan, sanitizePlan } from "../lib/askEngine";
 import { SUGGESTED_PROMPTS } from "../lib/askCatalog";
@@ -59,6 +60,9 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export default function AskAnything() {
   const { user, profile, profileLoading } = useAuth();
+  // One app-wide language, set from the floating switcher in the corner — see
+  // the effect below that re-narrates any card missing a translation in it.
+  const { lang } = useLang();
   const canAsk = profile?.role === "admin" || profile?.role === "manager";
   // An admin saving a query publishes it to the team; everyone else's saves are
   // their own. Decided server-side too — this only shapes what the UI promises.
@@ -142,35 +146,39 @@ export default function AskAnything() {
         if (runToken.current.get(id) !== token) return;
         const result = runPlan(rowsForPlan(plan, raw), plan);
         lastPlan.current = plan;
-        // The old sentence described the old numbers, so it goes.
-        patchItem(id, { result, loading: false, error: null, narratives: {}, narrativeLang: "en" });
+        // The old sentence described the old numbers, so it goes. Narrate in
+        // whatever language the floating switcher is currently set to.
+        patchItem(id, { result, loading: false, error: null, narratives: {}, narrativeLang: lang });
         // Editing chips re-runs on every keystroke of a date field; let the
         // edits settle before spending an LLM call on a sentence about to be
         // replaced. The table and chart are already on screen either way.
-        window.setTimeout(() => void narrate(id, "en", result.facts, token), NARRATE_DEBOUNCE_MS);
+        window.setTimeout(() => void narrate(id, lang, result.facts, token), NARRATE_DEBOUNCE_MS);
       } catch (e) {
         if (runToken.current.get(id) !== token) return;
         patchItem(id, { loading: false, error: errText(e) });
       }
     },
-    [loadRaw, narrate, patchItem]
+    [loadRaw, narrate, patchItem, lang]
   );
 
-  const addItem = useCallback((question: string): string => {
-    const id = newId();
-    const item: FeedItem = {
-      id,
-      question,
-      result: null,
-      loading: true,
-      error: null,
-      narratives: {},
-      narrativeLang: "en",
-      narrativeLoading: false,
-    };
-    setItems((cur) => [item, ...cur]); // newest first
-    return id;
-  }, []);
+  const addItem = useCallback(
+    (question: string): string => {
+      const id = newId();
+      const item: FeedItem = {
+        id,
+        question,
+        result: null,
+        loading: true,
+        error: null,
+        narratives: {},
+        narrativeLang: lang,
+        narrativeLoading: false,
+      };
+      setItems((cur) => [item, ...cur]); // newest first
+      return id;
+    },
+    [lang]
+  );
 
   const ask = useCallback(
     async (question: string) => {
@@ -212,6 +220,21 @@ export default function AskAnything() {
     },
     [savedQ]
   );
+
+  // Switching the floating language icon should update every card on screen,
+  // not just the next one asked. Cards that already have that language cached
+  // (you switched to it before, on this or an earlier card) flip instantly —
+  // only the ones missing a translation cost a fresh (grounded, still
+  // number-free) askNarrative call.
+  useEffect(() => {
+    setItems((cur) => cur.map((it) => (it.result ? { ...it, narrativeLang: lang } : it)));
+    items.forEach((it) => {
+      if (it.result && !it.narratives[lang]) void narrate(it.id, lang, it.result.facts);
+    });
+    // Only the language switch itself should trigger this — re-running on every
+    // `items`/`narrate` identity change would re-fire per keystroke elsewhere.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lang]);
 
   // The dashboard launcher navigates here with ?q=… — run it once, then drop
   // the param so a reload doesn't re-ask (and re-bill) the same question.
@@ -342,10 +365,6 @@ export default function AskAnything() {
           narratives={item.narratives}
           narrativeLang={item.narrativeLang}
           narrativeLoading={item.narrativeLoading}
-          onLangChange={(lang) => {
-            patchItem(item.id, { narrativeLang: lang });
-            if (item.result && !item.narratives[lang]) void narrate(item.id, lang, item.result.facts);
-          }}
           onRerun={(plan) => void run(item.id, plan)}
           savesShared={!!isAdmin}
           onSave={(name) => void save(item, name)}

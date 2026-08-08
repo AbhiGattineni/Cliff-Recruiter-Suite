@@ -1,10 +1,12 @@
-import { useState } from "react";
 import { RecruiterStat, INDEX_WEIGHTS } from "../lib/recruiterStats";
-import { GUIDE, LANGS, Lang, readLang, writeLang } from "../lib/indexGuide";
+import { GUIDE } from "../lib/indexGuide";
+import { useLang } from "../context/LangContext";
 
 // Plain-language guide to the Performance Index, readable in English, Telugu or
 // Hindi. Recruiters are ranked by this number, so the rules are explained in
-// the language they actually read, with their own figures filled in.
+// the language they actually read, with their own figures filled in. The
+// language itself is a single app-wide choice set from the floating
+// LanguageSwitcher (see LangContext) — this no longer carries its own picker.
 
 const WEIGHT_OF: Record<string, number> = {
   clientPerAssigned: INDEX_WEIGHTS.clientPerAssigned,
@@ -17,12 +19,8 @@ const WEIGHT_OF: Record<string, number> = {
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 
 export default function IndexGuide({ stat }: { stat?: RecruiterStat }) {
-  const [lang, setLang] = useState<Lang>(readLang);
+  const { lang } = useLang();
   const t = GUIDE[lang];
-  const pick = (l: Lang) => {
-    setLang(l);
-    writeLang(l);
-  };
 
   return (
     <details className="colpick guide" style={{ marginTop: "1rem" }}>
@@ -34,20 +32,6 @@ export default function IndexGuide({ stat }: { stat?: RecruiterStat }) {
       </summary>
 
       <div className="colpick-body">
-        <div className="guide-langs" role="group" aria-label="Language">
-          {LANGS.map((l) => (
-            <button
-              key={l.code}
-              type="button"
-              className={`guide-lang${l.code === lang ? " active" : ""}`}
-              aria-pressed={l.code === lang}
-              onClick={() => pick(l.code)}
-            >
-              {l.label}
-            </button>
-          ))}
-        </div>
-
         <p className="guide-intro">{t.intro}</p>
 
         {stat && (

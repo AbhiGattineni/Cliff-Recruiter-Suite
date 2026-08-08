@@ -22,7 +22,8 @@ import { scoreLinkedin, verdictClass } from "../lib/linkedinScore";
 import AskCard from "../components/ask/AskCard";
 import { AskPlan, Row, runPlan, sanitizePlan } from "../lib/askEngine";
 import { SUGGESTED_PROMPTS } from "../lib/askCatalog";
-import { Lang } from "../lib/indexGuide";
+import { useLang } from "../context/LangContext";
+import LanguageSwitcher from "../components/LanguageSwitcher";
 
 // Enough rows to exercise every page size in the footer dropdown.
 const DEMO_ROWS = Array.from({ length: 137 }, (_, i) => ({
@@ -345,7 +346,7 @@ function AskDemo() {
     []
   );
   const [plan, setPlan] = useState<AskPlan | null>(null);
-  const [lang, setLang] = useState<Lang>("en");
+  const { lang } = useLang(); // the floating icon at the bottom of this page
   const current = plan ?? initial;
   const result = useMemo(() => runPlan(rows, current), [rows, current]);
 
@@ -370,7 +371,6 @@ function AskDemo() {
         }}
         narrativeLang={lang}
         narrativeLoading={false}
-        onLangChange={setLang}
         onRerun={setPlan}
         savesShared
         onSave={() => undefined}
@@ -409,6 +409,11 @@ export default function DesignPreview() {
         </p>
         <IndexGuide stat={DEMO_STAT} />
       </div>
+
+      {/* The real thing lives in Layout.tsx; mounted here so the language
+          switch can be exercised (and both cards above verified to follow it)
+          without signing in. */}
+      <LanguageSwitcher />
 
 
       <div className="card">

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { AskPlan, AskResult, sanitizePlan } from "../../lib/askEngine";
 import { ASK_TABLES, tableByKey } from "../../lib/askCatalog";
 import { downloadAskResultCsv, downloadAskResultXlsx } from "../../lib/askExport";
-import { LANGS, Lang } from "../../lib/indexGuide";
+import { Lang } from "../../lib/indexGuide";
 import PieChart from "../PieChart";
 import BarChart from "../BarChart";
 import MultiSelect from "../MultiSelect";
@@ -20,7 +20,6 @@ export default function AskCard({
   narratives,
   narrativeLang,
   narrativeLoading,
-  onLangChange,
   onRerun,
   savesShared,
   onSave,
@@ -33,7 +32,6 @@ export default function AskCard({
   narratives: Partial<Record<Lang, string>>;
   narrativeLang: Lang;
   narrativeLoading: boolean;
-  onLangChange: (lang: Lang) => void;
   onRerun: (plan: AskPlan) => void;
   /** Admins publish to the team; everyone else saves privately. Decided server-side — this is only what we promise. */
   savesShared: boolean;
@@ -171,20 +169,11 @@ export default function AskCard({
         </div>
       )}
 
-      {/* Summary — grounded on the computed numbers, phrased in the chosen language. */}
+      {/* Summary — grounded on the computed numbers, phrased in the app's current
+          language (the floating switcher in the corner, not a per-card control —
+          switching it re-narrates every card that doesn't already have that
+          language cached; see AskAnything.tsx). */}
       <div className="ask-summary">
-        <div className="guide-langs" role="group" aria-label="Summary language" style={{ marginBottom: "0.5rem" }}>
-          {LANGS.map((l) => (
-            <button
-              key={l.code}
-              type="button"
-              className={`guide-lang${l.code === narrativeLang ? " active" : ""}`}
-              onClick={() => onLangChange(l.code)}
-            >
-              {l.label}
-            </button>
-          ))}
-        </div>
         {narrativeLoading ? (
           <p className="muted" style={{ display: "flex", alignItems: "center", gap: "0.5rem", margin: 0 }}>
             <span className="spinner dark" /> Summarising…

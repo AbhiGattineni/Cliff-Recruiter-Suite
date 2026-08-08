@@ -2,6 +2,7 @@ import { useState } from "react";
 import { NavLink, Outlet, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { isPlaceholderConfig } from "../firebase";
+import LanguageSwitcher from "./LanguageSwitcher";
 
 const NAV = [
   { to: "/", end: true, icon: "🏠", label: "Dashboard" },
@@ -109,6 +110,7 @@ export default function Layout() {
           <Outlet />
         </div>
       </div>
+      <LanguageSwitcher />
     </div>
   );
 }

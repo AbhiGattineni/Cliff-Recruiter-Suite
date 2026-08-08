@@ -18,7 +18,8 @@ import {
 } from "../lib/recruiterStats";
 import { getRecruiterActivity, RecruiterActivity, ActivityCounts, activityNameKey } from "../lib/recruiterActivity";
 import { extensionFor } from "../lib/extensions";
-import { GUIDE, readLang } from "../lib/indexGuide";
+import { GUIDE, Lang } from "../lib/indexGuide";
+import { useLang } from "../context/LangContext";
 import StageBar, { StageLegend } from "../components/StageBar";
 import PieChart from "../components/PieChart";
 import Modal from "../components/Modal";
@@ -58,8 +59,8 @@ const targetBasis = (s: RecruiterStat) =>
 // Hover text for the Index pill — the same weights/metrics IndexGuide shows in
 // the detail modal, sorted weakest-contributor-first so the thing dragging the
 // score down the most is the first thing a recruiter reads.
-const indexBreakdown = (s: RecruiterStat) => {
-  const t = GUIDE[readLang()];
+const indexBreakdown = (s: RecruiterStat, lang: Lang) => {
+  const t = GUIDE[lang];
   const rows = t.metrics
     .map((m) => {
       const weight = INDEX_WEIGHTS[m.key];
@@ -84,6 +85,7 @@ export default function RecruiterPerformance() {
   const [sortKey, setSortKey] = useState<SortKey>("index");
   const [submittedFrom, setSubmittedFrom] = useState("");
   const [submittedTo, setSubmittedTo] = useState("");
+  const { lang } = useLang();
   // Weekly activity (job-board / pipeline / mail-merge counts) — loaded on demand,
   // held in memory for the session and reused across recruiters (nothing stored).
   const [activity, setActivity] = useState<{ from: string; to: string; data: RecruiterActivity } | null>(null);
@@ -368,7 +370,7 @@ export default function RecruiterPerformance() {
                               <span
                                 className={`pill ${indexPill(s.index)}`}
                                 style={{ cursor: "help" }}
-                                title={indexBreakdown(s)}
+                                title={indexBreakdown(s, lang)}
                               >
                                 {s.index}
                               </span>
