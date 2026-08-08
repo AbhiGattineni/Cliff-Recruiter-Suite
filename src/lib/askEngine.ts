@@ -76,10 +76,13 @@ export function sanitizePlan(raw: unknown): AskPlan {
   const cat = tableByKey(table)!;
   const fieldKeys = new Set(cat.columns.map((c) => c.key));
 
+  // A filter on the table's own date field duplicates dateFrom/dateTo below,
+  // which already scope it — keep just the one, so the UI doesn't show the
+  // same range twice as separate pills.
   const filters: AskFilter[] = Array.isArray(o.filters)
     ? (o.filters as unknown[])
         .map((f) => sanitizeFilter(f, fieldKeys))
-        .filter((f): f is AskFilter => f !== null)
+        .filter((f): f is AskFilter => f !== null && f.field !== cat.dateField)
     : [];
 
   const groupByRaw = typeof o.groupBy === "string" ? o.groupBy : null;
@@ -322,8 +325,14 @@ export function timesheetsToRows(entries: TimesheetEntry[]): Row[] {
 // against a row set already built for the target table.
 // ---------------------------------------------------------------------------
 
-function matchFilter(row: Row, f: AskFilter): boolean {
+function matchFilter(row: Row, f: AskFilter, cat: CatalogColumn | undefined): boolean {
   const v = row[f.field];
+  // gte/lte/before/after/between need to know whether they're ordering numbers
+  // or ISO date strings ("2026-08-06" >= "2026-08-01" is correct lexicographic
+  // order; Number() on either side of a date string is NaN and silently
+  // matches nothing). Column type comes from the catalog, not the value's own
+  // JS typeof, since a numeric field can still hold a blank/missing string.
+  const isNumeric = cat?.type === "number";
   switch (f.op) {
     case "eq":
       return String(v ?? "").toLowerCase() === String(f.value).toLowerCase();
@@ -334,9 +343,9 @@ function matchFilter(row: Row, f: AskFilter): boolean {
       return list.includes(String(v ?? "").toLowerCase());
     }
     case "gte":
-      return Number(v) >= Number(f.value);
+      return v != null && (isNumeric ? Number(v) >= Number(f.value) : String(v) >= String(f.value));
     case "lte":
-      return Number(v) <= Number(f.value);
+      return v != null && (isNumeric ? Number(v) <= Number(f.value) : String(v) <= String(f.value));
     case "before":
       return !!v && String(v) < String(f.value);
     case "after":
@@ -344,8 +353,7 @@ function matchFilter(row: Row, f: AskFilter): boolean {
     case "between": {
       const [lo, hi] = Array.isArray(f.value) ? f.value : [f.value, f.value];
       if (v == null) return false;
-      const numeric = typeof v === "number";
-      return numeric ? Number(v) >= Number(lo) && Number(v) <= Number(hi) : String(v) >= String(lo) && String(v) <= String(hi);
+      return isNumeric ? Number(v) >= Number(lo) && Number(v) <= Number(hi) : String(v) >= String(lo) && String(v) <= String(hi);
     }
     default:
       return true;
@@ -396,7 +404,7 @@ function capForChart(data: { label: string; value: number }[], max: number): { l
 export function runPlan(rawRows: Row[], plan: AskPlan): AskResult {
   const cat = tableByKey(plan.table)!;
   const dateFiltered = applyDateRange(rawRows, cat.dateField, plan.dateFrom, plan.dateTo);
-  const filtered = dateFiltered.filter((r) => plan.filters.every((f) => matchFilter(r, f)));
+  const filtered = dateFiltered.filter((r) => plan.filters.every((f) => matchFilter(r, f, columnByKey(cat, f.field))));
 
   const metricLabel = plan.metric.field
     ? `${plan.metric.agg} of ${columnByKey(cat, plan.metric.field)?.label ?? plan.metric.field}`

@@ -76,6 +76,19 @@ describe("sanitizePlan", () => {
     const p = sanitizePlan({ table: "submissions", limit: 999999 });
     expect(p.limit).toBeLessThanOrEqual(2000);
   });
+
+  it("drops a filter on the table's own date field — dateFrom/dateTo already cover it", () => {
+    const p = sanitizePlan({
+      table: "submissions",
+      dateFrom: "2026-08-01",
+      dateTo: "2026-08-08",
+      filters: [
+        { field: "submittedOn", op: "gte", value: "2026-08-01" },
+        { field: "client", op: "contains", value: "IBM" },
+      ],
+    });
+    expect(p.filters).toEqual([{ field: "client", op: "contains", value: "IBM" }]);
+  });
 });
 
 describe("submissionsToRows + runPlan filtering", () => {
@@ -112,6 +125,20 @@ describe("submissionsToRows + runPlan filtering", () => {
   it("is case-insensitive on eq and contains", () => {
     const plan = sanitizePlan({ ...emptyPlan("submissions"), filters: [{ field: "client", op: "eq", value: "ibm" }] });
     expect(runPlan(rows, plan).totalRows).toBe(2);
+  });
+
+  it("filters gte/lte on a date column by ISO string order, not Number() (which is NaN for a date and matches nothing)", () => {
+    const dateRows = submissionsToRows([
+      ev({ applicantName: "D1", statusChangedOn: DateTime.fromISO("2026-08-02") }),
+      ev({ applicantName: "D2", statusChangedOn: DateTime.fromISO("2026-08-06") }),
+    ]);
+    const plan = sanitizePlan({
+      ...emptyPlan("submissions"),
+      filters: [{ field: "statusChangedOn", op: "gte", value: "2026-08-05" }],
+    });
+    const res = runPlan(dateRows, plan);
+    expect(res.totalRows).toBe(1);
+    expect(res.rows[0].applicantName).toBe("D2");
   });
 
   it("folds a candidate's status-change history on one job into a single row at their current status", () => {
