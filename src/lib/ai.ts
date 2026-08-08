@@ -14,7 +14,12 @@ export type AiAction =
   | "matchCandidatesToJd"
   | "githubPortfolio"
   | "githubSearch"
-  | "llmAvailability";
+  | "llmAvailability"
+  | "askPlan"
+  | "askNarrative"
+  | "askSave"
+  | "askList"
+  | "askDelete";
 
 /** Invoke one action on the shared AI function. */
 export async function callAi<TIn extends object, TOut>(

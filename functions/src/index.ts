@@ -11,7 +11,7 @@ import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
 import { fetchReport, probeTotal } from "./ceipal.js";
 import { readCache, readCacheMeta, writeCache, cacheEnvelope } from "./ceipalCache.js";
-import { assessResume, matchRolesToJd, assessPortfolio } from "./llm.js";
+import { assessResume, matchRolesToJd, assessPortfolio, planAskQuery, narrateAskResult } from "./llm.js";
 import { searchUsers, buildPortfolio, parseGithubUsername } from "./github.js";
 import { fetchLinkedinSignals, providerConfigured, EMPTY_SIGNALS } from "./linkedin.js";
 import {
@@ -507,13 +507,23 @@ export const updateResumeReport = onCall(
 );
 
 
-// ---- AI / enrichment: one function, five actions ---------------------------
+// ---- AI / enrichment: one function, many actions ----------------------------
 // These all do the same shape of work — take JSON, call an LLM or the GitHub
 // API, return JSON — and each `onCall` is a separate Cloud Run service with its
 // own reserved CPU. The project kept hitting the region's allowable-CPU quota,
 // so they share one service and branch on `action`. Settings are the widest of
-// the five (the portfolio fetch is the long pole).
-type AiAction = "parseResume" | "matchCandidatesToJd" | "githubPortfolio" | "githubSearch" | "llmAvailability";
+// the group (the portfolio fetch is the long pole).
+type AiAction =
+  | "parseResume"
+  | "matchCandidatesToJd"
+  | "githubPortfolio"
+  | "githubSearch"
+  | "llmAvailability"
+  | "askPlan"
+  | "askNarrative"
+  | "askSave"
+  | "askList"
+  | "askDelete";
 
 export const ai = onCall(
   {
@@ -608,6 +618,79 @@ export const ai = onCall(
           },
         };
       }
+
+      // ---- Ask Anything (management query assistant) -----------------------
+      // Gated to admin/manager — see requireProfile/requireRole above. The LLM
+      // only ever returns a query plan or phrases an already-computed summary;
+      // it never sees a data row. See askEngine.ts and llm.ts for why.
+      case "askPlan": {
+        const profile = await requireProfile(request.auth);
+        requireRole(profile, ["admin", "manager"]);
+        const question = String(request.data?.question ?? "").trim();
+        if (!question) throw new HttpsError("invalid-argument", "Ask a question.");
+        const priorPlan = request.data?.priorPlan ?? null;
+        const today = String(request.data?.today ?? new Date().toISOString().slice(0, 10));
+        const config = pickLlm();
+        try {
+          const { plan, usage } = await planAskQuery(question, priorPlan, today, config);
+          await logLlmCall("Ask Anything — plan", config.provider, config.model, usage);
+          return { ok: true, plan, usage };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      }
+      case "askNarrative": {
+        const profile = await requireProfile(request.auth);
+        requireRole(profile, ["admin", "manager"]);
+        const facts = (request.data?.facts ?? {}) as Record<string, unknown>;
+        const lang = String(request.data?.lang ?? "en");
+        const config = pickLlm();
+        try {
+          const { text, usage } = await narrateAskResult(facts, lang, config);
+          await logLlmCall("Ask Anything — narrative", config.provider, config.model, usage);
+          return { ok: true, text, usage };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      }
+      case "askSave": {
+        const profile = await requireProfile(request.auth);
+        requireRole(profile, ["admin", "manager"]);
+        const name = String(request.data?.name ?? "").trim().slice(0, 140);
+        const question = String(request.data?.question ?? "").trim().slice(0, 500);
+        const plan = request.data?.plan;
+        if (!name || !plan) throw new HttpsError("invalid-argument", "name and plan are required.");
+        const doc = await getFirestore().collection("askQueries").add({
+          name,
+          question,
+          plan,
+          createdByUid: profile.uid,
+          createdByName: profile.displayName || profile.email,
+          createdAt: FieldValue.serverTimestamp(),
+        });
+        return { ok: true, id: doc.id };
+      }
+      case "askList": {
+        const profile = await requireProfile(request.auth);
+        requireRole(profile, ["admin", "manager"]);
+        // Shared library — any admin/manager sees every saved query, since this
+        // is a team tool and today's saved query is tomorrow's suggested prompt.
+        const snap = await getFirestore().collection("askQueries").orderBy("createdAt", "desc").limit(200).get();
+        const queries = snap.docs.map((d) => {
+          const x = d.data() as Record<string, unknown>;
+          const createdAt = x.createdAt as { toMillis?: () => number } | undefined;
+          return { id: d.id, ...x, createdAt: createdAt?.toMillis?.() ?? null };
+        });
+        return { ok: true, queries };
+      }
+      case "askDelete": {
+        const profile = await requireProfile(request.auth);
+        requireRole(profile, ["admin", "manager"]);
+        const id = String(request.data?.id ?? "");
+        if (id) await getFirestore().collection("askQueries").doc(id).delete();
+        return { ok: true };
+      }
+
       default:
         throw new HttpsError("invalid-argument", `Unknown action "${action}".`);
     }

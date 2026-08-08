@@ -376,3 +376,184 @@ export async function assessPortfolio(
   };
   return { portfolio, usage };
 }
+
+// ---- Ask Anything: NL -> query plan, and grounded narrative -----------------
+//
+// Two-stage design, on purpose: the LLM NEVER sees a data row and never states
+// a number. planAskQuery only chooses WHAT to look at (a JSON plan over a
+// catalog of table/column names); the actual numbers are computed in
+// src/lib/askEngine.ts, in plain code, from data already loaded in the app.
+// narrateAskResult is handed only the already-computed aggregate — a handful
+// of numbers, not raw data — and asked to phrase (not invent) a sentence.
+//
+// Keep this catalog text in sync with src/lib/askCatalog.ts — it's duplicated
+// rather than imported because functions/ is a separate TS project.
+const ASK_CATALOG_PROMPT = [
+  "- submissions: one row per candidate submission event (a profile sent for a requirement, at its current status).",
+  "  columns: applicantName (string), jobCode (string), jobTitle (string), client (string), recruiter (string), status (string), submittedOn (date), statusChangedOn (date), accountManager (string)",
+  "  date field: submittedOn",
+  "- requirements: one row per job requirement/posting.",
+  "  columns: jobCode (string), jobTitle (string), client (string), status (enum: Active/On Hold/Hold by Client/Closed/Draft/Filled), jobCreatedOn (date), submissionsCount (number), recruitmentManager (string), assignedTo (string), payRate (string), experience (string), mandateSkills (string)",
+  "  date field: jobCreatedOn",
+  "- recruiters: one row per recruiter -- submission counts and Performance Index. A date range scopes which activity counts (not a per-row filter).",
+  "  columns: recruiter (string), requirementsWorked (number), profiles (number), clientSubmissions (number), clientRatePct (number), progressRatePct (number), index (number)",
+  "  date field: none (range scopes aggregation)",
+  "- clients: one row per client/vendor -- requirements received and how our submissions to them are going. A date range scopes the aggregation.",
+  "  columns: client (string), requirementsReceived (number), requirementsActive (number), requirementsOnHold (number), submissionsSent (number), responseRatePct (number), selected (number), verdict (enum: prioritize/watch/reconsider/unrated)",
+  "  date field: none (range scopes aggregation)",
+  "- resumes: one row per resume fit assessment.",
+  "  columns: candidateName (string), fitScore (number), rating (enum: Strong/Moderate/Weak), aiGeneratedPercent (number), currentTitle (string), location (string), experienceYears (number), githubScore (number), linkedinVerdict (string), provider (string), createdAt (date)",
+  "  date field: createdAt",
+  "- timesheets: one row per requirement logged on a timesheet day.",
+  "  columns: date (date), recruiter (string), jobCode (string), jobTitle (string), client (string), hours (number), notes (string)",
+  "  date field: date",
+].join("\n");
+
+const ASK_PLAN_SYS = [
+  "You turn a plain-English question about recruiting data into a JSON query plan.",
+  "You do NOT answer the question and you never invent a number -- you only say what to look at.",
+  "A separate deterministic engine runs your plan against the real data.",
+  "",
+  "Available tables and columns (use ONLY these field names, never invent one):",
+  ASK_CATALOG_PROMPT,
+  "",
+  "Return ONLY a JSON object with this exact shape:",
+  "{",
+  '  "table": one of "submissions" | "requirements" | "recruiters" | "clients" | "resumes" | "timesheets",',
+  '  "title": a short human title for this view (max 10 words),',
+  '  "filters": [{ "field": string, "op": "eq"|"contains"|"in"|"gte"|"lte"|"before"|"after"|"between", "value": string | number | string[] }],',
+  '  "dateFrom": "YYYY-MM-DD" or null,',
+  '  "dateTo": "YYYY-MM-DD" or null,',
+  '  "groupBy": a column name to group by, or null for a plain row list,',
+  '  "metric": { "field": a numeric column name or null, "agg": "count"|"sum"|"avg" },',
+  '  "columns": string[] of columns to show in the table (only used when groupBy is null),',
+  '  "sort": { "field": string, "dir": "asc"|"desc" } or null,',
+  '  "chart": "pie" | "bar" | "none" -- pick "none" when there is no groupBy or a chart would not help,',
+  '  "limit": a row cap, default 500',
+  "}",
+  'Interpret relative dates ("this month", "last week", "this year") against the date this request was made.',
+  "Pick the table whose description best matches the question. If the question asks for something no table",
+  "supports, pick the closest table anyway and leave out filters/groupBy that do not apply -- never refuse.",
+  "Output the JSON object and nothing else.",
+].join("\n");
+
+/** NL question -> structured query plan. The plan is untrusted output -- the caller (askEngine.sanitizePlan) validates every field before running it. */
+export async function planAskQuery(
+  question: string,
+  priorPlan: unknown,
+  today: string,
+  config: LlmConfig
+): Promise<{ plan: unknown; usage: TokenUsage }> {
+  const { apiKey, model } = config;
+  const url = `${config.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (apiKey && !apiKey.startsWith("PLACEHOLDER")) headers["authorization"] = `Bearer ${apiKey}`;
+
+  const userParts = [`Today's date: ${today}`];
+  if (priorPlan) {
+    userParts.push(`Previous query plan (this question may be a follow-up refining it):\n${JSON.stringify(priorPlan)}`);
+  }
+  userParts.push(`Question: ${question}`);
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model,
+      stream: false,
+      temperature: 0.1,
+      messages: [
+        { role: "system", content: ASK_PLAN_SYS },
+        { role: "user", content: userParts.join("\n\n") },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(`LLM query-plan request failed (${res.status}): ${t.slice(0, 300)}`);
+  }
+  const data = (await res.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    message?: { content?: string };
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+    prompt_eval_count?: number;
+    eval_count?: number;
+  };
+  const text = data.choices?.[0]?.message?.content ?? data.message?.content ?? "";
+  if (!text) throw new Error("The model returned an empty response.");
+  const promptTokens = data.usage?.prompt_tokens ?? data.prompt_eval_count ?? 0;
+  const completionTokens = data.usage?.completion_tokens ?? data.eval_count ?? 0;
+  const usage = computeUsage(model, Number(promptTokens) || 0, Number(completionTokens) || 0);
+  if (data.usage?.total_tokens) usage.totalTokens = Number(data.usage.total_tokens);
+
+  const plan = extractJson(text);
+  return { plan, usage };
+}
+
+const LANG_NAME: Record<string, string> = { en: "English", te: "Telugu", hi: "Hindi" };
+
+/**
+ * Phrase a short summary of an ALREADY-COMPUTED aggregate. The model receives
+ * only these numbers -- never raw rows -- so it can rephrase them but cannot
+ * introduce a figure that is not already here.
+ */
+export async function narrateAskResult(
+  facts: Record<string, unknown>,
+  lang: string,
+  config: LlmConfig
+): Promise<{ text: string; usage: TokenUsage }> {
+  const { apiKey, model } = config;
+  const url = `${config.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (apiKey && !apiKey.startsWith("PLACEHOLDER")) headers["authorization"] = `Bearer ${apiKey}`;
+
+  const langName = LANG_NAME[lang] ?? "English";
+  const sys = [
+    "You write a 1-3 sentence plain-language summary of an already-computed data result for a recruiting-agency manager.",
+    "You are given ONLY the computed numbers below -- you have no access to raw data and must not state, estimate,",
+    "or imply any number that is not explicitly present in the JSON. Do not invent causes or recommendations beyond",
+    `what the numbers directly show. Write in ${langName}.`,
+    'Return ONLY a JSON object: {"text": string}. Output the JSON and nothing else.',
+  ].join(" ");
+  const user = `Computed result:\n${JSON.stringify(facts)}`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model,
+      stream: false,
+      temperature: 0.3,
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: user },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(`LLM narrative request failed (${res.status}): ${t.slice(0, 300)}`);
+  }
+  const data = (await res.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    message?: { content?: string };
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+    prompt_eval_count?: number;
+    eval_count?: number;
+  };
+  const raw = data.choices?.[0]?.message?.content ?? data.message?.content ?? "";
+  if (!raw) throw new Error("The model returned an empty response.");
+  const promptTokens = data.usage?.prompt_tokens ?? data.prompt_eval_count ?? 0;
+  const completionTokens = data.usage?.completion_tokens ?? data.eval_count ?? 0;
+  const usage = computeUsage(model, Number(promptTokens) || 0, Number(completionTokens) || 0);
+  if (data.usage?.total_tokens) usage.totalTokens = Number(data.usage.total_tokens);
+
+  let text = "";
+  try {
+    const parsed = extractJson(raw) as { text?: unknown };
+    text = typeof parsed.text === "string" ? parsed.text : "";
+  } catch {
+    text = raw.trim(); // some models ignore the JSON instruction for short text -- fall back to the raw reply
+  }
+  return { text: text.slice(0, 800), usage };
+}
