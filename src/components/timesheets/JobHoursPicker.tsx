@@ -12,12 +12,15 @@ export default function JobHoursPicker({
   loading,
   error,
   onChange,
+  required,
 }: {
   jobs: JobHours[];
   options: OpenJob[];
   loading?: boolean;
   error?: string | null;
   onChange: (next: JobHours[]) => void;
+  /** At least one requirement must be added before the form can be saved. */
+  required?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -47,7 +50,9 @@ export default function JobHoursPicker({
 
   return (
     <div className="field" style={{ marginBottom: "1rem" }}>
-      <label>Requirements worked on</label>
+      <label>
+        Requirements worked on {required && <span style={{ color: "var(--danger)" }}>*</span>}
+      </label>
 
       {jobs.length > 0 && (
         <div className="table-wrap" style={{ marginBottom: "0.6rem" }}>
@@ -165,12 +170,18 @@ export default function JobHoursPicker({
       </div>
 
       {error ? (
-        <p className="muted" style={{ fontSize: "0.8rem", margin: "0.35rem 0 0" }}>
-          Couldn&#39;t load requirements — {error} You can still log hours without picking one.
+        <p style={{ fontSize: "0.8rem", margin: "0.35rem 0 0", color: "var(--danger)" }}>
+          Couldn&#39;t load requirements — {error} Reload the page to try again — a requirement is required to save.
         </p>
       ) : (
         <p className="muted" style={{ fontSize: "0.8rem", margin: "0.35rem 0 0" }}>
-          Active and On Hold requirements. Add as many as you worked on and split your hours between them.
+          Active and On Hold requirements. Add at least one and split your hours between them
+          {required && " — required to save"}.
+        </p>
+      )}
+      {required && jobs.length === 0 && !error && (
+        <p style={{ fontSize: "0.8rem", margin: "0.3rem 0 0", color: "var(--danger)" }}>
+          Add at least one requirement before saving.
         </p>
       )}
     </div>

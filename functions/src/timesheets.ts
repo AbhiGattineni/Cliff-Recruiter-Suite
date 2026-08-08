@@ -187,10 +187,15 @@ export async function saveEntry(
 ): Promise<TimesheetEntry> {
   if (!DATE_RE.test(date)) throw new Error("date must be in YYYY-MM-DD format.");
   const jobs = cleanJobs(jobsRaw);
-  // When a split is given it IS the day's total, so the two can never disagree.
-  const total = jobs.length ? jobs.reduce((sum, j) => sum + j.hours, 0) : hours;
-  if (!(Number.isFinite(total) && total >= 0 && total <= 24)) {
-    throw new Error("Total hours for a day must be between 0 and 24.");
+  // At least one requirement is mandatory — a timesheet with no requirement
+  // attached to the hours isn't useful for judging where the time went.
+  if (jobs.length === 0) {
+    throw new Error("Select at least one requirement worked on.");
+  }
+  // The split IS the day's total, so the two can never disagree.
+  const total = jobs.reduce((sum, j) => sum + j.hours, 0);
+  if (!(Number.isFinite(total) && total > 0 && total <= 24)) {
+    throw new Error("Total hours for a day must be more than 0 and at most 24.");
   }
   hours = Math.round(total * 100) / 100;
   const db = getFirestore();

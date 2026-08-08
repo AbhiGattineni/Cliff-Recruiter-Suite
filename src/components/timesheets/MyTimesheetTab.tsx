@@ -32,7 +32,6 @@ export default function MyTimesheetTab() {
   const openJobsQ = useQuery({ queryKey: ["openJobs"], queryFn: listOpenJobs, staleTime: 10 * 60_000 });
 
   const [date, setDate] = useState(todayIso());
-  const [hours, setHours] = useState("8");
   const [workedOn, setWorkedOn] = useState("");
   const [jobs, setJobs] = useState<JobHours[]>([]);
   const [saving, setSaving] = useState(false);
@@ -44,7 +43,6 @@ export default function MyTimesheetTab() {
     setSaved(false);
     setError(null);
     const existing = byDate.get(d);
-    setHours(existing ? String(existing.hours) : "8");
     setWorkedOn(existing?.workedOn ?? "");
     setJobs(existing?.jobs ?? []);
   };
@@ -53,13 +51,17 @@ export default function MyTimesheetTab() {
   const jobTotal = Math.round(jobs.reduce((s, j) => s + (Number(j.hours) || 0), 0) * 100) / 100;
   // Block saving a requirement row left at zero — it reads as "worked on, no time".
   const jobsIncomplete = jobs.length > 0 && jobs.some((j) => !(Number(j.hours) > 0));
+  // Date, hours and at least one requirement are all mandatory — hours is
+  // derived from the requirement split, so requiring a job also requires hours.
+  const canSave = !!date && jobs.length > 0 && jobTotal > 0 && !jobsIncomplete;
 
   const submit = async () => {
+    if (!canSave) return;
     setSaving(true);
     setError(null);
     setSaved(false);
     try {
-      await saveTimesheetEntry(date, Number(hours), workedOn, jobs);
+      await saveTimesheetEntry(date, jobTotal, workedOn, jobs);
       await qc.invalidateQueries({ queryKey: ["myTimesheets"] });
       await qc.invalidateQueries({ queryKey: ["teamTimesheets"] });
       setSaved(true);
@@ -91,20 +93,15 @@ export default function MyTimesheetTab() {
         {saved && !error && <div className="alert success">Saved {date}.</div>}
         <div className="row">
           <div className="field">
-            <label>Date</label>
+            <label>Date <span style={{ color: "var(--danger)" }}>*</span></label>
             <input type="date" max={todayIso()} value={date} onChange={(e) => pickDate(e.target.value)} />
           </div>
           <div className="field">
-            <label>Hours worked{jobs.length > 0 && <span className="muted"> — from the split below</span>}</label>
-            <input
-              type="number"
-              min={0}
-              max={24}
-              step={0.5}
-              value={jobs.length > 0 ? String(jobTotal) : hours}
-              disabled={jobs.length > 0}
-              onChange={(e) => setHours(e.target.value)}
-            />
+            <label>Hours worked <span style={{ color: "var(--danger)" }}>*</span></label>
+            <input type="number" value={jobTotal || ""} placeholder="0" disabled readOnly />
+            <span className="muted" style={{ fontSize: "0.78rem" }}>
+              Total from the requirements below — add one to set hours.
+            </span>
           </div>
         </div>
 
@@ -114,6 +111,7 @@ export default function MyTimesheetTab() {
           loading={openJobsQ.isLoading}
           error={openJobsQ.error ? friendlyError(openJobsQ.error) : null}
           onChange={setJobs}
+          required
         />
         <div className="field">
           <label>Notes (optional)</label>
@@ -130,9 +128,17 @@ export default function MyTimesheetTab() {
             You already logged {selected.hours}h for this date — saving will update it.
           </p>
         )}
-        <button className="btn" onClick={submit} disabled={saving || (jobs.length === 0 && !hours) || jobsIncomplete}>
+        {jobsIncomplete && (
+          <p style={{ fontSize: "0.82rem", color: "var(--danger)" }}>
+            Enter hours for every requirement you added, or remove the ones you haven&#39;t.
+          </p>
+        )}
+        <button className="btn" onClick={submit} disabled={saving || !canSave}>
           {saving ? <span className="spinner" /> : "Save"}
         </button>
+        <p className="muted" style={{ fontSize: "0.78rem", marginTop: "0.5rem", marginBottom: 0 }}>
+          Date, hours and at least one requirement worked on are all required.
+        </p>
       </div>
 
       {missingDays.length > 0 && (
