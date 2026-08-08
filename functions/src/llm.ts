@@ -390,7 +390,7 @@ export async function assessPortfolio(
 // rather than imported because functions/ is a separate TS project.
 const ASK_CATALOG_PROMPT = [
   "- submissions: one row per candidate submission event (a profile sent for a requirement, at its current status).",
-  "  columns: applicantName (string), jobCode (string), jobTitle (string), client (string), recruiter (string), status (string), submittedOn (date), statusChangedOn (date), accountManager (string)",
+  "  columns: applicantName (string, the CANDIDATE who was submitted -- not a staff member), jobCode (string), jobTitle (string), client (string), recruiter (string, the STAFF MEMBER who made the submission), status (string), submittedOn (date), statusChangedOn (date), accountManager (string)",
   "  date field: submittedOn",
   "- requirements: one row per job requirement/posting.",
   "  columns: jobCode (string), jobTitle (string), client (string), status (enum: Active/On Hold/Hold by Client/Closed/Draft/Filled), jobCreatedOn (date), submissionsCount (number), recruitmentManager (string), assignedTo (string), payRate (string), experience (string), mandateSkills (string)",
@@ -434,6 +434,17 @@ const ASK_PLAN_SYS = [
   'Interpret relative dates ("this month", "last week", "this year") against the date this request was made.',
   "Pick the table whose description best matches the question. If the question asks for something no table",
   "supports, pick the closest table anyway and leave out filters/groupBy that do not apply -- never refuse.",
+  "",
+  "A person's name in the question is almost always a RECRUITER (a staff member), not a candidate --",
+  'phrasings like "submissions by <name>", "how many submissions did <name> do/make", "<name>\'s submissions",',
+  '"<name>\'s index/performance" all filter on the `recruiter` field. Only use `applicantName` /',
+  '`candidateName` when the question is explicitly about a candidate or applicant profile (e.g. "candidate',
+  'John Doe", "the profile for <name>", "resume assessment for <name>"). When unsure, prefer `recruiter`.',
+  "",
+  'Prefer op "contains" over "eq" for any filter on a name (recruiter, applicantName, candidateName, client) --',
+  "names in the data may include middle initials, suffixes or different spacing than the question uses, and",
+  '"contains" still matches. Only use "eq" when the question supplies a value you are confident is the exact,',
+  "complete stored value (e.g. a status or an enum from the catalog above).",
   "Output the JSON object and nothing else.",
 ].join("\n");
 
