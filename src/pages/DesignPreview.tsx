@@ -290,7 +290,7 @@ function demoAskRows(): Row[] {
   }));
 }
 
-// The page furniture around the cards. Mirrors AskAnything.tsx's markup so the
+// The page furniture around the cards. Mirrors Home.tsx's markup so the
 // ask bar, prompt chips and saved-query list can be checked without signing in
 // (the real page is behind the login gate and an admin/manager role).
 function AskChromeDemo() {

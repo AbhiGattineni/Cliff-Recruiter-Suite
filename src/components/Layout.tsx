@@ -3,10 +3,10 @@ import { NavLink, Outlet, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { isPlaceholderConfig } from "../firebase";
 import LanguageSwitcher from "./LanguageSwitcher";
+import DebugLogPanel from "./DebugLogPanel";
 
 const NAV = [
   { to: "/", end: true, icon: "🏠", label: "Dashboard" },
-  { to: "/ask", icon: "🔎", label: "Ask Anything" },
   { to: "/resume", icon: "📄", label: "Resume Parsing" },
   { to: "/resume-reports", icon: "🗂️", label: "Resume Reports" },
   { to: "/reports", icon: "📊", label: "Report Generation" },
@@ -111,6 +111,7 @@ export default function Layout() {
         </div>
       </div>
       <LanguageSwitcher />
+      <DebugLogPanel />
     </div>
   );
 }

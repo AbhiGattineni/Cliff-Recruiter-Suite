@@ -172,7 +172,7 @@ export default function AskCard({
       {/* Summary — grounded on the computed numbers, phrased in the app's current
           language (the floating switcher in the corner, not a per-card control —
           switching it re-narrates every card that doesn't already have that
-          language cached; see AskAnything.tsx). */}
+          language cached; see Home.tsx). */}
       <div className="ask-summary">
         {narrativeLoading ? (
           <p className="muted" style={{ display: "flex", alignItems: "center", gap: "0.5rem", margin: 0 }}>

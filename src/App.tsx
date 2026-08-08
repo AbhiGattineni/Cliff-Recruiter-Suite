@@ -14,7 +14,6 @@ import ClientTracker from "./pages/ClientTracker";
 import CandidatePool from "./pages/CandidatePool";
 import Preferences from "./pages/Preferences";
 import Timesheets from "./pages/Timesheets";
-import AskAnything from "./pages/AskAnything";
 import DesignPreview from "./pages/DesignPreview";
 
 export default function App() {
@@ -42,7 +41,6 @@ export default function App() {
         }
       >
         <Route path="/" element={<Home />} />
-        <Route path="/ask" element={<AskAnything />} />
         <Route path="/resume" element={<ResumeParsing />} />
         <Route path="/resume-reports" element={<ResumeReports />} />
         <Route path="/reports" element={<ReportGeneration />} />
