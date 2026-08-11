@@ -6,9 +6,38 @@
 // normalised name. Anyone whose app display name differs from their Ceipal
 // name simply shows no hours rather than being attributed to the wrong person.
 
+import { DateTime } from "luxon";
 import { TimesheetEntry } from "./timesheets";
 
 export const nameKey = (s: string) => String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+
+/** Every ISO date from `from` to `to`, inclusive. Shared so "missing days" means the same thing everywhere it's shown. */
+export function daysBetween(from: string, to: string): string[] {
+  const out: string[] = [];
+  let d = DateTime.fromISO(from);
+  const end = DateTime.fromISO(to);
+  while (d.isValid && end.isValid && d <= end) {
+    out.push(d.toFormat("yyyy-MM-dd"));
+    d = d.plus({ days: 1 });
+  }
+  return out;
+}
+
+/**
+ * Days in [from, to] (up to `today`) with no timesheet entry and no approved
+ * leave — the one definition of "unfilled" used both in the Team Dashboard
+ * and a recruiter's own card, so the two places agree.
+ */
+export function missingDays(
+  from: string,
+  to: string,
+  today: string,
+  filledDates: Set<string>,
+  approvedLeaveDates: Set<string>
+): string[] {
+  if (!from || !to) return [];
+  return daysBetween(from, to).filter((d) => d <= today && !filledDates.has(d) && !approvedLeaveDates.has(d));
+}
 
 export interface JobEffort {
   jobCode: string;

@@ -6,6 +6,8 @@ import {
   effortWithoutOutput,
   subsPerHour,
   filterByDate,
+  daysBetween,
+  missingDays,
 } from "./timesheetStats";
 import { TimesheetEntry } from "./timesheets";
 
@@ -101,6 +103,35 @@ describe("subsPerHour", () => {
   });
   it("is null with no hours, rather than dividing by zero", () => {
     expect(subsPerHour(3, 0)).toBeNull();
+  });
+});
+
+describe("daysBetween / missingDays", () => {
+  it("lists every ISO date in range, inclusive of both ends", () => {
+    expect(daysBetween("2026-08-01", "2026-08-03")).toEqual(["2026-08-01", "2026-08-02", "2026-08-03"]);
+  });
+
+  it("flags a day with no entry and no leave as missing", () => {
+    const filled = new Set(["2026-08-01", "2026-08-03"]);
+    const leave = new Set<string>();
+    expect(missingDays("2026-08-01", "2026-08-03", "2026-08-03", filled, leave)).toEqual(["2026-08-02"]);
+  });
+
+  it("does not flag an approved-leave day as missing", () => {
+    const filled = new Set(["2026-08-01"]);
+    const leave = new Set(["2026-08-02"]);
+    expect(missingDays("2026-08-01", "2026-08-03", "2026-08-03", filled, leave)).toEqual(["2026-08-03"]);
+  });
+
+  it("does not flag a future day (after `today`) as missing", () => {
+    const filled = new Set<string>();
+    const leave = new Set<string>();
+    expect(missingDays("2026-08-01", "2026-08-05", "2026-08-02", filled, leave)).toEqual(["2026-08-01", "2026-08-02"]);
+  });
+
+  it("returns nothing when the range is unbounded", () => {
+    expect(missingDays("", "2026-08-05", "2026-08-05", new Set(), new Set())).toEqual([]);
+    expect(missingDays("2026-08-01", "", "2026-08-05", new Set(), new Set())).toEqual([]);
   });
 });
 

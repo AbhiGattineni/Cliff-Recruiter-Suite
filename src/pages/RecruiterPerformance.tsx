@@ -25,7 +25,7 @@ import PieChart from "../components/PieChart";
 import Modal from "../components/Modal";
 import Pagination, { usePagination } from "../components/Pagination";
 import ActiveJobsCard from "../components/ActiveJobsCard";
-import { listTeamTimesheets, listMyTimesheets, TimesheetEntry } from "../lib/timesheets";
+import { listTeamTimesheets, listMyTimesheets, listLeaveRequests, listMyLeaves, TimesheetEntry, LeaveRequest } from "../lib/timesheets";
 import {
   buildEffortIndex,
   effortFor,
@@ -33,6 +33,8 @@ import {
   effortWithoutOutput,
   subsPerHour,
   nameKey,
+  daysBetween,
+  missingDays,
   EffortIndex,
   PersonEffort,
 } from "../lib/timesheetStats";
@@ -178,6 +180,21 @@ export default function RecruiterPerformance() {
   });
   const timesheetEntries = useMemo(() => effortQ.data ?? [], [effortQ.data]);
   const effort: EffortIndex = useMemo(() => buildEffortIndex(timesheetEntries), [timesheetEntries]);
+
+  // Approved leave, scoped the same way — needed so a day off doesn't count
+  // as a missed timesheet in the "Missing days" section below.
+  const leavesQ = useQuery({
+    queryKey: ["recruiterPerfLeaves", canSeeTeamHours, profile?.role, user?.uid],
+    queryFn: async (): Promise<LeaveRequest[]> => {
+      if (canSeeTeamHours && profile) return listLeaveRequests(profile.role);
+      if (!user) return [];
+      return listMyLeaves(user.uid);
+    },
+    enabled: !!user,
+    retry: false,
+  });
+  const leaves = useMemo(() => leavesQ.data ?? [], [leavesQ.data]);
+  const today = DateTime.local().toFormat("yyyy-MM-dd");
 
   const { stats: allStats, statuses } = useMemo(
     () =>
@@ -423,6 +440,8 @@ export default function RecruiterPerformance() {
                 onLoadActivity={loadActivity}
                 effort={effort}
                 timesheetEntries={timesheetEntries}
+                leaves={leaves}
+                today={today}
                 canSeeTimesheetDetail={canSeeTeamHours || nameKey(picked.name) === myNameKey}
               />
             )}
@@ -453,6 +472,8 @@ function RecruiterModal({
   onLoadActivity,
   effort,
   timesheetEntries,
+  leaves,
+  today,
   canSeeTimesheetDetail,
 }: {
   stat: RecruiterStat;
@@ -468,6 +489,9 @@ function RecruiterModal({
   effort: EffortIndex;
   /** Whatever timesheet entries the page fetched — everyone's for an admin/manager, only the viewer's own otherwise. */
   timesheetEntries: TimesheetEntry[];
+  /** Same scoping as timesheetEntries — needed so an approved day off doesn't count as a missed timesheet. */
+  leaves: LeaveRequest[];
+  today: string;
   /** True for admin/manager (any recruiter), or an employee looking at their own card. */
   canSeeTimesheetDetail: boolean;
 }) {
@@ -484,6 +508,15 @@ function RecruiterModal({
         .sort((a, b) => b.date.localeCompare(a.date)),
     [timesheetEntries, stat.name]
   );
+  const myMissingDays = useMemo(() => {
+    if (!from || !to) return []; // "missing" is undefined over an unbounded range
+    const filledDates = new Set(myEntries.map((e) => e.date));
+    const leaveDates = new Set<string>();
+    leaves
+      .filter((l) => l.status === "approved" && nameKey(l.displayName || l.email) === nameKey(stat.name))
+      .forEach((l) => daysBetween(l.startDate, l.endDate).forEach((d) => leaveDates.add(d)));
+    return missingDays(from, to, today, filledDates, leaveDates);
+  }, [myEntries, leaves, stat.name, from, to, today]);
   // Requirements with hours logged but nothing sent to a client in this period.
   const noOutput = useMemo(() => {
     const subsByCode = new Map<string, number>();
@@ -580,6 +613,20 @@ function RecruiterModal({
           <h3 style={{ margin: "0 0 0.4rem" }}>
             Timesheet entries{myEntries.length > 0 ? ` (${myEntries.length})` : ""}
           </h3>
+          {!from || !to ? (
+            <p className="muted" style={{ fontSize: "0.82rem", marginTop: "-0.2rem" }}>
+              Set a date range above to see missing days.
+            </p>
+          ) : myMissingDays.length > 0 ? (
+            <div style={{ marginBottom: "0.6rem" }}>
+              <strong style={{ fontSize: "0.82rem" }}>Missing:</strong>{" "}
+              {myMissingDays.map((d) => (
+                <span className="pill red" key={d} style={{ marginRight: "0.3rem" }}>{d}</span>
+              ))}
+            </div>
+          ) : (
+            <span className="pill green" style={{ marginBottom: "0.6rem", display: "inline-block" }}>All caught up</span>
+          )}
           {myEntries.length === 0 ? (
             <p className="muted" style={{ fontSize: "0.85rem", margin: 0 }}>No timesheet entries in this range.</p>
           ) : (
