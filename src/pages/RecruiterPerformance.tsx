@@ -25,17 +25,19 @@ import PieChart from "../components/PieChart";
 import Modal from "../components/Modal";
 import Pagination, { usePagination } from "../components/Pagination";
 import ActiveJobsCard from "../components/ActiveJobsCard";
-import { listTeamTimesheets } from "../lib/timesheets";
+import { listTeamTimesheets, listMyTimesheets, TimesheetEntry } from "../lib/timesheets";
 import {
   buildEffortIndex,
   effortFor,
   hoursOnJob,
   effortWithoutOutput,
   subsPerHour,
+  nameKey,
   EffortIndex,
   PersonEffort,
 } from "../lib/timesheetStats";
 import IndexGuide from "../components/IndexGuide";
+import { useAuth } from "../context/AuthContext";
 
 const fmtDt = (d: DateTime | null) => (d ? d.toFormat("MM/dd/yyyy hh:mm a") : "—");
 
@@ -86,6 +88,12 @@ export default function RecruiterPerformance() {
   const [submittedFrom, setSubmittedFrom] = useState("");
   const [submittedTo, setSubmittedTo] = useState("");
   const { lang } = useLang();
+  const { user, profile } = useAuth();
+  // Everyone's timesheets, or just your own — decided below by role, and
+  // enforced server-side by firestore.rules either way (an employee's query
+  // is uid-scoped, so their browser never receives anyone else's entries).
+  const canSeeTeamHours = profile?.role === "admin" || profile?.role === "manager";
+  const myNameKey = nameKey(profile?.displayName || profile?.email || user?.displayName || user?.email || "");
   // Weekly activity (job-board / pipeline / mail-merge counts) — loaded on demand,
   // held in memory for the session and reused across recruiters (nothing stored).
   const [activity, setActivity] = useState<{ from: string; to: string; data: RecruiterActivity } | null>(null);
@@ -153,17 +161,23 @@ export default function RecruiterPerformance() {
     );
   }, [subs, submittedFrom, submittedTo]);
 
-  // Logged hours for the same window. Readable by admins/managers only (see
-  // firestore.rules), so a plain employee just sees no hours rather than an error.
+  // Logged hours for the same window. Admins/managers get everyone's; an
+  // employee gets only their own (listMyTimesheets is uid-scoped, matching
+  // the firestore.rules condition exactly) — so their row on the leaderboard
+  // fills in normally while every other recruiter's Hours cell stays blank,
+  // same as it always has.
   const effortQ = useQuery({
-    queryKey: ["teamTimesheets", submittedFrom, submittedTo],
-    queryFn: () => listTeamTimesheets(submittedFrom, submittedTo),
+    queryKey: ["recruiterPerfTimesheets", submittedFrom, submittedTo, canSeeTeamHours, user?.uid],
+    queryFn: async (): Promise<TimesheetEntry[]> => {
+      if (canSeeTeamHours) return (await listTeamTimesheets(submittedFrom, submittedTo)).entries;
+      if (!user) return [];
+      return listMyTimesheets(user.uid, submittedFrom, submittedTo);
+    },
+    enabled: !!user,
     retry: false,
   });
-  const effort: EffortIndex = useMemo(
-    () => buildEffortIndex(effortQ.data?.entries ?? []),
-    [effortQ.data]
-  );
+  const timesheetEntries = useMemo(() => effortQ.data ?? [], [effortQ.data]);
+  const effort: EffortIndex = useMemo(() => buildEffortIndex(timesheetEntries), [timesheetEntries]);
 
   const { stats: allStats, statuses } = useMemo(
     () =>
@@ -408,6 +422,8 @@ export default function RecruiterPerformance() {
                 activityError={activityError}
                 onLoadActivity={loadActivity}
                 effort={effort}
+                timesheetEntries={timesheetEntries}
+                canSeeTimesheetDetail={canSeeTeamHours || nameKey(picked.name) === myNameKey}
               />
             )}
           </Modal>
@@ -436,6 +452,8 @@ function RecruiterModal({
   activityError,
   onLoadActivity,
   effort,
+  timesheetEntries,
+  canSeeTimesheetDetail,
 }: {
   stat: RecruiterStat;
   statuses: StatusMeta[];
@@ -448,6 +466,10 @@ function RecruiterModal({
   activityError: string | null;
   onLoadActivity: () => void;
   effort: EffortIndex;
+  /** Whatever timesheet entries the page fetched — everyone's for an admin/manager, only the viewer's own otherwise. */
+  timesheetEntries: TimesheetEntry[];
+  /** True for admin/manager (any recruiter), or an employee looking at their own card. */
+  canSeeTimesheetDetail: boolean;
 }) {
   const present = statuses.filter((st) => (stat.counts[st.label] ?? 0) > 0);
   const pieData = present.map((st) => ({ label: st.label, value: stat.counts[st.label], color: st.color }));
@@ -455,6 +477,13 @@ function RecruiterModal({
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const jobs = stat.jobGroups;
   const myEffort: PersonEffort | null = effortFor(effort, stat.name);
+  const myEntries = useMemo(
+    () =>
+      timesheetEntries
+        .filter((e) => nameKey(e.displayName || e.email) === nameKey(stat.name))
+        .sort((a, b) => b.date.localeCompare(a.date)),
+    [timesheetEntries, stat.name]
+  );
   // Requirements with hours logged but nothing sent to a client in this period.
   const noOutput = useMemo(() => {
     const subsByCode = new Map<string, number>();
@@ -542,6 +571,46 @@ function RecruiterModal({
           {Math.round((myEffort.totalHours - myEffort.attributedHours) * 100) / 100}h of the{" "}
           {myEffort.totalHours}h logged wasn&#39;t booked to a requirement.
         </p>
+      )}
+
+      {/* Itemized timesheet entries — an employee only ever gets their own card
+          here (see canSeeTimesheetDetail); an admin/manager sees any recruiter's. */}
+      {canSeeTimesheetDetail && (
+        <div style={{ marginBottom: "1.5rem" }}>
+          <h3 style={{ margin: "0 0 0.4rem" }}>
+            Timesheet entries{myEntries.length > 0 ? ` (${myEntries.length})` : ""}
+          </h3>
+          {myEntries.length === 0 ? (
+            <p className="muted" style={{ fontSize: "0.85rem", margin: 0 }}>No timesheet entries in this range.</p>
+          ) : (
+            <div className="table-wrap" style={{ maxHeight: "30vh" }}>
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th style={{ textAlign: "right" }}>Hours</th>
+                    <th>Requirement(s)</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {myEntries.map((e) => (
+                    <tr key={e.id}>
+                      <td style={{ whiteSpace: "nowrap" }}>{e.date}</td>
+                      <td style={{ textAlign: "right", fontWeight: 600 }}>{e.hours}h</td>
+                      <td style={{ whiteSpace: "normal" }}>
+                        {e.jobs.length
+                          ? e.jobs.map((j) => `${j.jobCode}${j.jobTitle ? ` · ${j.jobTitle}` : ""} (${j.hours}h)`).join(", ")
+                          : "—"}
+                      </td>
+                      <td style={{ whiteSpace: "normal" }} className="muted">{e.workedOn || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Weekly activity — the numbers tracked from Ceipal (+ coming-soon sources) */}
