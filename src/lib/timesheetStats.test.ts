@@ -124,14 +124,23 @@ describe("daysBetween / missingDays", () => {
   });
 
   it("does not flag a future day (after `today`) as missing", () => {
+    // 2026-08-01 is a Saturday, so it's excluded on its own merits too —
+    // use a Monday start so this test isolates only the future-day rule.
     const filled = new Set<string>();
     const leave = new Set<string>();
-    expect(missingDays("2026-08-01", "2026-08-05", "2026-08-02", filled, leave)).toEqual(["2026-08-01", "2026-08-02"]);
+    expect(missingDays("2026-08-03", "2026-08-07", "2026-08-04", filled, leave)).toEqual(["2026-08-03", "2026-08-04"]);
   });
 
   it("returns nothing when the range is unbounded", () => {
     expect(missingDays("", "2026-08-05", "2026-08-05", new Set(), new Set())).toEqual([]);
     expect(missingDays("2026-08-01", "", "2026-08-05", new Set(), new Set())).toEqual([]);
+  });
+
+  it("never flags a Saturday as missing, even unfilled with no leave", () => {
+    // 2026-08-01 is a Saturday.
+    const filled = new Set<string>();
+    const leave = new Set<string>();
+    expect(missingDays("2026-08-01", "2026-08-02", "2026-08-02", filled, leave)).toEqual(["2026-08-02"]);
   });
 });
 

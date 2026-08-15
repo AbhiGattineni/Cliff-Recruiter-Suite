@@ -27,6 +27,9 @@ export function daysBetween(from: string, to: string): string[] {
  * Days in [from, to] (up to `today`) with no timesheet entry and no approved
  * leave — the one definition of "unfilled" used both in the Team Dashboard
  * and a recruiter's own card, so the two places agree.
+ *
+ * Saturdays are never "missing" — nobody's expected to log hours on one, so
+ * an empty Saturday isn't flagged red.
  */
 export function missingDays(
   from: string,
@@ -36,7 +39,9 @@ export function missingDays(
   approvedLeaveDates: Set<string>
 ): string[] {
   if (!from || !to) return [];
-  return daysBetween(from, to).filter((d) => d <= today && !filledDates.has(d) && !approvedLeaveDates.has(d));
+  return daysBetween(from, to).filter(
+    (d) => d <= today && DateTime.fromISO(d).weekday !== 6 && !filledDates.has(d) && !approvedLeaveDates.has(d)
+  );
 }
 
 export interface JobEffort {
