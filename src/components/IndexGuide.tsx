@@ -88,25 +88,35 @@ export default function IndexGuide({ stat }: { stat?: RecruiterStat }) {
                     <th style={{ textAlign: "right" }}>{t.col.weight}</th>
                     <th style={{ textAlign: "right" }}>{t.col.achieved}</th>
                     <th style={{ textAlign: "right" }}>{t.col.points}</th>
+                    <th style={{ textAlign: "right" }}>{t.col.cumulative}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {t.metrics.map((m) => {
-                    const weight = WEIGHT_OF[m.key] ?? 0;
-                    const v = stat.indexParts[m.key];
-                    return (
-                      <tr key={m.key}>
-                        <td style={{ whiteSpace: "normal" }}>{m.name}</td>
-                        <td style={{ textAlign: "right" }}>{pct(weight)}</td>
-                        <td style={{ textAlign: "right" }}>{pct(v)}</td>
-                        <td style={{ textAlign: "right", fontWeight: 600 }}>{Math.round(weight * v * 100)}</td>
-                      </tr>
-                    );
-                  })}
+                  {(() => {
+                    let running = 0;
+                    return t.metrics.map((m) => {
+                      const weight = WEIGHT_OF[m.key] ?? 0;
+                      const v = stat.indexParts[m.key];
+                      // This metric's own points, added on top of every metric above it —
+                      // the running total lands on stat.index by the last row, so it's
+                      // visible exactly how the five pieces add up to the final score.
+                      const points = Math.round(weight * v * 100);
+                      running += points;
+                      return (
+                        <tr key={m.key}>
+                          <td style={{ whiteSpace: "normal" }}>{m.name}</td>
+                          <td style={{ textAlign: "right" }}>{pct(weight)}</td>
+                          <td style={{ textAlign: "right" }}>{pct(v)}</td>
+                          <td style={{ textAlign: "right", fontWeight: 600 }}>{points}</td>
+                          <td style={{ textAlign: "right" }}>{running}</td>
+                        </tr>
+                      );
+                    });
+                  })()}
                 </tbody>
                 <tfoot>
                   <tr>
-                    <td colSpan={3} style={{ textAlign: "right", fontWeight: 700 }}>{t.col.total}</td>
+                    <td colSpan={4} style={{ textAlign: "right", fontWeight: 700 }}>{t.col.total}</td>
                     <td style={{ textAlign: "right", fontWeight: 700 }}>{stat.index}</td>
                   </tr>
                 </tfoot>

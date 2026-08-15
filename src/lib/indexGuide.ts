@@ -30,7 +30,7 @@ export interface GuideText {
   rangeNote: string;
   clientNote: string;
   tableTitle: string;
-  col: { metric: string; weight: string; achieved: string; points: string; total: string };
+  col: { metric: string; weight: string; achieved: string; points: string; cumulative: string; total: string };
   /** The requirement base behind the target, localised. */
   basis: (n: number, kind: "assigned" | "worked") => string;
   yourLine: (got: number, target: number, basis: string) => string;
@@ -93,7 +93,14 @@ export const GUIDE: Record<Lang, GuideText> = {
     clientNote:
       "A candidate counts as having reached the client when their status is a client or vendor submission, a client interview, an offer, or a placement.",
     tableTitle: "Your points, metric by metric",
-    col: { metric: "What is measured", weight: "Worth", achieved: "You got", points: "Points", total: "Your index" },
+    col: {
+      metric: "What is measured",
+      weight: "Worth",
+      achieved: "You got",
+      points: "Points",
+      cumulative: "Running total",
+      total: "Your index",
+    },
     basis: (n, kind) =>
       kind === "assigned"
         ? `${n} requirement${n === 1 ? "" : "s"} assigned to you`
@@ -156,7 +163,14 @@ export const GUIDE: Record<Lang, GuideText> = {
     clientNote:
       "candidate status 'Client / Vendor Submission', 'Client Interview', 'Offer', లేదా 'Placement' అయితే — ఆ candidate client దాకా వెళ్ళినట్టు లెక్క.",
     tableTitle: "మీ మార్కులు, ఒక్కొక్కటిగా",
-    col: { metric: "దేని మీద లెక్క", weight: "విలువ", achieved: "మీకు వచ్చింది", points: "మార్కులు", total: "మీ index" },
+    col: {
+      metric: "దేని మీద లెక్క",
+      weight: "విలువ",
+      achieved: "మీకు వచ్చింది",
+      points: "మార్కులు",
+      cumulative: "కూడిక మొత్తం",
+      total: "మీ index",
+    },
     basis: (n, kind) =>
       kind === "assigned" ? `మీకు ఇచ్చిన ${n} requirements` : `ఈ కాలంలో మీరు పని చేసిన ${n} requirements`,
     yourLine: (got, target, basis) =>
@@ -217,7 +231,14 @@ export const GUIDE: Record<Lang, GuideText> = {
     clientNote:
       "जब candidate का status 'Client / Vendor Submission', 'Client Interview', 'Offer', या 'Placement' हो — तब माना जाता है कि वह client तक पहुँच गया।",
     tableTitle: "आपके अंक, एक-एक करके",
-    col: { metric: "किस चीज़ की गिनती", weight: "कीमत", achieved: "आपको मिला", points: "अंक", total: "आपका index" },
+    col: {
+      metric: "किस चीज़ की गिनती",
+      weight: "कीमत",
+      achieved: "आपको मिला",
+      points: "अंक",
+      cumulative: "जोड़ का कुल",
+      total: "आपका index",
+    },
     basis: (n, kind) =>
       kind === "assigned" ? `आपको दी गई ${n} requirements` : `इस अवधि में आपने जिन ${n} requirements पर काम किया`,
     yourLine: (got, target, basis) =>

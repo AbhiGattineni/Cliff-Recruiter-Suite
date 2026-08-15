@@ -28,8 +28,8 @@ export function daysBetween(from: string, to: string): string[] {
  * leave — the one definition of "unfilled" used both in the Team Dashboard
  * and a recruiter's own card, so the two places agree.
  *
- * Saturdays are never "missing" — nobody's expected to log hours on one, so
- * an empty Saturday isn't flagged red.
+ * Weekends are never "missing" — nobody's expected to log hours on a
+ * Saturday or Sunday, so an empty one isn't flagged red.
  */
 export function missingDays(
   from: string,
@@ -39,9 +39,11 @@ export function missingDays(
   approvedLeaveDates: Set<string>
 ): string[] {
   if (!from || !to) return [];
-  return daysBetween(from, to).filter(
-    (d) => d <= today && DateTime.fromISO(d).weekday !== 6 && !filledDates.has(d) && !approvedLeaveDates.has(d)
-  );
+  return daysBetween(from, to).filter((d) => {
+    if (d > today || filledDates.has(d) || approvedLeaveDates.has(d)) return false;
+    const weekday = DateTime.fromISO(d).weekday; // Luxon: 1=Monday ... 6=Saturday, 7=Sunday
+    return weekday !== 6 && weekday !== 7;
+  });
 }
 
 export interface JobEffort {
