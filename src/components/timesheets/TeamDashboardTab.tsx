@@ -47,7 +47,10 @@ export default function TeamDashboardTab({ role }: { role: Role }) {
     if (!tsQ.data) return [];
     const { entries, users } = tsQ.data;
     const approvedLeaves = (leavesQ.data ?? []).filter((l) => l.status === "approved");
+    // Admins aren't tracked here — they're not expected to log hours, so they
+    // shouldn't show up as a name with missing days.
     return users
+      .filter((u) => u.role !== "admin")
       .map((u) => {
         const myEntries = entries.filter((e) => e.uid === u.uid).sort((a, b) => b.date.localeCompare(a.date));
         const filledDates = new Set(myEntries.map((e) => e.date));
