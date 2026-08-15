@@ -67,14 +67,15 @@ const indexBreakdown = (s: RecruiterStat, lang: Lang) => {
   const t = GUIDE[lang];
   const rows = t.metrics
     .map((m) => {
-      const weight = INDEX_WEIGHTS[m.key];
-      const achieved = s.indexParts[m.key];
-      return { name: m.name, achieved: Math.round(achieved * 100), points: Math.round(weight * achieved * 100) };
+      const weight = Math.round(INDEX_WEIGHTS[m.key] * 100); // this metric's worth, as % of the overall 100
+      const achieved = Math.round(s.indexParts[m.key] * 100); // % of that worth this recruiter actually hit
+      const points = Math.round(INDEX_WEIGHTS[m.key] * s.indexParts[m.key] * 100); // = % of the overall 100, since the total is 100
+      return { name: m.name, weight, achieved, points };
     })
     .sort((a, b) => a.points - b.points);
   return [
     `Performance Index: ${s.index}/100 (lowest-scoring first)`,
-    ...rows.map((r) => `${r.name}: ${r.achieved}% achieved → ${r.points} pts`),
+    ...rows.map((r) => `${r.name}: ${r.weight}%/${r.achieved}% → ${r.points}% of overall 100`),
     "Click the row for the full breakdown and how to improve it.",
   ].join("\n");
 };
