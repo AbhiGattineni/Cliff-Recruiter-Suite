@@ -15,6 +15,7 @@ import {
   StatusMeta,
   SortKey,
   INDEX_WEIGHTS,
+  TARGET_PER_ASSIGNED,
 } from "../lib/recruiterStats";
 import { getRecruiterActivity, RecruiterActivity, ActivityCounts, activityNameKey } from "../lib/recruiterActivity";
 import { extensionFor } from "../lib/extensions";
@@ -55,6 +56,30 @@ const pct = (n: number) => `${Math.round(n * 100)}%`;
 const medal = ["🥇", "🥈", "🥉"];
 const indexPill = (v: number) => (v >= 60 ? "green" : v >= 35 ? "amber" : "red");
 
+// The five index components as leaderboard columns, in weight order. Short
+// headers because they sit next to nine other columns; the full localised name,
+// the weight and the plain-English rule ride along in the cell's title. Keys
+// match INDEX_WEIGHTS / RecruiterStat.indexParts and GUIDE[lang].metrics.
+const INDEX_COLS: { key: keyof typeof INDEX_WEIGHTS; short: string }[] = [
+  { key: "clientPerAssigned", short: "Target" },
+  { key: "clientRate", short: "Client rate" },
+  { key: "progressRate", short: "Interview+" },
+  { key: "volume", short: "Volume" },
+  { key: "coverage", short: "Coverage" },
+];
+
+/** Points earned on one metric, and how close to its ceiling that is. */
+const partPoints = (s: RecruiterStat, key: keyof typeof INDEX_WEIGHTS) => {
+  const achieved = s.indexParts[key]; // 0–1
+  const max = INDEX_WEIGHTS[key] * 100;
+  return { achieved, max, points: achieved * max };
+};
+
+// Same thresholds as the Index pill, applied to how much of the metric's own
+// ceiling was reached — so a weak area reads red even when its weight is small.
+const partColor = (achieved: number) =>
+  achieved >= 0.6 ? "#1e7e34" : achieved >= 0.35 ? "#a9700a" : "var(--danger)";
+
 const targetBasis = (s: RecruiterStat) =>
   s.targetBasis === "assigned"
     ? `${s.targetBaseCount} assigned requirement${s.targetBaseCount === 1 ? "" : "s"}`
@@ -88,6 +113,10 @@ export default function RecruiterPerformance() {
   const [fetchInfo, setFetchInfo] = useState<string | null>(null);
   const [selected, setSelected] = useState<string>(""); // "" = all recruiters
   const [sortKey, setSortKey] = useState<SortKey>("index");
+  // The five index components as columns. On by default — the point is that
+  // everyone can see which part of the work is carrying the score and which
+  // part is dragging it — but the table is wide, so it can be folded away.
+  const [showParts, setShowParts] = useState(true);
   const [submittedFrom, setSubmittedFrom] = useState("");
   const [submittedTo, setSubmittedTo] = useState("");
   const { lang } = useLang();
@@ -313,6 +342,18 @@ export default function RecruiterPerformance() {
                   ))}
                 </select>
               </div>
+              <label
+                style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", fontWeight: 600, margin: 0, whiteSpace: "nowrap" }}
+                title="Show what each recruiter scored on the five parts of the Performance Index"
+              >
+                <input
+                  type="checkbox"
+                  checked={showParts}
+                  onChange={(e) => setShowParts(e.target.checked)}
+                  style={{ width: "auto" }}
+                />
+                Index breakdown
+              </label>
               <div style={{ flex: 1 }} />
               <StageLegend statuses={statuses} />
             </div>
@@ -366,6 +407,20 @@ export default function RecruiterPerformance() {
                         <th style={{ textAlign: "right" }}>Client/Vendor</th>
                         <th style={{ textAlign: "right" }} title="Hours logged on timesheets in this range">Hours</th>
                         <th style={{ textAlign: "right" }} title="Client/vendor submissions per hour logged">Per hour</th>
+                        {showParts &&
+                          INDEX_COLS.map((c, i) => {
+                            const m = GUIDE[lang].metrics[i];
+                            return (
+                              <th
+                                key={c.key}
+                                style={{ textAlign: "right", whiteSpace: "nowrap" }}
+                                title={`${m.name} — worth ${Math.round(INDEX_WEIGHTS[c.key] * 100)} of the 100 index points.\n\n${m.plain}`}
+                              >
+                                {c.short}
+                                <span className="muted" style={{ fontWeight: 400 }}> /{Math.round(INDEX_WEIGHTS[c.key] * 100)}</span>
+                              </th>
+                            );
+                          })}
                         <th style={{ textAlign: "right" }}>Index</th>
                       </tr>
                     </thead>
@@ -398,6 +453,23 @@ export default function RecruiterPerformance() {
                                 </>
                               );
                             })()}
+                            {showParts &&
+                              INDEX_COLS.map((c, i) => {
+                                const { achieved, max, points } = partPoints(s, c.key);
+                                const m = GUIDE[lang].metrics[i];
+                                return (
+                                  <td
+                                    key={c.key}
+                                    style={{ textAlign: "right", whiteSpace: "nowrap", cursor: "help" }}
+                                    title={`${m.name}\n${points.toFixed(1)} of ${max} points — ${pct(achieved)} of what this metric can give.\n\n${m.example}`}
+                                  >
+                                    <span style={{ fontWeight: 600, color: partColor(achieved) }}>
+                                      {points.toFixed(1)}
+                                    </span>
+                                    <span className="muted" style={{ fontSize: "0.75rem" }}> /{max}</span>
+                                  </td>
+                                );
+                              })}
                             <td style={{ textAlign: "right" }}>
                               <span
                                 className={`pill ${indexPill(s.index)}`}
@@ -414,6 +486,17 @@ export default function RecruiterPerformance() {
                   </table>
                 </div>
                 <Pagination page={board.page} pageCount={board.pageCount} total={board.total} pageSize={board.pageSize} onPage={board.setPage} onPageSize={board.setPageSize} />
+                {showParts && (
+                  <p className="muted" style={{ margin: "0.5rem 0 0", fontSize: "0.82rem", lineHeight: 1.6 }}>
+                    <strong>Target /45</strong> client/vendor submissions against {TARGET_PER_ASSIGNED} per requirement ·{" "}
+                    <strong>Client rate /20</strong> share of profiles that reached the client ·{" "}
+                    <strong>Interview+ /15</strong> share that reached an interview or beyond ·{" "}
+                    <strong>Volume /12</strong> and <strong>Coverage /8</strong> profiles and requirements, against the
+                    busiest recruiter. Each cell is the points earned out of that metric&#39;s maximum, and the five add
+                    up to the Index. Green ≥ 60% of what the metric can give, red under 35%. Hover any cell for the rule
+                    behind it, or click a row for the full guide.
+                  </p>
+                )}
 
                 <IndexGuide />
               </div>

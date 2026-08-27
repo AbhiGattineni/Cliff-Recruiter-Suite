@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { DateTime } from "luxon";
-import { computeRecruiterStats, funnelOf, eventDate, filterByActivity } from "./recruiterStats";
+import { computeRecruiterStats, funnelOf, eventDate, filterByActivity, INDEX_WEIGHTS } from "./recruiterStats";
 import { SubmissionEvent, JobRecord } from "./report/types";
 
 function job(over: Partial<JobRecord>): JobRecord {
@@ -248,6 +248,48 @@ describe("funnelOf — client-side progress", () => {
 
   it("classifies a bare interview status instead of dropping it to unknown", () => {
     expect(funnelOf("Interview Scheduled")).toBe("interview");
+  });
+});
+
+describe("index parts as leaderboard columns", () => {
+  // The Recruiter Performance table shows each part's earned points beside the
+  // Index, so the five must actually reconstruct it — otherwise the columns and
+  // the total tell different stories to the person being measured.
+  it("has the weighted parts sum to the index", () => {
+    const { stats } = computeRecruiterStats(
+      [
+        ev("Juhi", "J1", "Cand A", "Submitted To Client", day(CLIENT_SUB).toMillis()),
+        ev("Juhi", "J1", "Cand B", "Client Interview", day(CLIENT_SUB).toMillis()),
+        ev("Juhi", "J2", "Cand C", "Submitted", day(UPLOADED).toMillis()),
+        ev("Mubal", "J3", "Cand D", "Offer Released", day(CLIENT_SUB).toMillis()),
+      ],
+      [job({ jobCode: "J1", assignedTo: "Juhi" }), job({ jobCode: "J3", assignedTo: "Mubal" })]
+    );
+    expect(stats.length).toBeGreaterThan(0);
+    for (const s of stats) {
+      const summed =
+        INDEX_WEIGHTS.clientPerAssigned * s.indexParts.clientPerAssigned +
+        INDEX_WEIGHTS.clientRate * s.indexParts.clientRate +
+        INDEX_WEIGHTS.progressRate * s.indexParts.progressRate +
+        INDEX_WEIGHTS.volume * s.indexParts.volume +
+        INDEX_WEIGHTS.coverage * s.indexParts.coverage;
+      expect(Math.round(summed * 100)).toBe(s.index);
+    }
+  });
+
+  it("keeps every part inside its own 0–1 range, so no column can exceed its ceiling", () => {
+    const { stats } = computeRecruiterStats(
+      [
+        ev("Juhi", "J1", "Cand A", "Submitted To Client", day(CLIENT_SUB).toMillis()),
+        ev("Juhi", "J1", "Cand B", "Submitted To Client", day(CLIENT_SUB).toMillis()),
+        ev("Juhi", "J1", "Cand C", "Submitted To Client", day(CLIENT_SUB).toMillis()),
+      ],
+      [job({ jobCode: "J1", assignedTo: "Juhi" })]
+    );
+    for (const part of Object.values(stats[0].indexParts)) {
+      expect(part).toBeGreaterThanOrEqual(0);
+      expect(part).toBeLessThanOrEqual(1);
+    }
   });
 });
 
