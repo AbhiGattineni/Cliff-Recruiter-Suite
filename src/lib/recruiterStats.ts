@@ -79,29 +79,92 @@ export interface StatusMeta {
   color: string;
 }
 
-// Target client/vendor submissions per assigned requirement.
+// Target profiles sent out per assigned requirement.
 export const TARGET_PER_ASSIGNED = 2;
 
-// Weights for the composite Performance Index (sum = 1). The dominant metric is
-// hitting the target of TARGET_PER_ASSIGNED client/vendor submissions per assigned
-// requirement.
-//
-// Volume (profiles submitted vs the busiest recruiter) and coverage (distinct
-// requirements vs the widest) used to carry 12 and 8 points. Both were removed:
-// they paid for raw activity rather than outcomes, and being relative to the
-// busiest recruiter meant a good month could be dragged down by somebody else's
-// bigger one. Their 20 points went back to the three metrics that measure what
-// actually reached the client.
-export const INDEX_WEIGHTS = {
-  clientPerAssigned: 0.55, // client/vendor submissions vs target (2 per assigned requirement)
-  clientRate: 0.25, // profiles reaching a client/vendor submission
-  progressRate: 0.2, // profiles reaching internal interview or beyond
-} as const;
+/** The five scoring tiers of the pipeline, best first. Keys match Funnel stages. */
+export type PipelineStage =
+  | "offerAccepted"
+  | "clientSelected"
+  | "clientInterview"
+  | "clientSubmitted"
+  | "vendorSubmitted";
 
-// Internal funnel stage — for ORDERING and COLOUR only, never shown as a label.
+export const PIPELINE_STAGES: PipelineStage[] = [
+  "offerAccepted",
+  "clientSelected",
+  "clientInterview",
+  "clientSubmitted",
+  "vendorSubmitted",
+];
+
+// The Performance Index, out of 100.
+//
+// A submission is only the first step, so the score is mostly PIPELINE: each
+// profile earns points for how far it actually got, in the business's own order
+// of preference — offer accepted, then selected in the client round, then
+// interviewing with the client, then through the vendor to the client, then out
+// to the vendor. On top of that sits the older question of whether the recruiter
+// covered the requirements they were given at all.
+//
+// Every tier is capped, which is what makes the ordering hold rather than just
+// being implied by a weight: no amount of submissions can add up to an offer.
+// A hundred profiles sitting at the vendor are worth 6 points; one accepted
+// offer is worth 55.
+export const STAGE_POINTS: Record<PipelineStage, { first: number; each: number; cap: number }> = {
+  // An accepted offer is the job. The first one is worth more than every
+  // submission-tier cap combined; further ones keep adding.
+  offerAccepted: { first: 55, each: 20, cap: 100 },
+  clientSelected: { first: 12, each: 12, cap: 24 },
+  clientInterview: { first: 6, each: 6, cap: 14 },
+  clientSubmitted: { first: 3, each: 3, cap: 12 },
+  vendorSubmitted: { first: 1, each: 1, cap: 6 },
+};
+
+/** Points available for covering assigned requirements at TARGET_PER_ASSIGNED profiles each. */
+export const REQUIREMENT_TARGET_POINTS = 20;
+
+/**
+ * The most a recruiter can score without a single accepted offer: every
+ * pipeline tier capped out, plus full requirement coverage. Stated here because
+ * it is the number that decides how much an offer is really worth — an offer
+ * (55) beats any pile of submissions, but a genuinely full pipeline of
+ * near-wins can still out-score one.
+ */
+export const MAX_WITHOUT_OFFER =
+  STAGE_POINTS.clientSelected.cap +
+  STAGE_POINTS.clientInterview.cap +
+  STAGE_POINTS.clientSubmitted.cap +
+  STAGE_POINTS.vendorSubmitted.cap +
+  REQUIREMENT_TARGET_POINTS;
+
+/** Points a tier earns for `n` profiles sitting at it. */
+export function stagePoints(stage: PipelineStage, n: number): number {
+  if (n <= 0) return 0;
+  const { first, each, cap } = STAGE_POINTS[stage];
+  return Math.min(cap, first + (n - 1) * each);
+}
+
+// Internal funnel stage. Used for ORDERING and COLOUR, and — since the index
+// became pipeline-weighted — for scoring too. The ladder is the one the
+// business cares about, best outcome first:
+//
+//   1. offerAccepted    selected in the client round AND took the offer
+//   2. clientSelected   selected in the client round (offer out, not yet taken)
+//   3. clientInterview  interviewing with the client/vendor right now
+//   4. clientSubmitted  selected by the vendor and sent on to the client
+//   5. vendorSubmitted  sent to the vendor
+//
+// Client and vendor submissions used to be merged into one status, because a
+// submission was a submission. That no longer holds: reaching the client is a
+// step past reaching the vendor, and the index has to be able to tell them
+// apart, so they are separate stages (and separate labels) again.
 type Funnel =
-  | "clientprogress" // client-side interview / offer / placement — beyond a client submission
-  | "client"
+  | "offerAccepted"
+  | "clientSelected"
+  | "clientInterview"
+  | "clientSubmitted"
+  | "vendorSubmitted"
   | "selected"
   | "interview"
   | "waiting"
@@ -110,20 +173,26 @@ type Funnel =
   | "unknown";
 
 const FUNNEL_RANK: Record<Funnel, number> = {
-  clientprogress: 0,
-  client: 1,
-  selected: 2,
-  interview: 3,
-  waiting: 4,
-  submitted: 5,
-  rejected: 6,
-  unknown: 7,
+  offerAccepted: 0,
+  clientSelected: 1,
+  clientInterview: 2,
+  clientSubmitted: 3,
+  vendorSubmitted: 4,
+  selected: 5,
+  interview: 6,
+  waiting: 7,
+  submitted: 8,
+  rejected: 9,
+  unknown: 10,
 };
 
 const FUNNEL_COLOR: Record<Funnel, string> = {
-  clientprogress: "#0b6e2e",
-  client: "#1e7e34",
-  selected: "#12b886",
+  offerAccepted: "#07521f",
+  clientSelected: "#0b6e2e",
+  clientInterview: "#1e7e34",
+  clientSubmitted: "#12b886",
+  vendorSubmitted: "#5cc9a7",
+  selected: "#8bc34a",
   interview: "#e0a800",
   waiting: "#4c8bf5",
   submitted: "#8aa4c8",
@@ -131,9 +200,15 @@ const FUNNEL_COLOR: Record<Funnel, string> = {
   unknown: "", // filled from PALETTE
 };
 
-/** Stages that mean the profile reached the client/vendor (submission or later). */
+/** Stages that mean the profile was actually sent out — to the vendor or beyond. */
 function reachedClient(f: Funnel): boolean {
-  return f === "client" || f === "clientprogress";
+  return (
+    f === "vendorSubmitted" ||
+    f === "clientSubmitted" ||
+    f === "clientInterview" ||
+    f === "clientSelected" ||
+    f === "offerAccepted"
+  );
 }
 
 // Distinct colours for statuses that don't match a known funnel stage.
@@ -148,39 +223,60 @@ export function funnelOf(raw: string): Funnel {
   if (n.includes("reject") || n.includes("disqualif")) return "rejected";
 
   const internal = n.includes("internal");
-
-  // Client-side stages BEYOND a client submission — an interview with the
-  // client/vendor, an offer, a placement. These imply the client submission
-  // already happened, so they must score at least as well as one. Previously
-  // "Client Interview" matched nothing and fell through to `unknown`, scoring
-  // zero on the three metrics carrying 80% of the index — penalising the
-  // recruiter for a BETTER outcome than a plain submission.
   const clientSide =
     n.includes("client") || n.includes("vendor") || n.includes("enduser") || n.includes("external");
+
+  // 1. The offer was taken. Only an explicit acceptance or a start counts —
+  //    "Offer Released" means an offer went out, which the candidate can still
+  //    decline, so it scores as a client-round selection rather than a win.
   if (
-    (!internal && clientSide && n.includes("interview")) ||
-    n.includes("offer") ||
+    n.includes("offeraccept") ||
+    n.includes("acceptedoffer") ||
     n.includes("placed") ||
     n.includes("placement") ||
+    n.includes("joined") ||
+    n.includes("joining") ||
+    n.includes("onboard") ||
     n.includes("confirmation") ||
-    n.includes("confirmed") ||
-    n.includes("selectedbyvendor") ||
-    n.includes("selectedbyclient")
+    n.includes("confirmed")
   ) {
-    return "clientprogress";
+    return "offerAccepted";
   }
 
+  // 2. Picked in the client round — an offer is out, or the client/vendor said
+  //    yes, but nobody has signed anything yet.
   if (
+    n.includes("offer") || // offer released / extended / in progress
+    n.includes("selectedbyclient") ||
+    n.includes("clientselected") ||
+    n.includes("selectedbyenduser") ||
+    (n.includes("select") && clientSide && !internal && !n.includes("selectedbyvendor"))
+  ) {
+    return "clientSelected";
+  }
+
+  // 3. Interviewing with the client/vendor right now.
+  if (!internal && clientSide && n.includes("interview")) return "clientInterview";
+
+  // 4. Through the vendor and on to the client.
+  if (
+    n.includes("selectedbyvendor") ||
     n.includes("clientsubmission") ||
-    n.includes("vendorsubmission") ||
     n.includes("submittedtoclient") ||
-    n.includes("submittedtovendor") ||
     n.includes("submittedtoendclient") ||
     n.includes("submittedtoenduser") ||
-    n.includes("clientsubmitted") ||
+    n.includes("clientsubmitted")
+  ) {
+    return "clientSubmitted";
+  }
+
+  // 5. Sent to the vendor — the first step out of the door.
+  if (
+    n.includes("vendorsubmission") ||
+    n.includes("submittedtovendor") ||
     n.includes("vendorsubmitted")
   ) {
-    return "client";
+    return "vendorSubmitted";
   }
   if (n.includes("selectedinternally") || n.includes("internalselect") || n === "selected") return "selected";
   if (n.includes("internalinterview") || n.includes("internalscreening") || n.includes("interview")) {
@@ -203,15 +299,17 @@ export function funnelOf(raw: string): Funnel {
 const normKey = (raw: string) => raw.toLowerCase().replace(/\s+/g, " ").trim();
 const cleanLabel = (raw: string) => raw.replace(/\s+/g, " ").trim();
 
-// Merged display label for the client-funnel statuses (client & vendor submissions
-// are treated as the same status per the user's rule). All other statuses keep
-// their own verbatim name.
-const CLIENT_LABEL = "Client / Vendor Submission";
-
-/** Identity (de-dupe key + display label + funnel) for a raw status. */
+/**
+ * Identity (de-dupe key + display label + funnel) for a raw status.
+ *
+ * Client and vendor submissions used to be merged under one
+ * "Client / Vendor Submission" label. They are no longer the same thing to the
+ * index — reaching the client scores above reaching the vendor — so showing
+ * them as one status would hide the difference the score is now built on. Every
+ * status keeps its own verbatim Ceipal name.
+ */
 function statusIdentity(raw: string): { key: string; label: string; funnel: Funnel } {
   const funnel = funnelOf(raw);
-  if (funnel === "client") return { key: "__client__", label: CLIENT_LABEL, funnel };
   const trimmed = (raw ?? "").trim();
   return {
     key: normKey(trimmed) || "(no status)",
@@ -233,11 +331,10 @@ export interface RecruiterStat {
   targetBaseCount: number; // the requirement count behind clientTarget
   clientTarget: number; // target client/vendor submissions (2 × target base)
   index: number; // 0–100 composite Performance Index
-  indexParts: {
-    clientPerAssigned: number;
-    clientRate: number;
-    progressRate: number;
-  };
+  /** How many profiles sit at each scoring tier of the pipeline. */
+  stageCounts: Record<PipelineStage, number>;
+  /** Points earned per tier, plus the requirement-coverage points. Sums to `index`. */
+  indexParts: Record<PipelineStage | "requirementTarget", number>;
   rows: ProfileRow[]; // the underlying profiles, newest submission first
   jobGroups: JobGroup[]; // profiles grouped by requirement (+ assigned-no-submission)
   noSubCount: number; // assigned requirements with no submissions
@@ -471,10 +568,18 @@ export function computeRecruiterStats(
 
   const prelim = Array.from(per.entries()).map(([name, p]) => {
     const counts: Record<string, number> = {};
+    const stageCounts: Record<PipelineStage, number> = {
+      offerAccepted: 0,
+      clientSelected: 0,
+      clientInterview: 0,
+      clientSubmitted: 0,
+      vendorSubmitted: 0,
+    };
     let clientCount = 0;
     let progressCount = 0;
     for (const [key, n] of p.counts) {
       const f = funnelByKey.get(key)!;
+      if (f in stageCounts) stageCounts[f as PipelineStage] += n;
       if (reachedClient(f)) clientCount += n;
       if (reachedClient(f) || f === "selected" || f === "interview") progressCount += n;
       counts[labelByKey.get(key) ?? key] = n;
@@ -495,6 +600,7 @@ export function computeRecruiterStats(
       requirements: p.jobs.size,
       profiles: p.profiles,
       counts,
+      stageCounts,
       clientCount,
       clientRate: clientCount / profiles,
       progressRate: progressCount / profiles,
@@ -505,29 +611,29 @@ export function computeRecruiterStats(
     };
   });
 
-  const W = INDEX_WEIGHTS;
-
   const stats: RecruiterStat[] = prelim.map((x) => {
-    // Target = 2 client/vendor submissions per requirement. Within a date range
-    // that base is the requirements actually worked in the window; across all
-    // time it's the recruiter's assigned requirements (falling back to worked
-    // when there's no Assigned-To data).
+    // Coverage: 2 profiles sent out per requirement. Within a date range that
+    // base is the requirements actually worked in the window; across all time
+    // it's the recruiter's assigned requirements (falling back to worked when
+    // there's no Assigned-To data).
     const useWorked = opts.periodScoped || x.assignedCount === 0;
     const targetBasis: "assigned" | "worked" = useWorked ? "worked" : "assigned";
     const targetBase = useWorked ? x.requirements : x.assignedCount;
     const clientTarget = TARGET_PER_ASSIGNED * targetBase;
-    const clientPerAssigned = clientTarget > 0 ? Math.min(1, x.clientCount / clientTarget) : 0;
+    const coverage = clientTarget > 0 ? Math.min(1, x.clientCount / clientTarget) : 0;
+
+    // Each profile scores once, at the furthest stage it reached — a candidate
+    // who accepted an offer is not also counted as a submission.
     const indexParts = {
-      clientPerAssigned,
-      clientRate: x.clientRate,
-      progressRate: x.progressRate,
+      offerAccepted: stagePoints("offerAccepted", x.stageCounts.offerAccepted),
+      clientSelected: stagePoints("clientSelected", x.stageCounts.clientSelected),
+      clientInterview: stagePoints("clientInterview", x.stageCounts.clientInterview),
+      clientSubmitted: stagePoints("clientSubmitted", x.stageCounts.clientSubmitted),
+      vendorSubmitted: stagePoints("vendorSubmitted", x.stageCounts.vendorSubmitted),
+      requirementTarget: REQUIREMENT_TARGET_POINTS * coverage,
     };
-    const index = Math.round(
-      100 *
-        (W.clientPerAssigned * clientPerAssigned +
-          W.clientRate * x.clientRate +
-          W.progressRate * x.progressRate)
-    );
+    const total = Object.values(indexParts).reduce((s, v) => s + v, 0);
+    const index = Math.min(100, Math.round(total));
     return { ...x, targetBasis, targetBaseCount: targetBase, clientTarget, index, indexParts };
   });
 

@@ -4,6 +4,8 @@
 //
 // Keys under `metrics` match INDEX_METRICS in RecruiterPerformance.
 
+import { PipelineStage } from "./recruiterStats";
+
 export type Lang = "en" | "te" | "hi";
 
 export const LANGS: { code: Lang; label: string }[] = [
@@ -13,7 +15,7 @@ export const LANGS: { code: Lang; label: string }[] = [
 ];
 
 export interface MetricText {
-  key: "clientPerAssigned" | "clientRate" | "progressRate";
+  key: PipelineStage | "requirementTarget";
   name: string;
   plain: string;
   example: string;
@@ -41,33 +43,52 @@ export const GUIDE: Record<Lang, GuideText> = {
   en: {
     title: "How your Performance Index is calculated",
     intro:
-      "Your Performance Index is a single score out of 100. It adds up three things. Each one is worth a different number of points — the first one matters most.",
+      "Your Performance Index is a single score out of 100. It adds up how far each of your candidates actually got, plus whether you covered the requirements you were given. Each one is worth a different number of points — the first one matters most.",
     outOf: (n) => `${n} points out of 100`,
     metrics: [
       {
-        key: "clientPerAssigned",
-        name: "Sending enough people to the client",
+        key: "offerAccepted",
+        name: "An offer accepted",
         plain:
-          "For every requirement you worked on, we expect 2 of your candidates to reach the client or vendor.",
+          "Your candidate was picked in the client round and took the offer. This is the job — everything else is a step towards it.",
         example:
-          "Worked on 3 requirements? We expect 6 client submissions. Reach 6 and you get all 55 points. Reach 3 and you get half.",
+          "The first one is worth 55 points, more than every submission tier put together. Each one after that adds 20.",
       },
       {
-        key: "clientRate",
-        name: "How many of your profiles reached the client",
+        key: "clientSelected",
+        name: "Selected in the client round",
         plain:
-          "Out of everyone you submitted, what share actually went on to the client or vendor?",
-        example: "Submitted 10 and 5 reached the client? That is half, so you get 12.5 of the 25 points.",
+          "The client or vendor picked your candidate, or an offer is out — but nothing is signed yet.",
+        example: "12 points each, up to 24.",
       },
       {
-        key: "progressRate",
-        name: "How far your candidates got",
-        plain: "How many of your candidates reached an interview stage or better.",
-        example: "The further your people go, the more of these 20 points you keep.",
+        key: "clientInterview",
+        name: "Interviewing with the client",
+        plain: "Your candidate is in front of the client or vendor right now.",
+        example: "6 points each, up to 14.",
+      },
+      {
+        key: "clientSubmitted",
+        name: "Through the vendor, on to the client",
+        plain: "The vendor picked your candidate and sent them on to the client.",
+        example: "3 points each, up to 12.",
+      },
+      {
+        key: "vendorSubmitted",
+        name: "Sent to the vendor",
+        plain: "The first step out of the door — the profile has gone to the vendor.",
+        example:
+          "1 point each, up to 6. A hundred of these is still 6 points: a submission is a start, not a result.",
+      },
+      {
+        key: "requirementTarget",
+        name: "Covering the requirements you were given",
+        plain: "For every requirement assigned to you, 2 of your profiles should have gone out.",
+        example: "Hitting the target is 20 points. Reaching half of it gets you 10.",
       },
     ],
     relativeNote:
-      "All three depend only on your own work. Nothing here compares you with another recruiter, so nobody else's month can pull your score down.",
+      "Every part depends only on your own work — nothing compares you with another recruiter. Each candidate counts once, at the furthest stage they reached, so an accepted offer is not also counted as a submission.",
     bandsTitle: "What the number means",
     bands: [
       { label: "Doing well", range: "60 and above", tone: "green" },
@@ -81,8 +102,8 @@ export const GUIDE: Record<Lang, GuideText> = {
     tableTitle: "Your points, metric by metric",
     col: {
       metric: "What is measured",
-      weight: "Worth",
-      achieved: "You got",
+      weight: "Max",
+      achieved: "Candidates",
       points: "Points",
       cumulative: "Running total",
       total: "Your index",
@@ -99,28 +120,45 @@ export const GUIDE: Record<Lang, GuideText> = {
   te: {
     title: "మీ Performance Index ఎలా లెక్కిస్తారు",
     intro:
-      "Performance Index అంటే 100 కి మీకు వచ్చే ఒకే ఒక స్కోరు. ఇందులో మూడు విషయాలు కలుస్తాయి. ప్రతి దానికీ వేరు వేరు మార్కులు ఉంటాయి — మొదటిది అన్నిటికంటే ముఖ్యం.",
+      "Performance Index అంటే 100 కి మీకు వచ్చే ఒకే ఒక స్కోరు. మీ candidates ఎంత ముందుకు వెళ్ళారో, పైగా మీకు ఇచ్చిన requirements కవర్ చేశారో — ఇవి కలుస్తాయి. ప్రతి దానికీ వేరు వేరు మార్కులు ఉంటాయి — మొదటిది అన్నిటికంటే ముఖ్యం.",
     outOf: (n) => `100 కి ${n} మార్కులు`,
     metrics: [
       {
-        key: "clientPerAssigned",
-        name: "సరిపడా మందిని client కి పంపడం",
+        key: "offerAccepted",
+        name: "Offer accept అయ్యింది",
         plain:
-          "మీరు పని చేసిన ప్రతి requirement కి, మీ candidates లో 2 మంది client కి లేదా vendor కి వెళ్ళాలి అని ఆశిస్తాం.",
-        example:
-          "3 requirements మీద పని చేశారా? అయితే 6 client submissions ఉండాలి. 6 చేస్తే 55 మార్కులూ వస్తాయి. 3 చేస్తే సగం వస్తాయి.",
+          "మీ candidate client round లో select అయ్యి offer కూడా తీసుకున్నారు. అసలు పని ఇదే — మిగతావన్నీ దీనికి దారి మాత్రమే.",
+        example: "మొదటి దానికి 55 మార్కులు — submission మార్కులన్నీ కలిపినా దీనికంటే తక్కువ. తరువాత ప్రతి దానికీ 20.",
       },
       {
-        key: "clientRate",
-        name: "మీ profiles లో ఎన్ని client దాకా వెళ్ళాయి",
-        plain: "మీరు పంపిన మొత్తం candidates లో, ఎంత మంది నిజంగా client కి లేదా vendor కి వెళ్ళారు?",
-        example: "10 మందిని పంపి 5 మంది వెళ్ళారా? అది సగం — అంటే 25 లో 12.5 మార్కులు.",
+        key: "clientSelected",
+        name: "Client round లో select అయ్యారు",
+        plain: "Client లేదా vendor మీ candidate ని ఎంచుకున్నారు, లేదా offer ఇచ్చారు — కానీ ఇంకా ఏమీ ఖరారు కాలేదు.",
+        example: "ఒక్కొక్క దానికి 12 మార్కులు, గరిష్ఠంగా 24.",
       },
       {
-        key: "progressRate",
-        name: "మీ candidates ఎంత ముందుకు వెళ్ళారు",
-        plain: "మీ candidates లో ఎంత మంది interview దశకు లేదా అంతకంటే ముందుకు వెళ్ళారు.",
-        example: "మీ వాళ్ళు ఎంత ముందుకు వెళ్తే, ఈ 20 మార్కుల్లో అంత ఎక్కువ మీకు దక్కుతుంది.",
+        key: "clientInterview",
+        name: "Client తో interview జరుగుతోంది",
+        plain: "మీ candidate ఇప్పుడు client లేదా vendor ముందు ఉన్నారు.",
+        example: "ఒక్కొక్క దానికి 6 మార్కులు, గరిష్ఠంగా 14.",
+      },
+      {
+        key: "clientSubmitted",
+        name: "Vendor దాటి client కి వెళ్ళారు",
+        plain: "Vendor మీ candidate ని ఎంచుకుని client కి పంపారు.",
+        example: "ఒక్కొక్క దానికి 3 మార్కులు, గరిష్ఠంగా 12.",
+      },
+      {
+        key: "vendorSubmitted",
+        name: "Vendor కి పంపారు",
+        plain: "మొదటి అడుగు — profile vendor కి వెళ్ళింది.",
+        example: "ఒక్కొక్క దానికి 1 మార్కు, గరిష్ఠంగా 6. వంద పంపినా 6 మార్కులే — పంపడం మొదలు మాత్రమే, ఫలితం కాదు.",
+      },
+      {
+        key: "requirementTarget",
+        name: "మీకు ఇచ్చిన requirements కవర్ చేయడం",
+        plain: "మీకు ఇచ్చిన ప్రతి requirement కి, మీ 2 profiles బయటకు వెళ్ళాలి.",
+        example: "target చేరితే 20 మార్కులు. సగం చేరితే 10.",
       },
     ],
     relativeNote:
@@ -139,7 +177,7 @@ export const GUIDE: Record<Lang, GuideText> = {
     col: {
       metric: "దేని మీద లెక్క",
       weight: "విలువ",
-      achieved: "మీకు వచ్చింది",
+      achieved: "Candidates",
       points: "మార్కులు",
       cumulative: "కూడిక మొత్తం",
       total: "మీ index",
@@ -154,28 +192,45 @@ export const GUIDE: Record<Lang, GuideText> = {
   hi: {
     title: "आपका Performance Index कैसे निकाला जाता है",
     intro:
-      "Performance Index 100 में से एक स्कोर है। इसमें तीन चीज़ें जुड़ती हैं। हर एक के अलग अंक हैं — पहली सबसे ज़्यादा मायने रखती है।",
+      "Performance Index 100 में से एक स्कोर है। इसमें आपके candidates कितना आगे गए, और आपने दी गई requirements कवर कीं या नहीं — ये जुड़ते हैं। हर एक के अलग अंक हैं — पहली सबसे ज़्यादा मायने रखती है।",
     outOf: (n) => `100 में से ${n} अंक`,
     metrics: [
       {
-        key: "clientPerAssigned",
-        name: "client तक पर्याप्त लोग भेजना",
+        key: "offerAccepted",
+        name: "Offer accept हुआ",
         plain:
-          "आपने जिस भी requirement पर काम किया, उस पर आपके 2 candidates client या vendor तक पहुँचने चाहिए।",
-        example:
-          "3 requirements पर काम किया? तो 6 client submissions चाहिए। 6 हुए तो पूरे 55 अंक। 3 हुए तो आधे।",
+          "आपका candidate client round में चुना गया और offer भी ले लिया। असली काम यही है — बाकी सब इसी तक पहुँचने के कदम हैं।",
+        example: "पहले वाले के 55 अंक — सारे submission अंक मिलाकर भी इससे कम हैं। उसके बाद हर एक पर 20।",
       },
       {
-        key: "clientRate",
-        name: "आपकी कितनी profiles client तक पहुँचीं",
-        plain: "आपने जितने candidates भेजे, उनमें से कितने असल में client या vendor तक गए?",
-        example: "10 भेजे और 5 पहुँचे? यह आधा है — यानी 25 में से 12.5 अंक।",
+        key: "clientSelected",
+        name: "Client round में चुने गए",
+        plain: "Client या vendor ने आपके candidate को चुना, या offer निकल गया — पर अभी कुछ तय नहीं हुआ।",
+        example: "हर एक के 12 अंक, ज़्यादा से ज़्यादा 24।",
       },
       {
-        key: "progressRate",
-        name: "आपके candidates कितना आगे गए",
-        plain: "आपके कितने candidates interview या उससे आगे तक पहुँचे।",
-        example: "आपके लोग जितना आगे जाएँगे, इन 20 अंकों में से उतने ज़्यादा आपको मिलेंगे।",
+        key: "clientInterview",
+        name: "Client के साथ interview चल रहा है",
+        plain: "आपका candidate अभी client या vendor के सामने है।",
+        example: "हर एक के 6 अंक, ज़्यादा से ज़्यादा 14।",
+      },
+      {
+        key: "clientSubmitted",
+        name: "Vendor से आगे client तक",
+        plain: "Vendor ने आपके candidate को चुनकर client तक भेजा।",
+        example: "हर एक के 3 अंक, ज़्यादा से ज़्यादा 12।",
+      },
+      {
+        key: "vendorSubmitted",
+        name: "Vendor को भेजा",
+        plain: "पहला कदम — profile vendor तक पहुँच गई।",
+        example: "हर एक का 1 अंक, ज़्यादा से ज़्यादा 6। सौ भेजने पर भी 6 ही — भेजना शुरुआत है, नतीजा नहीं।",
+      },
+      {
+        key: "requirementTarget",
+        name: "दी गई requirements को कवर करना",
+        plain: "आपको दी गई हर requirement पर आपकी 2 profiles बाहर जानी चाहिए।",
+        example: "target पूरा होने पर 20 अंक। आधा होने पर 10।",
       },
     ],
     relativeNote:
@@ -194,7 +249,7 @@ export const GUIDE: Record<Lang, GuideText> = {
     col: {
       metric: "किस चीज़ की गिनती",
       weight: "कीमत",
-      achieved: "आपको मिला",
+      achieved: "Candidates",
       points: "अंक",
       cumulative: "जोड़ का कुल",
       total: "आपका index",

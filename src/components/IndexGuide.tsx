@@ -1,4 +1,4 @@
-import { RecruiterStat, INDEX_WEIGHTS } from "../lib/recruiterStats";
+import { RecruiterStat, STAGE_POINTS, REQUIREMENT_TARGET_POINTS, PIPELINE_STAGES } from "../lib/recruiterStats";
 import { GUIDE } from "../lib/indexGuide";
 import { useLang } from "../context/LangContext";
 
@@ -8,13 +8,13 @@ import { useLang } from "../context/LangContext";
 // language itself is a single app-wide choice set from the floating
 // LanguageSwitcher (see LangContext) — this no longer carries its own picker.
 
-const WEIGHT_OF: Record<string, number> = {
-  clientPerAssigned: INDEX_WEIGHTS.clientPerAssigned,
-  clientRate: INDEX_WEIGHTS.clientRate,
-  progressRate: INDEX_WEIGHTS.progressRate,
+// The most each row can contribute: a pipeline tier's cap, or the coverage points.
+const MAX_OF: Record<string, number> = {
+  ...Object.fromEntries(PIPELINE_STAGES.map((k) => [k, STAGE_POINTS[k].cap])),
+  requirementTarget: REQUIREMENT_TARGET_POINTS,
 };
 
-const pct = (n: number) => `${Math.round(n * 100)}%`;
+const round1 = (n: number) => Math.round(n * 10) / 10;
 
 export default function IndexGuide({ stat }: { stat?: RecruiterStat }) {
   const { lang } = useLang();
@@ -40,17 +40,18 @@ export default function IndexGuide({ stat }: { stat?: RecruiterStat }) {
 
         <ol className="guide-list">
           {t.metrics.map((m, i) => {
-            const weight = WEIGHT_OF[m.key] ?? 0;
+            const max = MAX_OF[m.key] ?? 0;
             const got = stat ? stat.indexParts[m.key] : null;
+            const share = got != null && max > 0 ? got / max : null;
             return (
               <li className="guide-item" key={m.key}>
                 <div className="guide-item-head">
                   <span className="guide-num">{i + 1}</span>
                   <span className="guide-name">{m.name}</span>
-                  <span className="pill grey">{t.outOf(Math.round(weight * 100))}</span>
-                  {got != null && (
-                    <span className={`pill ${got >= 0.6 ? "green" : got >= 0.3 ? "amber" : "red"}`}>
-                      {pct(got)} · {Math.round(weight * got * 100)}
+                  <span className="pill grey">{t.outOf(max)}</span>
+                  {got != null && share != null && (
+                    <span className={`pill ${share >= 0.6 ? "green" : share > 0 ? "amber" : "red"}`}>
+                      {round1(got)} / {max}
                     </span>
                   )}
                 </div>
@@ -93,18 +94,19 @@ export default function IndexGuide({ stat }: { stat?: RecruiterStat }) {
                   {(() => {
                     let running = 0;
                     return t.metrics.map((m) => {
-                      const weight = WEIGHT_OF[m.key] ?? 0;
-                      const v = stat.indexParts[m.key];
-                      // This metric's own points, added on top of every metric above it —
-                      // the running total lands on stat.index by the last row, so it's
-                      // visible exactly how the five pieces add up to the final score.
-                      const points = Math.round(weight * v * 100);
-                      running += points;
+                      const max = MAX_OF[m.key] ?? 0;
+                      const points = round1(stat.indexParts[m.key]);
+                      // Each tier's own points, added on top of every tier above it. The
+                      // running total lands on stat.index by the last row, so it's visible
+                      // exactly how the pieces add up to the final score. It can exceed
+                      // 100 before the cap, which is why the footer shows the capped index.
+                      running = round1(running + points);
+                      const count = m.key === "requirementTarget" ? null : stat.stageCounts[m.key as keyof typeof stat.stageCounts];
                       return (
                         <tr key={m.key}>
                           <td style={{ whiteSpace: "normal" }}>{m.name}</td>
-                          <td style={{ textAlign: "right" }}>{pct(weight)}</td>
-                          <td style={{ textAlign: "right" }}>{pct(v)}</td>
+                          <td style={{ textAlign: "right" }}>{max}</td>
+                          <td style={{ textAlign: "right" }}>{count ?? "—"}</td>
                           <td style={{ textAlign: "right", fontWeight: 600 }}>{points}</td>
                           <td style={{ textAlign: "right" }}>{running}</td>
                         </tr>

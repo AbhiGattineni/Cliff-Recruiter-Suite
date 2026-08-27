@@ -14,8 +14,12 @@ import {
   RecruiterStat,
   StatusMeta,
   SortKey,
-  INDEX_WEIGHTS,
+  STAGE_POINTS,
+  PIPELINE_STAGES,
+  REQUIREMENT_TARGET_POINTS,
+  MAX_WITHOUT_OFFER,
   TARGET_PER_ASSIGNED,
+  PipelineStage,
 } from "../lib/recruiterStats";
 import { getRecruiterActivity, RecruiterActivity, ActivityCounts, activityNameKey } from "../lib/recruiterActivity";
 import { extensionFor } from "../lib/extensions";
@@ -56,21 +60,31 @@ const pct = (n: number) => `${Math.round(n * 100)}%`;
 const medal = ["🥇", "🥈", "🥉"];
 const indexPill = (v: number) => (v >= 60 ? "green" : v >= 35 ? "amber" : "red");
 
-// The five index components as leaderboard columns, in weight order. Short
-// headers because they sit next to nine other columns; the full localised name,
-// the weight and the plain-English rule ride along in the cell's title. Keys
-// match INDEX_WEIGHTS / RecruiterStat.indexParts and GUIDE[lang].metrics.
-const INDEX_COLS: { key: keyof typeof INDEX_WEIGHTS; short: string }[] = [
-  { key: "clientPerAssigned", short: "Target" },
-  { key: "clientRate", short: "Client rate" },
-  { key: "progressRate", short: "Interview+" },
+// The index components as leaderboard columns, best outcome first. Short headers
+// because they sit next to nine other columns; the full localised name, the tier
+// ceiling and the plain-English rule ride along in the cell's title. Keys match
+// RecruiterStat.indexParts and GUIDE[lang].metrics, in the same order.
+type IndexColKey = PipelineStage | "requirementTarget";
+const INDEX_COLS: { key: IndexColKey; short: string }[] = [
+  { key: "offerAccepted", short: "Offer" },
+  { key: "clientSelected", short: "Client sel." },
+  { key: "clientInterview", short: "Client int." },
+  { key: "clientSubmitted", short: "To client" },
+  { key: "vendorSubmitted", short: "To vendor" },
+  { key: "requirementTarget", short: "Coverage" },
 ];
 
-/** Points earned on one metric, and how close to its ceiling that is. */
-const partPoints = (s: RecruiterStat, key: keyof typeof INDEX_WEIGHTS) => {
-  const achieved = s.indexParts[key]; // 0–1
-  const max = INDEX_WEIGHTS[key] * 100;
-  return { achieved, max, points: achieved * max };
+const MAX_OF: Record<IndexColKey, number> = {
+  ...(Object.fromEntries(PIPELINE_STAGES.map((k) => [k, STAGE_POINTS[k].cap])) as Record<PipelineStage, number>),
+  requirementTarget: REQUIREMENT_TARGET_POINTS,
+};
+
+/** Points earned on one tier, how many candidates produced them, and the ceiling. */
+const partPoints = (s: RecruiterStat, key: IndexColKey) => {
+  const points = s.indexParts[key];
+  const max = MAX_OF[key];
+  const count = key === "requirementTarget" ? null : s.stageCounts[key];
+  return { points, max, count, achieved: max > 0 ? points / max : 0 };
 };
 
 // Same thresholds as the Index pill, applied to how much of the metric's own
@@ -83,22 +97,20 @@ const targetBasis = (s: RecruiterStat) =>
     ? `${s.targetBaseCount} assigned requirement${s.targetBaseCount === 1 ? "" : "s"}`
     : `${s.targetBaseCount} requirement${s.targetBaseCount === 1 ? "" : "s"} worked in this period`;
 
-// Hover text for the Index pill — the same weights/metrics IndexGuide shows in
-// the detail modal, sorted weakest-contributor-first so the thing dragging the
-// score down the most is the first thing a recruiter reads.
+// Hover text for the Index pill — the same tiers IndexGuide shows in the detail
+// modal, in pipeline order (best outcome first) so what the recruiter actually
+// landed reads before what they merely sent out.
 const indexBreakdown = (s: RecruiterStat, lang: Lang) => {
   const t = GUIDE[lang];
-  const rows = t.metrics
-    .map((m) => {
-      const weight = Math.round(INDEX_WEIGHTS[m.key] * 100); // this metric's worth, as % of the overall 100
-      const achieved = Math.round(s.indexParts[m.key] * 100); // % of that worth this recruiter actually hit
-      const points = Math.round(INDEX_WEIGHTS[m.key] * s.indexParts[m.key] * 100); // = % of the overall 100, since the total is 100
-      return { name: m.name, weight, achieved, points };
-    })
-    .sort((a, b) => a.points - b.points);
+  const rows = t.metrics.map((m) => {
+    const max = MAX_OF[m.key] ?? 0;
+    const points = Math.round(s.indexParts[m.key] * 10) / 10;
+    const count = m.key === "requirementTarget" ? null : s.stageCounts[m.key];
+    return { name: m.name, max, points, count };
+  });
   return [
-    `Performance Index: ${s.index}/100 (lowest-scoring first)`,
-    ...rows.map((r) => `${r.name}: ${r.weight}%/${r.achieved}% → ${r.points}% of overall 100`),
+    `Performance Index: ${s.index}/100`,
+    ...rows.map((r) => `${r.name}: ${r.count != null ? `${r.count} → ` : ""}${r.points}/${r.max} pts`),
     "Click the row for the full breakdown and how to improve it.",
   ].join("\n");
 };
@@ -412,10 +424,10 @@ export default function RecruiterPerformance() {
                               <th
                                 key={c.key}
                                 style={{ textAlign: "right", whiteSpace: "nowrap" }}
-                                title={`${m.name} — worth ${Math.round(INDEX_WEIGHTS[c.key] * 100)} of the 100 index points.\n\n${m.plain}`}
+                                title={`${m.name} — up to ${MAX_OF[c.key]} of the 100 index points.\n\n${m.plain}`}
                               >
                                 {c.short}
-                                <span className="muted" style={{ fontWeight: 400 }}> /{Math.round(INDEX_WEIGHTS[c.key] * 100)}</span>
+                                <span className="muted" style={{ fontWeight: 400 }}> /{MAX_OF[c.key]}</span>
                               </th>
                             );
                           })}
@@ -453,16 +465,16 @@ export default function RecruiterPerformance() {
                             })()}
                             {showParts &&
                               INDEX_COLS.map((c, i) => {
-                                const { achieved, max, points } = partPoints(s, c.key);
+                                const { achieved, max, points, count } = partPoints(s, c.key);
                                 const m = GUIDE[lang].metrics[i];
                                 return (
                                   <td
                                     key={c.key}
                                     style={{ textAlign: "right", whiteSpace: "nowrap", cursor: "help" }}
-                                    title={`${m.name}\n${points.toFixed(1)} of ${max} points — ${pct(achieved)} of what this metric can give.\n\n${m.example}`}
+                                    title={`${m.name}\n${count != null ? `${count} candidate${count === 1 ? "" : "s"} — ` : ""}${Math.round(points * 10) / 10} of ${max} points.\n\n${m.example}`}
                                   >
                                     <span style={{ fontWeight: 600, color: partColor(achieved) }}>
-                                      {points.toFixed(1)}
+                                      {Math.round(points * 10) / 10}
                                     </span>
                                     <span className="muted" style={{ fontSize: "0.75rem" }}> /{max}</span>
                                   </td>

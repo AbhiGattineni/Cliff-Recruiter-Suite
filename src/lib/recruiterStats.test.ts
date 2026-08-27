@@ -1,6 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { DateTime } from "luxon";
-import { computeRecruiterStats, funnelOf, eventDate, filterByActivity, INDEX_WEIGHTS } from "./recruiterStats";
+import {
+  computeRecruiterStats,
+  funnelOf,
+  eventDate,
+  filterByActivity,
+  stagePoints,
+  STAGE_POINTS,
+  MAX_WITHOUT_OFFER,
+  REQUIREMENT_TARGET_POINTS,
+} from "./recruiterStats";
 import { SubmissionEvent, JobRecord } from "./report/types";
 
 function job(over: Partial<JobRecord>): JobRecord {
@@ -34,10 +43,13 @@ function ev(
 }
 
 describe("funnelOf", () => {
-  it("separates Submitted (to AM) from Client/Vendor Submission", () => {
+  it("separates internal, vendor and client submissions into their own tiers", () => {
     expect(funnelOf("Submitted")).toBe("submitted");
-    expect(funnelOf("Submitted to Client")).toBe("client");
-    expect(funnelOf("Vendor Submission")).toBe("client");
+    expect(funnelOf("Submitted to Vendor")).toBe("vendorSubmitted");
+    expect(funnelOf("Vendor Submission")).toBe("vendorSubmitted");
+    // Reaching the client is a step past reaching the vendor, and scores higher.
+    expect(funnelOf("Submitted to Client")).toBe("clientSubmitted");
+    expect(funnelOf("Selected By Vendor")).toBe("clientSubmitted");
   });
   it("returns unknown for unrecognised statuses (they keep their own label)", () => {
     expect(funnelOf("Paperwork Pending")).toBe("unknown");
@@ -65,9 +77,12 @@ describe("computeRecruiterStats", () => {
     expect(stats.map((s) => s.name).sort()).toEqual(["Alice", "Bob"]);
   });
 
-  it("merges client & vendor submissions into one status, uses the latest status", () => {
+  it("keeps client and vendor submissions apart, and uses the latest status", () => {
     const alice = stats.find((s) => s.name === "Alice")!;
-    expect(alice.counts["Client / Vendor Submission"]).toBe(2); // John (client) + Sam (vendor)
+    // They used to share one "Client / Vendor Submission" label. The index now
+    // scores them differently, so merging them would hide what it is measuring.
+    expect(alice.counts["Submitted to Client"]).toBe(1); // John
+    expect(alice.counts["Submitted to Vendor"]).toBe(1); // Sam
     expect(alice.counts["Waiting for Evaluation"]).toBe(1);
     expect(alice.counts["Submitted"]).toBeUndefined(); // John moved on; not double-counted
     expect(alice.profiles).toBe(3);
@@ -199,7 +214,7 @@ describe("period attribution end-to-end", () => {
     const jul = computeRecruiterStats(filterByActivity(history, day("2026-07-01"), day("2026-07-31T23:59:59")));
     const aug = computeRecruiterStats(filterByActivity(history, day("2026-08-01"), day("2026-08-31T23:59:59")));
     expect(jul.stats[0].rows[0].status).toBe("Submitted");
-    expect(aug.stats[0].rows[0].status).toBe("Client / Vendor Submission");
+    expect(aug.stats[0].rows[0].status).toBe("Client Submission");
   });
 
   it("keeps the original upload date on the row while attributing by activity", () => {
@@ -222,10 +237,10 @@ describe("period attribution end-to-end", () => {
 // for an outcome BETTER than a plain client submission.
 
 describe("funnelOf — client-side progress", () => {
-  it("treats a client/vendor interview as having reached the client", () => {
-    expect(funnelOf("Client Interview")).toBe("clientprogress");
-    expect(funnelOf("Vendor Interview")).toBe("clientprogress");
-    expect(funnelOf("End Client Interview")).toBe("clientprogress");
+  it("treats a client/vendor interview as its own tier above a client submission", () => {
+    expect(funnelOf("Client Interview")).toBe("clientInterview");
+    expect(funnelOf("Vendor Interview")).toBe("clientInterview");
+    expect(funnelOf("End Client Interview")).toBe("clientInterview");
   });
 
   it("still treats internal interviews as internal", () => {
@@ -233,11 +248,17 @@ describe("funnelOf — client-side progress", () => {
     expect(funnelOf("Internal Screening")).toBe("interview");
   });
 
-  it("counts offers, placements and confirmations as client progress", () => {
-    expect(funnelOf("Offer Released")).toBe("clientprogress");
-    expect(funnelOf("Placed")).toBe("clientprogress");
-    expect(funnelOf("Confirmation")).toBe("clientprogress");
-    expect(funnelOf("Selected By Vendor")).toBe("clientprogress");
+  it("splits an offer that was taken from one that was merely released", () => {
+    // "Released" means an offer went out and can still be declined.
+    expect(funnelOf("Offer Released")).toBe("clientSelected");
+    expect(funnelOf("Selected By Client")).toBe("clientSelected");
+    // These mean the candidate actually started, or signed.
+    expect(funnelOf("Offer Accepted")).toBe("offerAccepted");
+    expect(funnelOf("Placed")).toBe("offerAccepted");
+    expect(funnelOf("Joined")).toBe("offerAccepted");
+    expect(funnelOf("Confirmation")).toBe("offerAccepted");
+    // Picked by the vendor is the step that sends them on to the client.
+    expect(funnelOf("Selected By Vendor")).toBe("clientSubmitted");
   });
 
   it("reads rejections as rejections even when client-side", () => {
@@ -255,39 +276,85 @@ describe("index parts as leaderboard columns", () => {
   // The Recruiter Performance table shows each part's earned points beside the
   // Index, so the five must actually reconstruct it — otherwise the columns and
   // the total tell different stories to the person being measured.
-  it("has the weighted parts sum to the index", () => {
+  it("has the tier points sum to the index", () => {
     const { stats } = computeRecruiterStats(
       [
         ev("Juhi", "J1", "Cand A", "Submitted To Client", day(CLIENT_SUB).toMillis()),
         ev("Juhi", "J1", "Cand B", "Client Interview", day(CLIENT_SUB).toMillis()),
         ev("Juhi", "J2", "Cand C", "Submitted", day(UPLOADED).toMillis()),
-        ev("Mubal", "J3", "Cand D", "Offer Released", day(CLIENT_SUB).toMillis()),
+        ev("Mubal", "J3", "Cand D", "Offer Accepted", day(CLIENT_SUB).toMillis()),
       ],
       [job({ jobCode: "J1", assignedTo: "Juhi" }), job({ jobCode: "J3", assignedTo: "Mubal" })]
     );
     expect(stats.length).toBeGreaterThan(0);
     for (const s of stats) {
-      const summed =
-        INDEX_WEIGHTS.clientPerAssigned * s.indexParts.clientPerAssigned +
-        INDEX_WEIGHTS.clientRate * s.indexParts.clientRate +
-        INDEX_WEIGHTS.progressRate * s.indexParts.progressRate;
-      expect(Math.round(summed * 100)).toBe(s.index);
+      const summed = Object.values(s.indexParts).reduce((a, b) => a + b, 0);
+      expect(Math.min(100, Math.round(summed))).toBe(s.index);
     }
   });
 
-  it("keeps every part inside its own 0–1 range, so no column can exceed its ceiling", () => {
-    const { stats } = computeRecruiterStats(
-      [
-        ev("Juhi", "J1", "Cand A", "Submitted To Client", day(CLIENT_SUB).toMillis()),
-        ev("Juhi", "J1", "Cand B", "Submitted To Client", day(CLIENT_SUB).toMillis()),
-        ev("Juhi", "J1", "Cand C", "Submitted To Client", day(CLIENT_SUB).toMillis()),
-      ],
-      [job({ jobCode: "J1", assignedTo: "Juhi" })]
+  it("caps every tier at its own ceiling, so no column can run away", () => {
+    const many = Array.from({ length: 50 }, (_, i) =>
+      ev("Juhi", "J1", `Cand ${i}`, "Submitted To Vendor", day(CLIENT_SUB).toMillis())
     );
-    for (const part of Object.values(stats[0].indexParts)) {
-      expect(part).toBeGreaterThanOrEqual(0);
-      expect(part).toBeLessThanOrEqual(1);
+    const { stats } = computeRecruiterStats(many, [job({ jobCode: "J1", assignedTo: "Juhi" })]);
+    expect(stats[0].indexParts.vendorSubmitted).toBe(STAGE_POINTS.vendorSubmitted.cap);
+    expect(stats[0].index).toBeLessThanOrEqual(100);
+  });
+});
+
+describe("pipeline-weighted index", () => {
+  const at = (recruiter: string, status: string, n = 1) =>
+    Array.from({ length: n }, (_, i) =>
+      ev(recruiter, "J1", `${recruiter} Cand ${i}`, status, day(CLIENT_SUB).toMillis())
+    );
+
+  it("puts the tiers in the order the business asked for", () => {
+    const order = ["offerAccepted", "clientSelected", "clientInterview", "clientSubmitted", "vendorSubmitted"] as const;
+    for (let i = 1; i < order.length; i++) {
+      expect(stagePoints(order[i - 1], 1)).toBeGreaterThan(stagePoints(order[i], 1));
+      expect(STAGE_POINTS[order[i - 1]].cap).toBeGreaterThan(STAGE_POINTS[order[i]].cap);
     }
+  });
+
+  it("scores one accepted offer above any number of plain submissions", () => {
+    const offer = computeRecruiterStats(at("Mubal", "Offer Accepted"), []).stats[0];
+    const volume = computeRecruiterStats(at("Ravi", "Submitted To Vendor", 100), []).stats[0];
+    expect(offer.index).toBeGreaterThan(volume.index);
+    // Not a close call: the whole submission tier is capped well below one offer.
+    expect(STAGE_POINTS.offerAccepted.first).toBeGreaterThan(
+      STAGE_POINTS.vendorSubmitted.cap + REQUIREMENT_TARGET_POINTS
+    );
+  });
+
+  it("treats an offer that is only released as a client-round selection, not a win", () => {
+    const released = computeRecruiterStats(at("R", "Offer Released"), []).stats[0];
+    const accepted = computeRecruiterStats(at("A", "Offer Accepted"), []).stats[0];
+    expect(released.stageCounts.clientSelected).toBe(1);
+    expect(released.stageCounts.offerAccepted).toBe(0);
+    expect(accepted.stageCounts.offerAccepted).toBe(1);
+    expect(accepted.index).toBeGreaterThan(released.index);
+  });
+
+  it("separates a vendor submission from one that reached the client", () => {
+    const toVendor = computeRecruiterStats(at("V", "Submitted To Vendor"), []).stats[0];
+    const toClient = computeRecruiterStats(at("C", "Submitted To Client"), []).stats[0];
+    expect(toVendor.stageCounts.vendorSubmitted).toBe(1);
+    expect(toClient.stageCounts.clientSubmitted).toBe(1);
+    expect(toClient.index).toBeGreaterThan(toVendor.index);
+  });
+
+  it("counts each candidate once, at the furthest stage they reached", () => {
+    const s = computeRecruiterStats(at("R", "Offer Accepted"), []).stats[0];
+    expect(s.profiles).toBe(1);
+    expect(s.stageCounts.offerAccepted).toBe(1);
+    expect(s.stageCounts.clientSubmitted).toBe(0);
+    expect(s.stageCounts.vendorSubmitted).toBe(0);
+  });
+
+  it("still leaves a full pipeline of near-wins able to out-score a single offer", () => {
+    // Stated as a deliberate trade rather than an accident — see MAX_WITHOUT_OFFER.
+    expect(MAX_WITHOUT_OFFER).toBeGreaterThan(STAGE_POINTS.offerAccepted.first);
   });
 });
 
@@ -355,6 +422,6 @@ describe("period-scoped target base", () => {
       { ...ev2("R", "Cand B", "Submitted To Client", CLIENT_SUB, CLIENT_SUB), jobCode: "J1" },
     ];
     const s = computeRecruiterStats(two, [], { periodScoped: true }).stats[0];
-    expect(s.indexParts.clientPerAssigned).toBe(1);
+    expect(s.indexParts.requirementTarget).toBe(REQUIREMENT_TARGET_POINTS);
   });
 });
