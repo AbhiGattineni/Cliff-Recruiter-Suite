@@ -270,9 +270,7 @@ describe("index parts as leaderboard columns", () => {
       const summed =
         INDEX_WEIGHTS.clientPerAssigned * s.indexParts.clientPerAssigned +
         INDEX_WEIGHTS.clientRate * s.indexParts.clientRate +
-        INDEX_WEIGHTS.progressRate * s.indexParts.progressRate +
-        INDEX_WEIGHTS.volume * s.indexParts.volume +
-        INDEX_WEIGHTS.coverage * s.indexParts.coverage;
+        INDEX_WEIGHTS.progressRate * s.indexParts.progressRate;
       expect(Math.round(summed * 100)).toBe(s.index);
     }
   });

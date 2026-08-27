@@ -64,8 +64,6 @@ const INDEX_COLS: { key: keyof typeof INDEX_WEIGHTS; short: string }[] = [
   { key: "clientPerAssigned", short: "Target" },
   { key: "clientRate", short: "Client rate" },
   { key: "progressRate", short: "Interview+" },
-  { key: "volume", short: "Volume" },
-  { key: "coverage", short: "Coverage" },
 ];
 
 /** Points earned on one metric, and how close to its ceiling that is. */
@@ -488,12 +486,10 @@ export default function RecruiterPerformance() {
                 <Pagination page={board.page} pageCount={board.pageCount} total={board.total} pageSize={board.pageSize} onPage={board.setPage} onPageSize={board.setPageSize} />
                 {showParts && (
                   <p className="muted" style={{ margin: "0.5rem 0 0", fontSize: "0.82rem", lineHeight: 1.6 }}>
-                    <strong>Target /45</strong> client/vendor submissions against {TARGET_PER_ASSIGNED} per requirement ·{" "}
-                    <strong>Client rate /20</strong> share of profiles that reached the client ·{" "}
-                    <strong>Interview+ /15</strong> share that reached an interview or beyond ·{" "}
-                    <strong>Volume /12</strong> and <strong>Coverage /8</strong> profiles and requirements, against the
-                    busiest recruiter. Each cell is the points earned out of that metric&#39;s maximum, and the five add
-                    up to the Index. Green ≥ 60% of what the metric can give, red under 35%. Hover any cell for the rule
+                    <strong>Target /55</strong> client/vendor submissions against {TARGET_PER_ASSIGNED} per requirement ·{" "}
+                    <strong>Client rate /25</strong> share of profiles that reached the client ·{" "}
+                    <strong>Interview+ /20</strong> share that reached an interview or beyond. Each cell is the points
+                    earned out of that metric&#39;s maximum, and the three add up to the Index. Green ≥ 60% of what the metric can give, red under 35%. Hover any cell for the rule
                     behind it, or click a row for the full guide.
                   </p>
                 )}

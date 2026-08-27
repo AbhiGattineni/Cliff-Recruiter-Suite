@@ -13,7 +13,7 @@ export const LANGS: { code: Lang; label: string }[] = [
 ];
 
 export interface MetricText {
-  key: "clientPerAssigned" | "clientRate" | "progressRate" | "volume" | "coverage";
+  key: "clientPerAssigned" | "clientRate" | "progressRate";
   name: string;
   plain: string;
   example: string;
@@ -41,7 +41,7 @@ export const GUIDE: Record<Lang, GuideText> = {
   en: {
     title: "How your Performance Index is calculated",
     intro:
-      "Your Performance Index is a single score out of 100. It adds up five things. Each one is worth a different number of points — the first one matters most.",
+      "Your Performance Index is a single score out of 100. It adds up three things. Each one is worth a different number of points — the first one matters most.",
     outOf: (n) => `${n} points out of 100`,
     metrics: [
       {
@@ -50,38 +50,24 @@ export const GUIDE: Record<Lang, GuideText> = {
         plain:
           "For every requirement you worked on, we expect 2 of your candidates to reach the client or vendor.",
         example:
-          "Worked on 3 requirements? We expect 6 client submissions. Reach 6 and you get all 45 points. Reach 3 and you get half.",
+          "Worked on 3 requirements? We expect 6 client submissions. Reach 6 and you get all 55 points. Reach 3 and you get half.",
       },
       {
         key: "clientRate",
         name: "How many of your profiles reached the client",
         plain:
           "Out of everyone you submitted, what share actually went on to the client or vendor?",
-        example: "Submitted 10 and 5 reached the client? That is half, so you get 10 of the 20 points.",
+        example: "Submitted 10 and 5 reached the client? That is half, so you get 12.5 of the 25 points.",
       },
       {
         key: "progressRate",
         name: "How far your candidates got",
         plain: "How many of your candidates reached an interview stage or better.",
-        example: "The further your people go, the more of these 15 points you keep.",
-      },
-      {
-        key: "volume",
-        name: "How much work you did",
-        plain:
-          "Your number of profiles compared with the busiest recruiter in the same period.",
-        example: "The busiest recruiter gets all 12 points. Half as many profiles gets you 6.",
-      },
-      {
-        key: "coverage",
-        name: "How many different requirements you covered",
-        plain:
-          "How many separate requirements you worked on, compared with the recruiter who covered the most.",
-        example: "Working across many requirements — not just one — earns these 8 points.",
+        example: "The further your people go, the more of these 20 points you keep.",
       },
     ],
     relativeNote:
-      "The last two compare you with other recruiters. The first three depend only on your own work, so nobody else's month can pull them down.",
+      "All three depend only on your own work. Nothing here compares you with another recruiter, so nobody else's month can pull your score down.",
     bandsTitle: "What the number means",
     bands: [
       { label: "Doing well", range: "60 and above", tone: "green" },
@@ -113,7 +99,7 @@ export const GUIDE: Record<Lang, GuideText> = {
   te: {
     title: "మీ Performance Index ఎలా లెక్కిస్తారు",
     intro:
-      "Performance Index అంటే 100 కి మీకు వచ్చే ఒకే ఒక స్కోరు. ఇందులో ఐదు విషయాలు కలుస్తాయి. ప్రతి దానికీ వేరు వేరు మార్కులు ఉంటాయి — మొదటిది అన్నిటికంటే ముఖ్యం.",
+      "Performance Index అంటే 100 కి మీకు వచ్చే ఒకే ఒక స్కోరు. ఇందులో మూడు విషయాలు కలుస్తాయి. ప్రతి దానికీ వేరు వేరు మార్కులు ఉంటాయి — మొదటిది అన్నిటికంటే ముఖ్యం.",
     outOf: (n) => `100 కి ${n} మార్కులు`,
     metrics: [
       {
@@ -122,36 +108,23 @@ export const GUIDE: Record<Lang, GuideText> = {
         plain:
           "మీరు పని చేసిన ప్రతి requirement కి, మీ candidates లో 2 మంది client కి లేదా vendor కి వెళ్ళాలి అని ఆశిస్తాం.",
         example:
-          "3 requirements మీద పని చేశారా? అయితే 6 client submissions ఉండాలి. 6 చేస్తే 45 మార్కులూ వస్తాయి. 3 చేస్తే సగం వస్తాయి.",
+          "3 requirements మీద పని చేశారా? అయితే 6 client submissions ఉండాలి. 6 చేస్తే 55 మార్కులూ వస్తాయి. 3 చేస్తే సగం వస్తాయి.",
       },
       {
         key: "clientRate",
         name: "మీ profiles లో ఎన్ని client దాకా వెళ్ళాయి",
         plain: "మీరు పంపిన మొత్తం candidates లో, ఎంత మంది నిజంగా client కి లేదా vendor కి వెళ్ళారు?",
-        example: "10 మందిని పంపి 5 మంది వెళ్ళారా? అది సగం — అంటే 20 లో 10 మార్కులు.",
+        example: "10 మందిని పంపి 5 మంది వెళ్ళారా? అది సగం — అంటే 25 లో 12.5 మార్కులు.",
       },
       {
         key: "progressRate",
         name: "మీ candidates ఎంత ముందుకు వెళ్ళారు",
         plain: "మీ candidates లో ఎంత మంది interview దశకు లేదా అంతకంటే ముందుకు వెళ్ళారు.",
-        example: "మీ వాళ్ళు ఎంత ముందుకు వెళ్తే, ఈ 15 మార్కుల్లో అంత ఎక్కువ మీకు దక్కుతుంది.",
-      },
-      {
-        key: "volume",
-        name: "మీరు ఎంత పని చేశారు",
-        plain: "అదే సమయంలో అందరికంటే ఎక్కువ పని చేసిన recruiter తో పోల్చి, మీ profiles సంఖ్య.",
-        example: "ఎక్కువ పని చేసిన recruiter కి 12 మార్కులూ వస్తాయి. వాళ్ళలో సగం చేస్తే మీకు 6.",
-      },
-      {
-        key: "coverage",
-        name: "ఎన్ని వేరు వేరు requirements చూశారు",
-        plain:
-          "అందరికంటే ఎక్కువ requirements చూసిన recruiter తో పోల్చి, మీరు ఎన్ని వేరు వేరు requirements మీద పని చేశారు.",
-        example: "ఒకే requirement కాకుండా చాలా వాటి మీద పని చేస్తే ఈ 8 మార్కులు వస్తాయి.",
+        example: "మీ వాళ్ళు ఎంత ముందుకు వెళ్తే, ఈ 20 మార్కుల్లో అంత ఎక్కువ మీకు దక్కుతుంది.",
       },
     ],
     relativeNote:
-      "చివరి రెండు మిమ్మల్ని ఇతర recruiters తో పోలుస్తాయి. మొదటి మూడు మీ సొంత పని మీదే ఆధారపడతాయి — వేరే వాళ్ళ వల్ల అవి తగ్గవు.",
+      "ఈ మూడూ మీ సొంత పని మీదే ఆధారపడతాయి. ఇక్కడ మిమ్మల్ని వేరే recruiter తో పోల్చడం లేదు — వేరే వాళ్ళ వల్ల మీ స్కోరు తగ్గదు.",
     bandsTitle: "ఈ నంబర్ అర్థం ఏంటి",
     bands: [
       { label: "బాగా చేస్తున్నారు", range: "60 అంతకంటే ఎక్కువ", tone: "green" },
@@ -181,7 +154,7 @@ export const GUIDE: Record<Lang, GuideText> = {
   hi: {
     title: "आपका Performance Index कैसे निकाला जाता है",
     intro:
-      "Performance Index 100 में से एक स्कोर है। इसमें पाँच चीज़ें जुड़ती हैं। हर एक के अलग अंक हैं — पहली सबसे ज़्यादा मायने रखती है।",
+      "Performance Index 100 में से एक स्कोर है। इसमें तीन चीज़ें जुड़ती हैं। हर एक के अलग अंक हैं — पहली सबसे ज़्यादा मायने रखती है।",
     outOf: (n) => `100 में से ${n} अंक`,
     metrics: [
       {
@@ -190,36 +163,23 @@ export const GUIDE: Record<Lang, GuideText> = {
         plain:
           "आपने जिस भी requirement पर काम किया, उस पर आपके 2 candidates client या vendor तक पहुँचने चाहिए।",
         example:
-          "3 requirements पर काम किया? तो 6 client submissions चाहिए। 6 हुए तो पूरे 45 अंक। 3 हुए तो आधे।",
+          "3 requirements पर काम किया? तो 6 client submissions चाहिए। 6 हुए तो पूरे 55 अंक। 3 हुए तो आधे।",
       },
       {
         key: "clientRate",
         name: "आपकी कितनी profiles client तक पहुँचीं",
         plain: "आपने जितने candidates भेजे, उनमें से कितने असल में client या vendor तक गए?",
-        example: "10 भेजे और 5 पहुँचे? यह आधा है — यानी 20 में से 10 अंक।",
+        example: "10 भेजे और 5 पहुँचे? यह आधा है — यानी 25 में से 12.5 अंक।",
       },
       {
         key: "progressRate",
         name: "आपके candidates कितना आगे गए",
         plain: "आपके कितने candidates interview या उससे आगे तक पहुँचे।",
-        example: "आपके लोग जितना आगे जाएँगे, इन 15 अंकों में से उतने ज़्यादा आपको मिलेंगे।",
-      },
-      {
-        key: "volume",
-        name: "आपने कितना काम किया",
-        plain: "उसी अवधि में सबसे ज़्यादा काम करने वाले recruiter से तुलना करके, आपकी profiles की संख्या।",
-        example: "सबसे ज़्यादा काम करने वाले को पूरे 12 अंक। उससे आधा काम किया तो 6 अंक।",
-      },
-      {
-        key: "coverage",
-        name: "कितनी अलग-अलग requirements पर काम किया",
-        plain:
-          "सबसे ज़्यादा requirements संभालने वाले recruiter से तुलना करके, आपने कितनी अलग requirements पर काम किया।",
-        example: "सिर्फ़ एक नहीं, कई requirements पर काम करने से ये 8 अंक मिलते हैं।",
+        example: "आपके लोग जितना आगे जाएँगे, इन 20 अंकों में से उतने ज़्यादा आपको मिलेंगे।",
       },
     ],
     relativeNote:
-      "आख़िरी दो आपकी तुलना दूसरे recruiters से करते हैं। पहले तीन सिर्फ़ आपके अपने काम पर निर्भर हैं — दूसरों की वजह से वे कम नहीं होते।",
+      "तीनों सिर्फ़ आपके अपने काम पर निर्भर हैं। यहाँ किसी दूसरे recruiter से तुलना नहीं होती — दूसरों की वजह से आपका स्कोर कम नहीं होता।",
     bandsTitle: "इस नंबर का मतलब",
     bands: [
       { label: "अच्छा कर रहे हैं", range: "60 और उससे ऊपर", tone: "green" },

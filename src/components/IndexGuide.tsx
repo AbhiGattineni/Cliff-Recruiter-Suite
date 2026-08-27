@@ -12,8 +12,6 @@ const WEIGHT_OF: Record<string, number> = {
   clientPerAssigned: INDEX_WEIGHTS.clientPerAssigned,
   clientRate: INDEX_WEIGHTS.clientRate,
   progressRate: INDEX_WEIGHTS.progressRate,
-  volume: INDEX_WEIGHTS.volume,
-  coverage: INDEX_WEIGHTS.coverage,
 };
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;

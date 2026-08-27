@@ -11,6 +11,13 @@ import { TimesheetEntry } from "./timesheets";
 
 export const nameKey = (s: string) => String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
 
+/**
+ * Hours a recruiter is expected to log on a working day. One definition, so the
+ * entry form, the shortfall warning and anything that reports on completeness
+ * all mean the same thing by "a full day".
+ */
+export const EXPECTED_DAILY_HOURS = 9;
+
 /** Every ISO date from `from` to `to`, inclusive. Shared so "missing days" means the same thing everywhere it's shown. */
 export function daysBetween(from: string, to: string): string[] {
   const out: string[] = [];
@@ -44,6 +51,30 @@ export function missingDays(
     const weekday = DateTime.fromISO(d).weekday; // Luxon: 1=Monday ... 6=Saturday, 7=Sunday
     return weekday !== 6 && weekday !== 7;
   });
+}
+
+/**
+ * Working days in [from, to] that have an entry, but one totalling less than a
+ * full day. Distinct from missingDays: the person did log something, they just
+ * logged short. Weekends and approved leave are excluded on the same rule.
+ */
+export function shortDays(
+  from: string,
+  to: string,
+  today: string,
+  hoursByDate: Map<string, number>,
+  approvedLeaveDates: Set<string>
+): { date: string; hours: number }[] {
+  if (!from || !to) return [];
+  return daysBetween(from, to)
+    .filter((d) => {
+      if (d > today || approvedLeaveDates.has(d)) return false;
+      const weekday = DateTime.fromISO(d).weekday;
+      if (weekday === 6 || weekday === 7) return false;
+      const h = hoursByDate.get(d);
+      return h !== undefined && h < EXPECTED_DAILY_HOURS;
+    })
+    .map((d) => ({ date: d, hours: hoursByDate.get(d) ?? 0 }));
 }
 
 export interface JobEffort {

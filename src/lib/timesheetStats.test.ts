@@ -8,6 +8,8 @@ import {
   filterByDate,
   daysBetween,
   missingDays,
+  shortDays,
+  EXPECTED_DAILY_HOURS,
 } from "./timesheetStats";
 import { TimesheetEntry } from "./timesheets";
 
@@ -152,5 +154,40 @@ describe("filterByDate", () => {
   });
   it("returns everything when no range is given", () => {
     expect(filterByDate(rows, "", "")).toHaveLength(3);
+  });
+});
+
+describe("shortDays", () => {
+  // Aug 3-7 2026 is Mon-Fri; Aug 8-9 is the weekend.
+  const noLeave = new Set<string>();
+
+  it("flags a working day logged under a full day, with the hours it got", () => {
+    const hours = new Map([["2026-08-03", 4], ["2026-08-04", EXPECTED_DAILY_HOURS]]);
+    expect(shortDays("2026-08-03", "2026-08-04", "2026-08-04", hours, noLeave)).toEqual([
+      { date: "2026-08-03", hours: 4 },
+    ]);
+  });
+
+  it("says nothing about a day with no entry at all — that is missingDays' job", () => {
+    const hours = new Map([["2026-08-03", 4]]);
+    const short = shortDays("2026-08-03", "2026-08-05", "2026-08-05", hours, noLeave);
+    expect(short.map((d) => d.date)).toEqual(["2026-08-03"]);
+  });
+
+  it("ignores weekends, approved leave, and anything after today", () => {
+    const hours = new Map([
+      ["2026-08-08", 2], // Saturday
+      ["2026-08-06", 3], // approved leave
+      ["2026-08-07", 1], // in the future relative to `today`
+      ["2026-08-05", 5], // the only real shortfall
+    ]);
+    const leave = new Set(["2026-08-06"]);
+    const short = shortDays("2026-08-03", "2026-08-09", "2026-08-05", hours, leave);
+    expect(short.map((d) => d.date)).toEqual(["2026-08-05"]);
+  });
+
+  it("does not flag a full or over-full day", () => {
+    const hours = new Map([["2026-08-03", EXPECTED_DAILY_HOURS], ["2026-08-04", EXPECTED_DAILY_HOURS + 2]]);
+    expect(shortDays("2026-08-03", "2026-08-04", "2026-08-04", hours, noLeave)).toEqual([]);
   });
 });

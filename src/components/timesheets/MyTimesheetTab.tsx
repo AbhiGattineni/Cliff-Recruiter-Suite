@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DateTime } from "luxon";
 import { friendlyError } from "../../lib/errors";
-import { listMyTimesheets, saveTimesheetEntry, TimesheetEntry, JobHours } from "../../lib/timesheets";
+import { listMyTimesheets, listMyLeaves, saveTimesheetEntry, TimesheetEntry, JobHours } from "../../lib/timesheets";
+import { EXPECTED_DAILY_HOURS, daysBetween, missingDays, shortDays } from "../../lib/timesheetStats";
 import { listOpenJobs } from "../../lib/openJobs";
 import JobHoursPicker from "./JobHoursPicker";
 import { useAuth } from "../../context/AuthContext";
@@ -72,18 +73,28 @@ export default function MyTimesheetTab() {
     }
   };
 
-  const missingDays = useMemo(() => {
-    if (!entriesQ.data) return [];
-    const days: string[] = [];
-    let d = DateTime.fromISO(from);
-    const end = DateTime.fromISO(to);
-    while (d <= end) {
-      const iso = d.toFormat("yyyy-MM-dd");
-      if (!byDate.has(iso)) days.push(iso);
-      d = d.plus({ days: 1 });
-    }
-    return days;
-  }, [entriesQ.data, byDate, from, to]);
+  // Approved leave, so a booked day off isn't chased as an unfilled one.
+  const leavesQ = useQuery({ queryKey: ["myLeaves", uid], queryFn: () => listMyLeaves(uid) });
+  const leaveDates = useMemo(() => {
+    const set = new Set<string>();
+    (leavesQ.data ?? [])
+      .filter((l) => l.status === "approved")
+      .forEach((l) => daysBetween(l.startDate, l.endDate).forEach((d) => set.add(d)));
+    return set;
+  }, [leavesQ.data]);
+
+  // Both use the shared definitions in timesheetStats, so this tab, the Team
+  // Dashboard and Recruiter Performance agree on what "unfilled" and "short"
+  // mean. This tab used to count its own way and flagged weekends as missing.
+  const missing = useMemo(
+    () => missingDays(from, to, todayIso(), new Set(byDate.keys()), leaveDates),
+    [byDate, leaveDates, from, to]
+  );
+  const short = useMemo(() => {
+    const hoursByDate = new Map<string, number>();
+    for (const [d, e] of byDate) hoursByDate.set(d, Number(e.hours) || 0);
+    return shortDays(from, to, todayIso(), hoursByDate, leaveDates);
+  }, [byDate, leaveDates, from, to]);
 
   return (
     <div>
@@ -97,7 +108,10 @@ export default function MyTimesheetTab() {
             <input type="date" max={todayIso()} value={date} onChange={(e) => pickDate(e.target.value)} />
           </div>
           <div className="field">
-            <label>Hours worked <span style={{ color: "var(--danger)" }}>*</span></label>
+            <label>
+              Hours worked <span style={{ color: "var(--danger)" }}>*</span>
+              <span className="muted" style={{ fontWeight: 400 }}> — {EXPECTED_DAILY_HOURS}h expected</span>
+            </label>
             <input type="number" value={jobTotal || ""} placeholder="0" disabled readOnly />
             <span className="muted" style={{ fontSize: "0.78rem" }}>
               Total from the requirements below — add one to set hours.
@@ -133,19 +147,44 @@ export default function MyTimesheetTab() {
             Enter hours for every requirement you added, or remove the ones you haven&#39;t.
           </p>
         )}
+        {/* A full day is 9h. Said plainly and left as a warning rather than a
+            block — someone on a half day shouldn't have to invent hours to
+            save, and a forced 9 would make the whole number worthless. */}
+        {jobTotal > 0 && jobTotal < EXPECTED_DAILY_HOURS && (
+          <p className="alert warn" style={{ fontSize: "0.82rem", padding: "0.5rem 0.7rem" }}>
+            That&#39;s {Math.round((EXPECTED_DAILY_HOURS - jobTotal) * 100) / 100}h short of a full{" "}
+            {EXPECTED_DAILY_HOURS}h day. Add the missing time against a requirement if you worked it — you can
+            still save a shorter day for a half day or leave.
+          </p>
+        )}
+        {jobTotal > EXPECTED_DAILY_HOURS && (
+          <p className="muted" style={{ fontSize: "0.82rem" }}>
+            {Math.round((jobTotal - EXPECTED_DAILY_HOURS) * 100) / 100}h over the expected {EXPECTED_DAILY_HOURS}h.
+          </p>
+        )}
         <button className="btn" onClick={submit} disabled={saving || !canSave}>
           {saving ? <span className="spinner" /> : "Save"}
         </button>
         <p className="muted" style={{ fontSize: "0.78rem", marginTop: "0.5rem", marginBottom: 0 }}>
-          Date, hours and at least one requirement worked on are all required.
+          Date, hours and at least one requirement worked on are all required. A full working day is{" "}
+          {EXPECTED_DAILY_HOURS} hours.
         </p>
       </div>
 
-      {missingDays.length > 0 && (
+      {missing.length > 0 && (
         <div className="alert warn">
-          You&#39;re missing <strong>{missingDays.length}</strong> day{missingDays.length === 1 ? "" : "s"} in the
-          last {RANGE_DAYS} days: {missingDays.slice(0, 8).join(", ")}
-          {missingDays.length > 8 ? "…" : ""}
+          You&#39;re missing <strong>{missing.length}</strong> working day{missing.length === 1 ? "" : "s"} in the
+          last {RANGE_DAYS} days: {missing.slice(0, 8).join(", ")}
+          {missing.length > 8 ? "…" : ""}
+        </div>
+      )}
+
+      {short.length > 0 && (
+        <div className="alert warn">
+          <strong>{short.length}</strong> day{short.length === 1 ? "" : "s"} logged under the expected{" "}
+          {EXPECTED_DAILY_HOURS}h:{" "}
+          {short.slice(0, 8).map((d) => `${d.date} (${d.hours}h)`).join(", ")}
+          {short.length > 8 ? "…" : ""}
         </div>
       )}
 

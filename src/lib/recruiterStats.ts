@@ -85,12 +85,17 @@ export const TARGET_PER_ASSIGNED = 2;
 // Weights for the composite Performance Index (sum = 1). The dominant metric is
 // hitting the target of TARGET_PER_ASSIGNED client/vendor submissions per assigned
 // requirement.
+//
+// Volume (profiles submitted vs the busiest recruiter) and coverage (distinct
+// requirements vs the widest) used to carry 12 and 8 points. Both were removed:
+// they paid for raw activity rather than outcomes, and being relative to the
+// busiest recruiter meant a good month could be dragged down by somebody else's
+// bigger one. Their 20 points went back to the three metrics that measure what
+// actually reached the client.
 export const INDEX_WEIGHTS = {
-  clientPerAssigned: 0.45, // client/vendor submissions vs target (2 per assigned requirement)
-  clientRate: 0.2, // profiles reaching a client/vendor submission
-  progressRate: 0.15, // profiles reaching internal interview or beyond
-  volume: 0.12, // profiles submitted, normalised to the busiest recruiter
-  coverage: 0.08, // distinct requirements worked, normalised to the widest
+  clientPerAssigned: 0.55, // client/vendor submissions vs target (2 per assigned requirement)
+  clientRate: 0.25, // profiles reaching a client/vendor submission
+  progressRate: 0.2, // profiles reaching internal interview or beyond
 } as const;
 
 // Internal funnel stage — for ORDERING and COLOUR only, never shown as a label.
@@ -232,8 +237,6 @@ export interface RecruiterStat {
     clientPerAssigned: number;
     clientRate: number;
     progressRate: number;
-    volume: number;
-    coverage: number;
   };
   rows: ProfileRow[]; // the underlying profiles, newest submission first
   jobGroups: JobGroup[]; // profiles grouped by requirement (+ assigned-no-submission)
@@ -502,13 +505,9 @@ export function computeRecruiterStats(
     };
   });
 
-  const maxProfiles = Math.max(1, ...prelim.map((x) => x.profiles));
-  const maxReqs = Math.max(1, ...prelim.map((x) => x.requirements));
   const W = INDEX_WEIGHTS;
 
   const stats: RecruiterStat[] = prelim.map((x) => {
-    const volume = x.profiles / maxProfiles;
-    const coverage = x.requirements / maxReqs;
     // Target = 2 client/vendor submissions per requirement. Within a date range
     // that base is the requirements actually worked in the window; across all
     // time it's the recruiter's assigned requirements (falling back to worked
@@ -522,16 +521,12 @@ export function computeRecruiterStats(
       clientPerAssigned,
       clientRate: x.clientRate,
       progressRate: x.progressRate,
-      volume,
-      coverage,
     };
     const index = Math.round(
       100 *
         (W.clientPerAssigned * clientPerAssigned +
           W.clientRate * x.clientRate +
-          W.progressRate * x.progressRate +
-          W.volume * volume +
-          W.coverage * coverage)
+          W.progressRate * x.progressRate)
     );
     return { ...x, targetBasis, targetBaseCount: targetBase, clientTarget, index, indexParts };
   });
