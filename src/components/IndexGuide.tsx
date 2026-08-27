@@ -1,4 +1,4 @@
-import { RecruiterStat, STAGE_POINTS, REQUIREMENT_TARGET_POINTS, PIPELINE_STAGES } from "../lib/recruiterStats";
+import { RecruiterStat, BUCKETS, BucketKey } from "../lib/recruiterStats";
 import { GUIDE } from "../lib/indexGuide";
 import { useLang } from "../context/LangContext";
 
@@ -8,11 +8,10 @@ import { useLang } from "../context/LangContext";
 // language itself is a single app-wide choice set from the floating
 // LanguageSwitcher (see LangContext) — this no longer carries its own picker.
 
-// The most each row can contribute: a pipeline tier's cap, or the coverage points.
-const MAX_OF: Record<string, number> = {
-  ...Object.fromEntries(PIPELINE_STAGES.map((k) => [k, STAGE_POINTS[k].cap])),
-  requirementTarget: REQUIREMENT_TARGET_POINTS,
-};
+/** What each bucket is worth out of the 100. */
+const MAX_OF: Record<string, number> = Object.fromEntries(
+  (Object.keys(BUCKETS) as BucketKey[]).map((k) => [k, BUCKETS[k].points])
+);
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
@@ -101,7 +100,10 @@ export default function IndexGuide({ stat }: { stat?: RecruiterStat }) {
                       // exactly how the pieces add up to the final score. It can exceed
                       // 100 before the cap, which is why the footer shows the capped index.
                       running = round1(running + points);
-                      const count = m.key === "requirementTarget" ? null : stat.stageCounts[m.key as keyof typeof stat.stageCounts];
+                      const count =
+                        m.key === "coverage"
+                          ? null
+                          : BUCKETS[m.key].stages.reduce((n, st) => n + stat.stageCounts[st], 0);
                       return (
                         <tr key={m.key}>
                           <td style={{ whiteSpace: "normal" }}>{m.name}</td>

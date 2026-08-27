@@ -4,7 +4,7 @@
 //
 // Keys under `metrics` match INDEX_METRICS in RecruiterPerformance.
 
-import { PipelineStage } from "./recruiterStats";
+import { BucketKey } from "./recruiterStats";
 
 export type Lang = "en" | "te" | "hi";
 
@@ -15,7 +15,7 @@ export const LANGS: { code: Lang; label: string }[] = [
 ];
 
 export interface MetricText {
-  key: PipelineStage | "requirementTarget";
+  key: BucketKey;
   name: string;
   plain: string;
   example: string;
@@ -47,44 +47,31 @@ export const GUIDE: Record<Lang, GuideText> = {
     outOf: (n) => `${n} points out of 100`,
     metrics: [
       {
-        key: "offerAccepted",
+        key: "offer",
         name: "An offer accepted",
         plain:
-          "Your candidate was picked in the client round and took the offer. This is the job — everything else is a step towards it.",
-        example:
-          "The first one is worth 55 points, more than every submission tier put together. Each one after that adds 20.",
+          "Your candidate was picked in the client round and took the offer. One is enough to fill this.",
+        example: "One accepted offer earns all 20 points.",
       },
       {
-        key: "clientSelected",
-        name: "Selected in the client round",
+        key: "client",
+        name: "With the client — submitted, interviewing, or selected",
         plain:
-          "The client or vendor picked your candidate, or an offer is out — but nothing is signed yet.",
-        example: "12 points each, up to 24.",
+          "Candidates the vendor sent on to the client: sitting with the client, interviewing there, or already picked.",
+        example: "3 candidates at this stage earns all 20 points. 1 earns about 7.",
       },
       {
-        key: "clientInterview",
-        name: "Interviewing with the client",
-        plain: "Your candidate is in front of the client or vendor right now.",
-        example: "6 points each, up to 14.",
+        key: "vendor",
+        name: "With the vendor — submitted or interviewing",
+        plain: "Candidates sent to the vendor, including those interviewing with them.",
+        example: "6 candidates at this stage earns all 20 points. 3 earns 10.",
       },
       {
-        key: "clientSubmitted",
-        name: "Through the vendor, on to the client",
-        plain: "The vendor picked your candidate and sent them on to the client.",
-        example: "3 points each, up to 12.",
-      },
-      {
-        key: "vendorSubmitted",
-        name: "Sent to the vendor",
-        plain: "The first step out of the door — the profile has gone to the vendor.",
-        example:
-          "1 point each, up to 6. A hundred of these is still 6 points: a submission is a start, not a result.",
-      },
-      {
-        key: "requirementTarget",
-        name: "Covering the requirements you were given",
-        plain: "For every requirement assigned to you, 2 of your profiles should have gone out.",
-        example: "Hitting the target is 20 points. Reaching half of it gets you 10.",
+        key: "coverage",
+        name: "Two profiles for every requirement you were given",
+        plain:
+          "For each requirement assigned to you, 2 of your candidates should have gone out. This is the biggest single share of the score.",
+        example: "Hitting the target earns all 40 points. Reaching half of it earns 20.",
       },
     ],
     relativeNote:
@@ -124,41 +111,28 @@ export const GUIDE: Record<Lang, GuideText> = {
     outOf: (n) => `100 కి ${n} మార్కులు`,
     metrics: [
       {
-        key: "offerAccepted",
+        key: "offer",
         name: "Offer accept అయ్యింది",
-        plain:
-          "మీ candidate client round లో select అయ్యి offer కూడా తీసుకున్నారు. అసలు పని ఇదే — మిగతావన్నీ దీనికి దారి మాత్రమే.",
-        example: "మొదటి దానికి 55 మార్కులు — submission మార్కులన్నీ కలిపినా దీనికంటే తక్కువ. తరువాత ప్రతి దానికీ 20.",
+        plain: "మీ candidate client round లో select అయ్యి offer తీసుకున్నారు. ఒక్కటి చాలు.",
+        example: "ఒక్క offer accept అయితే 20 మార్కులూ వస్తాయి.",
       },
       {
-        key: "clientSelected",
-        name: "Client round లో select అయ్యారు",
-        plain: "Client లేదా vendor మీ candidate ని ఎంచుకున్నారు, లేదా offer ఇచ్చారు — కానీ ఇంకా ఏమీ ఖరారు కాలేదు.",
-        example: "ఒక్కొక్క దానికి 12 మార్కులు, గరిష్ఠంగా 24.",
+        key: "client",
+        name: "Client దగ్గర — submit, interview, లేదా select",
+        plain: "Vendor client కి పంపిన candidates: client దగ్గర ఉన్నవాళ్ళు, interview జరుగుతున్నవాళ్ళు, లేదా select అయినవాళ్ళు.",
+        example: "ఈ దశలో 3 మంది ఉంటే 20 మార్కులూ. ఒక్కరైతే సుమారు 7.",
       },
       {
-        key: "clientInterview",
-        name: "Client తో interview జరుగుతోంది",
-        plain: "మీ candidate ఇప్పుడు client లేదా vendor ముందు ఉన్నారు.",
-        example: "ఒక్కొక్క దానికి 6 మార్కులు, గరిష్ఠంగా 14.",
+        key: "vendor",
+        name: "Vendor దగ్గర — submit లేదా interview",
+        plain: "Vendor కి పంపిన candidates, వాళ్ళతో interview జరుగుతున్నవాళ్ళతో సహా.",
+        example: "ఈ దశలో 6 మంది ఉంటే 20 మార్కులూ. 3 మందైతే 10.",
       },
       {
-        key: "clientSubmitted",
-        name: "Vendor దాటి client కి వెళ్ళారు",
-        plain: "Vendor మీ candidate ని ఎంచుకుని client కి పంపారు.",
-        example: "ఒక్కొక్క దానికి 3 మార్కులు, గరిష్ఠంగా 12.",
-      },
-      {
-        key: "vendorSubmitted",
-        name: "Vendor కి పంపారు",
-        plain: "మొదటి అడుగు — profile vendor కి వెళ్ళింది.",
-        example: "ఒక్కొక్క దానికి 1 మార్కు, గరిష్ఠంగా 6. వంద పంపినా 6 మార్కులే — పంపడం మొదలు మాత్రమే, ఫలితం కాదు.",
-      },
-      {
-        key: "requirementTarget",
-        name: "మీకు ఇచ్చిన requirements కవర్ చేయడం",
-        plain: "మీకు ఇచ్చిన ప్రతి requirement కి, మీ 2 profiles బయటకు వెళ్ళాలి.",
-        example: "target చేరితే 20 మార్కులు. సగం చేరితే 10.",
+        key: "coverage",
+        name: "మీకు ఇచ్చిన ప్రతి requirement కి 2 profiles",
+        plain: "మీకు ఇచ్చిన ప్రతి requirement కి మీ 2 candidates బయటకు వెళ్ళాలి. స్కోరులో ఇదే అతిపెద్ద భాగం.",
+        example: "target చేరితే 40 మార్కులూ. సగం చేరితే 20.",
       },
     ],
     relativeNote:
@@ -196,41 +170,28 @@ export const GUIDE: Record<Lang, GuideText> = {
     outOf: (n) => `100 में से ${n} अंक`,
     metrics: [
       {
-        key: "offerAccepted",
+        key: "offer",
         name: "Offer accept हुआ",
-        plain:
-          "आपका candidate client round में चुना गया और offer भी ले लिया। असली काम यही है — बाकी सब इसी तक पहुँचने के कदम हैं।",
-        example: "पहले वाले के 55 अंक — सारे submission अंक मिलाकर भी इससे कम हैं। उसके बाद हर एक पर 20।",
+        plain: "आपका candidate client round में चुना गया और offer ले लिया। एक ही काफ़ी है।",
+        example: "एक accept हुआ offer पूरे 20 अंक देता है।",
       },
       {
-        key: "clientSelected",
-        name: "Client round में चुने गए",
-        plain: "Client या vendor ने आपके candidate को चुना, या offer निकल गया — पर अभी कुछ तय नहीं हुआ।",
-        example: "हर एक के 12 अंक, ज़्यादा से ज़्यादा 24।",
+        key: "client",
+        name: "Client के पास — submit, interview, या select",
+        plain: "वे candidates जिन्हें vendor ने client तक भेजा: client के पास हैं, interview दे रहे हैं, या चुन लिए गए हैं।",
+        example: "इस चरण पर 3 candidates से पूरे 20 अंक। एक से लगभग 7।",
       },
       {
-        key: "clientInterview",
-        name: "Client के साथ interview चल रहा है",
-        plain: "आपका candidate अभी client या vendor के सामने है।",
-        example: "हर एक के 6 अंक, ज़्यादा से ज़्यादा 14।",
+        key: "vendor",
+        name: "Vendor के पास — submit या interview",
+        plain: "Vendor को भेजे गए candidates, उनके साथ interview दे रहे लोगों समेत।",
+        example: "इस चरण पर 6 candidates से पूरे 20 अंक। 3 से 10।",
       },
       {
-        key: "clientSubmitted",
-        name: "Vendor से आगे client तक",
-        plain: "Vendor ने आपके candidate को चुनकर client तक भेजा।",
-        example: "हर एक के 3 अंक, ज़्यादा से ज़्यादा 12।",
-      },
-      {
-        key: "vendorSubmitted",
-        name: "Vendor को भेजा",
-        plain: "पहला कदम — profile vendor तक पहुँच गई।",
-        example: "हर एक का 1 अंक, ज़्यादा से ज़्यादा 6। सौ भेजने पर भी 6 ही — भेजना शुरुआत है, नतीजा नहीं।",
-      },
-      {
-        key: "requirementTarget",
-        name: "दी गई requirements को कवर करना",
-        plain: "आपको दी गई हर requirement पर आपकी 2 profiles बाहर जानी चाहिए।",
-        example: "target पूरा होने पर 20 अंक। आधा होने पर 10।",
+        key: "coverage",
+        name: "हर दी गई requirement पर 2 profiles",
+        plain: "आपको दी गई हर requirement पर आपके 2 candidates बाहर जाने चाहिए। स्कोर का सबसे बड़ा हिस्सा यही है।",
+        example: "target पूरा होने पर पूरे 40 अंक। आधा होने पर 20।",
       },
     ],
     relativeNote:

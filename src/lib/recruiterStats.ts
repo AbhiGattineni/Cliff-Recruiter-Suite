@@ -88,6 +88,7 @@ export type PipelineStage =
   | "clientSelected"
   | "clientInterview"
   | "clientSubmitted"
+  | "vendorInterview"
   | "vendorSubmitted";
 
 export const PIPELINE_STAGES: PipelineStage[] = [
@@ -95,54 +96,48 @@ export const PIPELINE_STAGES: PipelineStage[] = [
   "clientSelected",
   "clientInterview",
   "clientSubmitted",
+  "vendorInterview",
   "vendorSubmitted",
 ];
 
-// The Performance Index, out of 100.
-//
-// A submission is only the first step, so the score is mostly PIPELINE: each
-// profile earns points for how far it actually got, in the business's own order
-// of preference — offer accepted, then selected in the client round, then
-// interviewing with the client, then through the vendor to the client, then out
-// to the vendor. On top of that sits the older question of whether the recruiter
-// covered the requirements they were given at all.
-//
-// Every tier is capped, which is what makes the ordering hold rather than just
-// being implied by a weight: no amount of submissions can add up to an offer.
-// A hundred profiles sitting at the vendor are worth 6 points; one accepted
-// offer is worth 55.
-export const STAGE_POINTS: Record<PipelineStage, { first: number; each: number; cap: number }> = {
-  // An accepted offer is the job. The first one is worth more than every
-  // submission-tier cap combined; further ones keep adding.
-  offerAccepted: { first: 55, each: 20, cap: 100 },
-  clientSelected: { first: 12, each: 12, cap: 24 },
-  clientInterview: { first: 6, each: 6, cap: 14 },
-  clientSubmitted: { first: 3, each: 3, cap: 12 },
-  vendorSubmitted: { first: 1, each: 1, cap: 6 },
-};
-
-/** Points available for covering assigned requirements at TARGET_PER_ASSIGNED profiles each. */
-export const REQUIREMENT_TARGET_POINTS = 20;
-
 /**
- * The most a recruiter can score without a single accepted offer: every
- * pipeline tier capped out, plus full requirement coverage. Stated here because
- * it is the number that decides how much an offer is really worth — an offer
- * (55) beats any pile of submissions, but a genuinely full pipeline of
- * near-wins can still out-score one.
+ * The four things the index scores, and what each is worth out of 100.
+ *
+ * Set by the business, in this order of preference. Note that covering the
+ * requirements you were given is the single biggest share — double an accepted
+ * offer — so a recruiter who consistently sends 2 profiles per requirement
+ * out-scores one who lands a placement but leaves requirements untouched.
  */
-export const MAX_WITHOUT_OFFER =
-  STAGE_POINTS.clientSelected.cap +
-  STAGE_POINTS.clientInterview.cap +
-  STAGE_POINTS.clientSubmitted.cap +
-  STAGE_POINTS.vendorSubmitted.cap +
-  REQUIREMENT_TARGET_POINTS;
+export const BUCKETS = {
+  offer: { points: 20, stages: ["offerAccepted"] as PipelineStage[], target: 1 },
+  client: {
+    points: 20,
+    stages: ["clientSelected", "clientInterview", "clientSubmitted"] as PipelineStage[],
+    target: 3,
+  },
+  vendor: { points: 20, stages: ["vendorInterview", "vendorSubmitted"] as PipelineStage[], target: 6 },
+  coverage: { points: 40, stages: [] as PipelineStage[], target: 0 },
+} as const;
 
-/** Points a tier earns for `n` profiles sitting at it. */
-export function stagePoints(stage: PipelineStage, n: number): number {
-  if (n <= 0) return 0;
-  const { first, each, cap } = STAGE_POINTS[stage];
-  return Math.min(cap, first + (n - 1) * each);
+export type BucketKey = keyof typeof BUCKETS;
+export const BUCKET_KEYS: BucketKey[] = ["offer", "client", "vendor", "coverage"];
+
+// The Performance Index, out of 100. Four buckets — see BUCKETS above.
+//
+// Inside a bucket the score scales with how many candidates reached it, against
+// a target that fills the bucket: one accepted offer fills the offer bucket,
+// three client-side candidates fill the client bucket, six vendor submissions
+// fill the vendor one. Past the target a bucket is full, so no single tier can
+// run away with the score.
+//
+// Each candidate counts once, at the furthest stage they reached — an accepted
+// offer is not also counted as a submission.
+
+/** Points a bucket earns for `n` candidates in it. */
+export function bucketPoints(bucket: BucketKey, n: number): number {
+  const b = BUCKETS[bucket];
+  if (b.target <= 0) return 0;
+  return b.points * Math.min(1, n / b.target);
 }
 
 // Internal funnel stage. Used for ORDERING and COLOUR, and — since the index
@@ -151,9 +146,14 @@ export function stagePoints(stage: PipelineStage, n: number): number {
 //
 //   1. offerAccepted    selected in the client round AND took the offer
 //   2. clientSelected   selected in the client round (offer out, not yet taken)
-//   3. clientInterview  interviewing with the client/vendor right now
+//   3. clientInterview  interviewing with the CLIENT right now
 //   4. clientSubmitted  selected by the vendor and sent on to the client
-//   5. vendorSubmitted  sent to the vendor
+//   5. vendorInterview  interviewing with the VENDOR right now
+//   6. vendorSubmitted  sent to the vendor
+//
+// Client-side and vendor-side interviews are separate stages because the index
+// scores them in different buckets — reaching the client is a step past
+// reaching the vendor, at every stage of the ladder.
 //
 // Client and vendor submissions used to be merged into one status, because a
 // submission was a submission. That no longer holds: reaching the client is a
@@ -164,6 +164,7 @@ type Funnel =
   | "clientSelected"
   | "clientInterview"
   | "clientSubmitted"
+  | "vendorInterview"
   | "vendorSubmitted"
   | "selected"
   | "interview"
@@ -177,13 +178,14 @@ const FUNNEL_RANK: Record<Funnel, number> = {
   clientSelected: 1,
   clientInterview: 2,
   clientSubmitted: 3,
-  vendorSubmitted: 4,
-  selected: 5,
-  interview: 6,
-  waiting: 7,
-  submitted: 8,
-  rejected: 9,
-  unknown: 10,
+  vendorInterview: 4,
+  vendorSubmitted: 5,
+  selected: 6,
+  interview: 7,
+  waiting: 8,
+  submitted: 9,
+  rejected: 10,
+  unknown: 11,
 };
 
 const FUNNEL_COLOR: Record<Funnel, string> = {
@@ -191,6 +193,7 @@ const FUNNEL_COLOR: Record<Funnel, string> = {
   clientSelected: "#0b6e2e",
   clientInterview: "#1e7e34",
   clientSubmitted: "#12b886",
+  vendorInterview: "#3fb9a0",
   vendorSubmitted: "#5cc9a7",
   selected: "#8bc34a",
   interview: "#e0a800",
@@ -204,6 +207,7 @@ const FUNNEL_COLOR: Record<Funnel, string> = {
 function reachedClient(f: Funnel): boolean {
   return (
     f === "vendorSubmitted" ||
+    f === "vendorInterview" ||
     f === "clientSubmitted" ||
     f === "clientInterview" ||
     f === "clientSelected" ||
@@ -255,8 +259,12 @@ export function funnelOf(raw: string): Funnel {
     return "clientSelected";
   }
 
-  // 3. Interviewing with the client/vendor right now.
-  if (!internal && clientSide && n.includes("interview")) return "clientInterview";
+  // 3. Interviewing right now — with the client, or with the vendor. These sit
+  //    in different buckets, so "Vendor Interview" must not read as client-side.
+  if (!internal && n.includes("interview")) {
+    if (n.includes("vendor")) return "vendorInterview";
+    if (clientSide) return "clientInterview";
+  }
 
   // 4. Through the vendor and on to the client.
   if (
@@ -333,8 +341,8 @@ export interface RecruiterStat {
   index: number; // 0–100 composite Performance Index
   /** How many profiles sit at each scoring tier of the pipeline. */
   stageCounts: Record<PipelineStage, number>;
-  /** Points earned per tier, plus the requirement-coverage points. Sums to `index`. */
-  indexParts: Record<PipelineStage | "requirementTarget", number>;
+  /** Points earned per bucket. Sums to `index`. */
+  indexParts: Record<BucketKey, number>;
   rows: ProfileRow[]; // the underlying profiles, newest submission first
   jobGroups: JobGroup[]; // profiles grouped by requirement (+ assigned-no-submission)
   noSubCount: number; // assigned requirements with no submissions
@@ -573,6 +581,7 @@ export function computeRecruiterStats(
       clientSelected: 0,
       clientInterview: 0,
       clientSubmitted: 0,
+      vendorInterview: 0,
       vendorSubmitted: 0,
     };
     let clientCount = 0;
@@ -624,16 +633,15 @@ export function computeRecruiterStats(
 
     // Each profile scores once, at the furthest stage it reached — a candidate
     // who accepted an offer is not also counted as a submission.
-    const indexParts = {
-      offerAccepted: stagePoints("offerAccepted", x.stageCounts.offerAccepted),
-      clientSelected: stagePoints("clientSelected", x.stageCounts.clientSelected),
-      clientInterview: stagePoints("clientInterview", x.stageCounts.clientInterview),
-      clientSubmitted: stagePoints("clientSubmitted", x.stageCounts.clientSubmitted),
-      vendorSubmitted: stagePoints("vendorSubmitted", x.stageCounts.vendorSubmitted),
-      requirementTarget: REQUIREMENT_TARGET_POINTS * coverage,
+    const inBucket = (b: BucketKey) =>
+      BUCKETS[b].stages.reduce((n, st) => n + x.stageCounts[st], 0);
+    const indexParts: Record<BucketKey, number> = {
+      offer: bucketPoints("offer", inBucket("offer")),
+      client: bucketPoints("client", inBucket("client")),
+      vendor: bucketPoints("vendor", inBucket("vendor")),
+      coverage: BUCKETS.coverage.points * coverage,
     };
-    const total = Object.values(indexParts).reduce((s, v) => s + v, 0);
-    const index = Math.min(100, Math.round(total));
+    const index = Math.min(100, Math.round(Object.values(indexParts).reduce((a, b) => a + b, 0)));
     return { ...x, targetBasis, targetBaseCount: targetBase, clientTarget, index, indexParts };
   });
 

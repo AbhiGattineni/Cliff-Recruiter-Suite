@@ -5,10 +5,8 @@ import {
   funnelOf,
   eventDate,
   filterByActivity,
-  stagePoints,
-  STAGE_POINTS,
-  MAX_WITHOUT_OFFER,
-  REQUIREMENT_TARGET_POINTS,
+  bucketPoints,
+  BUCKETS,
 } from "./recruiterStats";
 import { SubmissionEvent, JobRecord } from "./report/types";
 
@@ -100,7 +98,7 @@ describe("computeRecruiterStats", () => {
 
   it("orders statuses by funnel and ranks the stronger recruiter first", () => {
     const labels = statuses.map((s) => s.label);
-    expect(labels.indexOf("Client / Vendor Submission")).toBeLessThan(labels.indexOf("Waiting for Evaluation"));
+    expect(labels.indexOf("Submitted to Client")).toBeLessThan(labels.indexOf("Waiting for Evaluation"));
     expect(stats[0].name).toBe("Alice");
     expect(stats[0].index).toBeGreaterThan(stats[1].index);
   });
@@ -237,10 +235,10 @@ describe("period attribution end-to-end", () => {
 // for an outcome BETTER than a plain client submission.
 
 describe("funnelOf — client-side progress", () => {
-  it("treats a client/vendor interview as its own tier above a client submission", () => {
+  it("separates a client-side interview from a vendor-side one — different buckets", () => {
     expect(funnelOf("Client Interview")).toBe("clientInterview");
-    expect(funnelOf("Vendor Interview")).toBe("clientInterview");
     expect(funnelOf("End Client Interview")).toBe("clientInterview");
+    expect(funnelOf("Vendor Interview")).toBe("vendorInterview");
   });
 
   it("still treats internal interviews as internal", () => {
@@ -298,63 +296,82 @@ describe("index parts as leaderboard columns", () => {
       ev("Juhi", "J1", `Cand ${i}`, "Submitted To Vendor", day(CLIENT_SUB).toMillis())
     );
     const { stats } = computeRecruiterStats(many, [job({ jobCode: "J1", assignedTo: "Juhi" })]);
-    expect(stats[0].indexParts.vendorSubmitted).toBe(STAGE_POINTS.vendorSubmitted.cap);
+    expect(stats[0].indexParts.vendor).toBe(BUCKETS.vendor.points);
     expect(stats[0].index).toBeLessThanOrEqual(100);
   });
 });
 
-describe("pipeline-weighted index", () => {
+describe("bucket-weighted index", () => {
   const at = (recruiter: string, status: string, n = 1) =>
     Array.from({ length: n }, (_, i) =>
       ev(recruiter, "J1", `${recruiter} Cand ${i}`, status, day(CLIENT_SUB).toMillis())
     );
 
-  it("puts the tiers in the order the business asked for", () => {
-    const order = ["offerAccepted", "clientSelected", "clientInterview", "clientSubmitted", "vendorSubmitted"] as const;
-    for (let i = 1; i < order.length; i++) {
-      expect(stagePoints(order[i - 1], 1)).toBeGreaterThan(stagePoints(order[i], 1));
-      expect(STAGE_POINTS[order[i - 1]].cap).toBeGreaterThan(STAGE_POINTS[order[i]].cap);
+  it("splits the 100 points the way the business asked: 20/20/20/40", () => {
+    expect(BUCKETS.offer.points).toBe(20);
+    expect(BUCKETS.client.points).toBe(20);
+    expect(BUCKETS.vendor.points).toBe(20);
+    expect(BUCKETS.coverage.points).toBe(40);
+    const total = Object.values(BUCKETS).reduce((a, b) => a + b.points, 0);
+    expect(total).toBe(100);
+  });
+
+  it("fills the offer bucket on a single accepted offer", () => {
+    expect(bucketPoints("offer", 1)).toBe(20);
+    expect(bucketPoints("offer", 5)).toBe(20); // capped, not cumulative
+  });
+
+  it("scales a bucket with how many candidates reached it, then caps", () => {
+    expect(bucketPoints("vendor", 3)).toBe(10); // half of the 6 target
+    expect(bucketPoints("vendor", 6)).toBe(20);
+    expect(bucketPoints("vendor", 100)).toBe(20);
+  });
+
+  it("has the four buckets sum to the index", () => {
+    const { stats } = computeRecruiterStats(
+      [
+        ev("Juhi", "J1", "Cand A", "Submitted To Client", day(CLIENT_SUB).toMillis()),
+        ev("Juhi", "J1", "Cand B", "Vendor Interview", day(CLIENT_SUB).toMillis()),
+        ev("Mubal", "J3", "Cand D", "Offer Accepted", day(CLIENT_SUB).toMillis()),
+      ],
+      [job({ jobCode: "J1", assignedTo: "Juhi" }), job({ jobCode: "J3", assignedTo: "Mubal" })]
+    );
+    for (const s of stats) {
+      const summed = Object.values(s.indexParts).reduce((a, b) => a + b, 0);
+      expect(Math.min(100, Math.round(summed))).toBe(s.index);
     }
   });
 
-  it("scores one accepted offer above any number of plain submissions", () => {
-    const offer = computeRecruiterStats(at("Mubal", "Offer Accepted"), []).stats[0];
-    const volume = computeRecruiterStats(at("Ravi", "Submitted To Vendor", 100), []).stats[0];
-    expect(offer.index).toBeGreaterThan(volume.index);
-    // Not a close call: the whole submission tier is capped well below one offer.
-    expect(STAGE_POINTS.offerAccepted.first).toBeGreaterThan(
-      STAGE_POINTS.vendorSubmitted.cap + REQUIREMENT_TARGET_POINTS
-    );
+  it("puts a client-side interview in the client bucket and a vendor one in the vendor bucket", () => {
+    expect(funnelOf("Client Interview")).toBe("clientInterview");
+    expect(funnelOf("End Client Interview")).toBe("clientInterview");
+    expect(funnelOf("Vendor Interview")).toBe("vendorInterview");
+    const clientSide = computeRecruiterStats(at("C", "Client Interview"), []).stats[0];
+    const vendorSide = computeRecruiterStats(at("V", "Vendor Interview"), []).stats[0];
+    expect(clientSide.indexParts.client).toBeGreaterThan(0);
+    expect(clientSide.indexParts.vendor).toBe(0);
+    expect(vendorSide.indexParts.vendor).toBeGreaterThan(0);
+    expect(vendorSide.indexParts.client).toBe(0);
   });
 
-  it("treats an offer that is only released as a client-round selection, not a win", () => {
+  it("treats an offer that is only released as client-side, not as a win", () => {
     const released = computeRecruiterStats(at("R", "Offer Released"), []).stats[0];
-    const accepted = computeRecruiterStats(at("A", "Offer Accepted"), []).stats[0];
-    expect(released.stageCounts.clientSelected).toBe(1);
-    expect(released.stageCounts.offerAccepted).toBe(0);
-    expect(accepted.stageCounts.offerAccepted).toBe(1);
-    expect(accepted.index).toBeGreaterThan(released.index);
-  });
-
-  it("separates a vendor submission from one that reached the client", () => {
-    const toVendor = computeRecruiterStats(at("V", "Submitted To Vendor"), []).stats[0];
-    const toClient = computeRecruiterStats(at("C", "Submitted To Client"), []).stats[0];
-    expect(toVendor.stageCounts.vendorSubmitted).toBe(1);
-    expect(toClient.stageCounts.clientSubmitted).toBe(1);
-    expect(toClient.index).toBeGreaterThan(toVendor.index);
+    expect(released.indexParts.offer).toBe(0);
+    expect(released.indexParts.client).toBeGreaterThan(0);
   });
 
   it("counts each candidate once, at the furthest stage they reached", () => {
     const s = computeRecruiterStats(at("R", "Offer Accepted"), []).stats[0];
     expect(s.profiles).toBe(1);
-    expect(s.stageCounts.offerAccepted).toBe(1);
-    expect(s.stageCounts.clientSubmitted).toBe(0);
-    expect(s.stageCounts.vendorSubmitted).toBe(0);
+    expect(s.indexParts.offer).toBe(20);
+    expect(s.indexParts.client).toBe(0);
+    expect(s.indexParts.vendor).toBe(0);
   });
 
-  it("still leaves a full pipeline of near-wins able to out-score a single offer", () => {
-    // Stated as a deliberate trade rather than an accident — see MAX_WITHOUT_OFFER.
-    expect(MAX_WITHOUT_OFFER).toBeGreaterThan(STAGE_POINTS.offerAccepted.first);
+  it("makes coverage the single biggest share — worth double an accepted offer", () => {
+    // A deliberate consequence of the 20/20/20/40 split: consistently sending 2
+    // profiles per requirement outweighs landing one placement.
+    expect(BUCKETS.coverage.points).toBe(2 * BUCKETS.offer.points);
   });
 });
 
@@ -422,6 +439,6 @@ describe("period-scoped target base", () => {
       { ...ev2("R", "Cand B", "Submitted To Client", CLIENT_SUB, CLIENT_SUB), jobCode: "J1" },
     ];
     const s = computeRecruiterStats(two, [], { periodScoped: true }).stats[0];
-    expect(s.indexParts.requirementTarget).toBe(REQUIREMENT_TARGET_POINTS);
+    expect(s.indexParts.coverage).toBe(BUCKETS.coverage.points);
   });
 });

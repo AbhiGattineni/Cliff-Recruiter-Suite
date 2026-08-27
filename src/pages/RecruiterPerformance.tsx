@@ -14,12 +14,10 @@ import {
   RecruiterStat,
   StatusMeta,
   SortKey,
-  STAGE_POINTS,
-  PIPELINE_STAGES,
-  REQUIREMENT_TARGET_POINTS,
-  MAX_WITHOUT_OFFER,
+  BUCKETS,
+  BUCKET_KEYS,
+  BucketKey,
   TARGET_PER_ASSIGNED,
-  PipelineStage,
 } from "../lib/recruiterStats";
 import { getRecruiterActivity, RecruiterActivity, ActivityCounts, activityNameKey } from "../lib/recruiterActivity";
 import { extensionFor } from "../lib/extensions";
@@ -64,26 +62,22 @@ const indexPill = (v: number) => (v >= 60 ? "green" : v >= 35 ? "amber" : "red")
 // because they sit next to nine other columns; the full localised name, the tier
 // ceiling and the plain-English rule ride along in the cell's title. Keys match
 // RecruiterStat.indexParts and GUIDE[lang].metrics, in the same order.
-type IndexColKey = PipelineStage | "requirementTarget";
-const INDEX_COLS: { key: IndexColKey; short: string }[] = [
-  { key: "offerAccepted", short: "Offer" },
-  { key: "clientSelected", short: "Client sel." },
-  { key: "clientInterview", short: "Client int." },
-  { key: "clientSubmitted", short: "To client" },
-  { key: "vendorSubmitted", short: "To vendor" },
-  { key: "requirementTarget", short: "Coverage" },
+const INDEX_COLS: { key: BucketKey; short: string }[] = [
+  { key: "offer", short: "Offer" },
+  { key: "client", short: "Client" },
+  { key: "vendor", short: "Vendor" },
+  { key: "coverage", short: "Coverage" },
 ];
 
-const MAX_OF: Record<IndexColKey, number> = {
-  ...(Object.fromEntries(PIPELINE_STAGES.map((k) => [k, STAGE_POINTS[k].cap])) as Record<PipelineStage, number>),
-  requirementTarget: REQUIREMENT_TARGET_POINTS,
-};
+const MAX_OF: Record<BucketKey, number> = Object.fromEntries(
+  BUCKET_KEYS.map((k) => [k, BUCKETS[k].points])
+) as Record<BucketKey, number>;
 
-/** Points earned on one tier, how many candidates produced them, and the ceiling. */
-const partPoints = (s: RecruiterStat, key: IndexColKey) => {
+/** Points earned in one bucket, how many candidates produced them, and the ceiling. */
+const partPoints = (s: RecruiterStat, key: BucketKey) => {
   const points = s.indexParts[key];
   const max = MAX_OF[key];
-  const count = key === "requirementTarget" ? null : s.stageCounts[key];
+  const count = key === "coverage" ? null : BUCKETS[key].stages.reduce((n, st) => n + s.stageCounts[st], 0);
   return { points, max, count, achieved: max > 0 ? points / max : 0 };
 };
 
@@ -105,7 +99,7 @@ const indexBreakdown = (s: RecruiterStat, lang: Lang) => {
   const rows = t.metrics.map((m) => {
     const max = MAX_OF[m.key] ?? 0;
     const points = Math.round(s.indexParts[m.key] * 10) / 10;
-    const count = m.key === "requirementTarget" ? null : s.stageCounts[m.key];
+    const count = m.key === "coverage" ? null : BUCKETS[m.key].stages.reduce((n, st) => n + s.stageCounts[st], 0);
     return { name: m.name, max, points, count };
   });
   return [
@@ -498,11 +492,12 @@ export default function RecruiterPerformance() {
                 <Pagination page={board.page} pageCount={board.pageCount} total={board.total} pageSize={board.pageSize} onPage={board.setPage} onPageSize={board.setPageSize} />
                 {showParts && (
                   <p className="muted" style={{ margin: "0.5rem 0 0", fontSize: "0.82rem", lineHeight: 1.6 }}>
-                    <strong>Target /55</strong> client/vendor submissions against {TARGET_PER_ASSIGNED} per requirement ·{" "}
-                    <strong>Client rate /25</strong> share of profiles that reached the client ·{" "}
-                    <strong>Interview+ /20</strong> share that reached an interview or beyond. Each cell is the points
-                    earned out of that metric&#39;s maximum, and the three add up to the Index. Green ≥ 60% of what the metric can give, red under 35%. Hover any cell for the rule
-                    behind it, or click a row for the full guide.
+                    <strong>Offer /20</strong> one accepted offer fills it ·{" "}
+                    <strong>Client /20</strong> candidates with the client — submitted, interviewing or selected
+                    (3 fills it) · <strong>Vendor /20</strong> candidates with the vendor (6 fills it) ·{" "}
+                    <strong>Coverage /40</strong> {TARGET_PER_ASSIGNED} profiles out for every requirement assigned
+                    to you. Each candidate counts once, at the furthest stage they reached. Green ≥ 60% of a
+                    bucket, red under 35%. Hover any cell for the rule, or click a row for the full guide.
                   </p>
                 )}
 
