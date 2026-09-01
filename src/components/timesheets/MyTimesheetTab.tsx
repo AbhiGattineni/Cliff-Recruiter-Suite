@@ -6,8 +6,8 @@ import {
   listMyTimesheets,
   listMyLeaves,
   saveTimesheetEntry,
-  TIMESHEET_ZONE,
   TIMESHEET_ZONE_LABEL,
+  timesheetToday,
   TimesheetEntry,
   JobHours,
 } from "../../lib/timesheets";
@@ -16,9 +16,10 @@ import { listOpenJobs } from "../../lib/openJobs";
 import JobHoursPicker from "./JobHoursPicker";
 import { useAuth } from "../../context/AuthContext";
 
-// The server only accepts today's date, decided in the team's zone — so the
-// form has to agree with it, not with whatever zone the browser happens to be in.
-const todayIso = () => DateTime.now().setZone(TIMESHEET_ZONE).toFormat("yyyy-MM-dd");
+// The server only accepts today's date, decided in the team's zone and on the
+// SERVER's clock. Deriving it from the browser meant a machine with the wrong
+// system date offered a day the server refused; this follows the server instead.
+const todayIso = () => timesheetToday();
 const RANGE_DAYS = 30;
 
 export default function MyTimesheetTab() {

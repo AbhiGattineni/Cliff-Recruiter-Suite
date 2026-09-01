@@ -19,6 +19,7 @@ import {
 } from "firebase/firestore";
 import { functions, db } from "../firebase";
 import { ensureConfigured } from "./errors";
+import { setServerNow, todayInZone } from "./serverClock";
 
 export type Role = "admin" | "manager" | "employee";
 
@@ -48,12 +49,20 @@ function rowToProfile(id: string, x: DocumentData): UserProfile {
 
 export async function ensureUserProfile(): Promise<UserProfile> {
   ensureConfigured();
-  const callable = httpsCallable<Record<string, never>, { ok: boolean; profile: UserProfile }>(
-    functions,
-    "ensureUserProfile"
-  );
+  const callable = httpsCallable<
+    Record<string, never>,
+    { ok: boolean; profile: UserProfile; serverNow?: number; today?: string }
+  >(functions, "ensureUserProfile");
   const res = await callable({});
+  // Sync the app's clock to the server's while we're here — every timesheet
+  // date is decided by it, and the local clock can be wrong or set wrongly.
+  if (res.data.serverNow) setServerNow(res.data.serverNow);
   return res.data.profile;
+}
+
+/** Today's timesheet date, on the server's clock rather than the browser's. */
+export function timesheetToday(): string {
+  return todayInZone(TIMESHEET_ZONE);
 }
 
 /** Full roster — admins use it for role management, managers for the team dashboard. */

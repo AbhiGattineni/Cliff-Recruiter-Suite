@@ -22,6 +22,7 @@ import {
   setRole,
   saveEntry,
   saveEntryOnBehalf,
+  todayInZone,
   createLeaveRequest,
   decideLeave,
 } from "./timesheets.js";
@@ -1038,7 +1039,10 @@ export const ensureUserProfile = onCall(
     const email = String(request.auth!.token.email ?? "");
     const displayName = String(request.auth!.token.name ?? email);
     const profile = await getOrCreateProfile(uid, email, displayName);
-    return { ok: true, profile };
+    // The client can't trust its own clock for timesheet dates — a machine with
+    // the wrong system date would offer a day the server then refuses. This is
+    // already called on every sign-in, so it costs nothing to carry the truth.
+    return { ok: true, profile, serverNow: Date.now(), today: todayInZone() };
   }
 );
 
