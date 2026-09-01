@@ -7,6 +7,7 @@ import {
   listMyLeaves,
   saveTimesheetEntry,
   TIMESHEET_ZONE,
+  TIMESHEET_ZONE_LABEL,
   TimesheetEntry,
   JobHours,
 } from "../../lib/timesheets";
@@ -118,7 +119,8 @@ export default function MyTimesheetTab() {
             <label>Date</label>
             <input type="text" value={date} disabled readOnly />
             <span className="muted" style={{ fontSize: "0.78rem" }}>
-              Today only. A day closes at midnight and can&#39;t be filled or changed afterwards.
+              Today only. The day closes at midnight {TIMESHEET_ZONE_LABEL} and can&#39;t be filled or
+              changed afterwards.
             </span>
           </div>
           <div className="field">

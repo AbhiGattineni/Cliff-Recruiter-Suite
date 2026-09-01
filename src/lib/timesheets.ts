@@ -149,8 +149,14 @@ export async function saveTimesheetEntry(
   return res.data.entry;
 }
 
-/** The team's working day, so the client agrees with the server on "today". */
-export const TIMESHEET_ZONE = "Asia/Kolkata";
+/**
+ * The team's working day, so the client agrees with the server on "today".
+ * Must stay identical to TIMESHEET_ZONE in functions/src/timesheets.ts — if the
+ * two drift, the form offers a date the server then refuses.
+ */
+export const TIMESHEET_ZONE = "America/New_York";
+/** Shown next to the date so a recruiter knows which midnight closes their day. */
+export const TIMESHEET_ZONE_LABEL = "US Eastern";
 
 export async function listMyTimesheets(uid: string, from: string, to: string): Promise<TimesheetEntry[]> {
   ensureConfigured();

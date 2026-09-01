@@ -29,11 +29,15 @@ export interface UserProfile {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
- * The team's working day is India time, so that is what "today" means for a
- * timesheet — not the server's UTC clock, which rolls over at 5:30am IST and
- * would reject a genuine early-morning entry as yesterday's.
+ * The team's working day is US Eastern, so that is what "today" means for a
+ * timesheet — not the server's UTC clock, which rolls over mid-evening Eastern
+ * and would close the day while people are still working.
+ *
+ * "America/New_York", not the fixed "EST": Eastern is EDT (UTC-4) for about
+ * eight months of the year, so a fixed -5 offset would put the midnight cutoff
+ * an hour out for most of the calendar. This tracks the change automatically.
  */
-export const TIMESHEET_ZONE = "Asia/Kolkata";
+export const TIMESHEET_ZONE = "America/New_York";
 
 /** Today's date in the team's zone, as YYYY-MM-DD. */
 export function todayInZone(now: Date = new Date()): string {
