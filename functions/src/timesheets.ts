@@ -28,6 +28,24 @@ export interface UserProfile {
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * The team's working day is India time, so that is what "today" means for a
+ * timesheet — not the server's UTC clock, which rolls over at 5:30am IST and
+ * would reject a genuine early-morning entry as yesterday's.
+ */
+export const TIMESHEET_ZONE = "Asia/Kolkata";
+
+/** Today's date in the team's zone, as YYYY-MM-DD. */
+export function todayInZone(now: Date = new Date()): string {
+  // en-CA formats as YYYY-MM-DD, which is exactly the shape stored.
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: TIMESHEET_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+
 function toMillis(v: unknown): number | null {
   const t = v as { toMillis?: () => number } | undefined;
   return t?.toMillis?.() ?? null;
@@ -122,6 +140,9 @@ export interface TimesheetEntry {
   jobs: JobHours[];
   /** Free-text note. Was the only record of what was worked on before `jobs`. */
   workedOn: string;
+  /** Set when a manager/admin filled this day for the person, rather than the person themselves. */
+  filledByUid: string | null;
+  filledByName: string | null;
   createdAt: number | null;
   updatedAt: number | null;
 }
@@ -143,6 +164,8 @@ function rowToEntry(id: string, x: Record<string, unknown>): TimesheetEntry {
         }))
       : [],
     workedOn: String(x.workedOn ?? ""),
+    filledByUid: x.filledByUid ? String(x.filledByUid) : null,
+    filledByName: x.filledByName ? String(x.filledByName) : null,
     createdAt: toMillis(x.createdAt),
     updatedAt: toMillis(x.updatedAt),
   };
@@ -186,6 +209,19 @@ export async function saveEntry(
   jobsRaw?: unknown
 ): Promise<TimesheetEntry> {
   if (!DATE_RE.test(date)) throw new Error("date must be in YYYY-MM-DD format.");
+  // You may only fill TODAY. Backdating and future-dating are both refused,
+  // and this single rule is also what closes editing: today's entry can still
+  // be corrected (the write below upserts), but once the day is over the date
+  // no longer matches and nothing can change it. A missed day is a manager's
+  // job from then on — see saveEntryOnBehalf.
+  const today = todayInZone();
+  if (date !== today) {
+    throw new Error(
+      date > today
+        ? "You can't fill a timesheet for a future date."
+        : `You can only fill today's timesheet (${today}). Ask a manager to fill ${date} for you.`
+    );
+  }
   const jobs = cleanJobs(jobsRaw);
   // At least one requirement is mandatory — a timesheet with no requirement
   // attached to the hours isn't useful for judging where the time went.
@@ -198,19 +234,82 @@ export async function saveEntry(
     throw new Error("Total hours for a day must be more than 0 and at most 24.");
   }
   hours = Math.round(total * 100) / 100;
+  return writeEntry(profile, date, hours, workedOn, jobs, null);
+}
+
+/**
+ * A manager or admin filling a day the person themselves can no longer reach.
+ *
+ * Missing days only: if an entry already exists it is left alone, so nobody
+ * can quietly rewrite what a recruiter actually logged. The hours belong to
+ * the recruiter — `uid` and `displayName` are theirs, and every total that
+ * counts them is unchanged — but the entry carries who really typed it.
+ */
+export async function saveEntryOnBehalf(
+  actor: UserProfile,
+  targetUid: string,
+  date: string,
+  workedOn: string,
+  jobsRaw?: unknown
+): Promise<TimesheetEntry> {
+  if (actor.role !== "admin" && actor.role !== "manager") {
+    throw new Error("Only a manager or admin can fill someone else's timesheet.");
+  }
+  if (!DATE_RE.test(date)) throw new Error("date must be in YYYY-MM-DD format.");
+  if (date > todayInZone()) throw new Error("You can't fill a timesheet for a future date.");
+
   const db = getFirestore();
-  const id = `${profile.uid}_${date}`;
+  const targetSnap = await db.collection("userProfiles").doc(String(targetUid)).get();
+  if (!targetSnap.exists) throw new Error("That person doesn't have a profile yet.");
+  const t = targetSnap.data()!;
+  const target: UserProfile = {
+    uid: String(targetUid),
+    email: String(t.email ?? ""),
+    displayName: String(t.displayName ?? ""),
+    role: (t.role as Role) ?? "employee",
+    createdAt: null,
+    updatedAt: null,
+  };
+
+  const existing = await db.collection("timesheetEntries").doc(`${targetUid}_${date}`).get();
+  if (existing.exists) {
+    throw new Error(`${target.displayName || target.email} already filled ${date}. Existing entries can't be changed.`);
+  }
+
+  const jobs = cleanJobs(jobsRaw);
+  if (jobs.length === 0) throw new Error("Select at least one requirement worked on.");
+  const total = jobs.reduce((sum, j) => sum + j.hours, 0);
+  if (!(Number.isFinite(total) && total > 0 && total <= 24)) {
+    throw new Error("Total hours for a day must be more than 0 and at most 24.");
+  }
+  return writeEntry(target, date, Math.round(total * 100) / 100, workedOn, jobs, actor);
+}
+
+/** The one place a timesheet entry is written, whoever is doing the typing. */
+async function writeEntry(
+  owner: UserProfile,
+  date: string,
+  hours: number,
+  workedOn: string,
+  jobs: JobHours[],
+  filledBy: UserProfile | null
+): Promise<TimesheetEntry> {
+  const db = getFirestore();
+  const id = `${owner.uid}_${date}`;
   const ref = db.collection("timesheetEntries").doc(id);
   const existing = await ref.get();
   await ref.set(
     {
-      uid: profile.uid,
-      email: profile.email,
-      displayName: profile.displayName,
+      uid: owner.uid,
+      email: owner.email,
+      displayName: owner.displayName,
       date,
       hours,
       jobs,
       workedOn: workedOn.slice(0, 500),
+      // Who actually typed it, when that isn't the person it belongs to.
+      filledByUid: filledBy ? filledBy.uid : null,
+      filledByName: filledBy ? filledBy.displayName || filledBy.email : null,
       createdAt: existing.exists ? existing.data()!.createdAt : FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     },

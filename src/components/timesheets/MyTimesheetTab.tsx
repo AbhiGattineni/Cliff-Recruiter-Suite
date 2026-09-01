@@ -1,14 +1,23 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DateTime } from "luxon";
 import { friendlyError } from "../../lib/errors";
-import { listMyTimesheets, listMyLeaves, saveTimesheetEntry, TimesheetEntry, JobHours } from "../../lib/timesheets";
+import {
+  listMyTimesheets,
+  listMyLeaves,
+  saveTimesheetEntry,
+  TIMESHEET_ZONE,
+  TimesheetEntry,
+  JobHours,
+} from "../../lib/timesheets";
 import { EXPECTED_DAILY_HOURS, daysBetween, missingDays, shortDays } from "../../lib/timesheetStats";
 import { listOpenJobs } from "../../lib/openJobs";
 import JobHoursPicker from "./JobHoursPicker";
 import { useAuth } from "../../context/AuthContext";
 
-const todayIso = () => DateTime.local().toFormat("yyyy-MM-dd");
+// The server only accepts today's date, decided in the team's zone — so the
+// form has to agree with it, not with whatever zone the browser happens to be in.
+const todayIso = () => DateTime.now().setZone(TIMESHEET_ZONE).toFormat("yyyy-MM-dd");
 const RANGE_DAYS = 30;
 
 export default function MyTimesheetTab() {
@@ -39,14 +48,16 @@ export default function MyTimesheetTab() {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
-  const pickDate = (d: string) => {
-    setDate(d);
-    setSaved(false);
-    setError(null);
-    const existing = byDate.get(d);
+  // Today's entry, loaded into the form so a same-day correction starts from
+  // what is already saved rather than from an empty form.
+  const loadedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (loadedFor.current === date || !entriesQ.data) return;
+    loadedFor.current = date;
+    const existing = byDate.get(date);
     setWorkedOn(existing?.workedOn ?? "");
     setJobs(existing?.jobs ?? []);
-  };
+  }, [date, entriesQ.data, byDate]);
 
   const selected = byDate.get(date);
   const jobTotal = Math.round(jobs.reduce((s, j) => s + (Number(j.hours) || 0), 0) * 100) / 100;
@@ -104,8 +115,11 @@ export default function MyTimesheetTab() {
         {saved && !error && <div className="alert success">Saved {date}.</div>}
         <div className="row">
           <div className="field">
-            <label>Date <span style={{ color: "var(--danger)" }}>*</span></label>
-            <input type="date" max={todayIso()} value={date} onChange={(e) => pickDate(e.target.value)} />
+            <label>Date</label>
+            <input type="text" value={date} disabled readOnly />
+            <span className="muted" style={{ fontSize: "0.78rem" }}>
+              Today only. A day closes at midnight and can&#39;t be filled or changed afterwards.
+            </span>
           </div>
           <div className="field">
             <label>
@@ -139,7 +153,8 @@ export default function MyTimesheetTab() {
         </div>
         {selected && (
           <p className="muted" style={{ fontSize: "0.82rem" }}>
-            You already logged {selected.hours}h for this date — saving will update it.
+            You already logged {selected.hours}h today — saving replaces it. After midnight this day
+            locks, and only a manager can fill it.
           </p>
         )}
         {jobsIncomplete && (
@@ -175,7 +190,8 @@ export default function MyTimesheetTab() {
         <div className="alert warn">
           You&#39;re missing <strong>{missing.length}</strong> working day{missing.length === 1 ? "" : "s"} in the
           last {RANGE_DAYS} days: {missing.slice(0, 8).join(", ")}
-          {missing.length > 8 ? "…" : ""}
+          {missing.length > 8 ? "…" : ""}. A closed day can only be filled by a manager or admin — ask
+          them to add it for you.
         </div>
       )}
 
@@ -205,11 +221,12 @@ export default function MyTimesheetTab() {
                   <th style={{ textAlign: "right" }}>Hours</th>
                   <th>Requirements</th>
                   <th>Notes</th>
+                  <th>Filled by</th>
                 </tr>
               </thead>
               <tbody>
                 {(entriesQ.data ?? []).map((e) => (
-                  <tr key={e.id} style={{ cursor: "pointer" }} onClick={() => pickDate(e.date)}>
+                  <tr key={e.id}>
                     <td>{e.date}</td>
                     <td style={{ textAlign: "right" }}>{e.hours}</td>
                     <td style={{ whiteSpace: "normal" }}>
@@ -224,11 +241,20 @@ export default function MyTimesheetTab() {
                       )}
                     </td>
                     <td style={{ whiteSpace: "normal" }}>{e.workedOn || <span className="muted">—</span>}</td>
+                    <td style={{ whiteSpace: "normal" }}>
+                      {e.filledByName ? (
+                        <span className="pill amber" title={`Filled on your behalf by ${e.filledByName}`}>
+                          {e.filledByName}
+                        </span>
+                      ) : (
+                        <span className="muted">You</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
                 {(entriesQ.data ?? []).length === 0 && (
                   <tr>
-                    <td colSpan={4} className="muted" style={{ textAlign: "center", padding: "1rem" }}>
+                    <td colSpan={5} className="muted" style={{ textAlign: "center", padding: "1rem" }}>
                       No entries yet.
                     </td>
                   </tr>

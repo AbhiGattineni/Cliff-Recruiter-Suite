@@ -22,6 +22,8 @@ const entry = (over: Partial<TimesheetEntry>): TimesheetEntry => ({
   hours: 8,
   jobs: [],
   workedOn: "",
+  filledByUid: null,
+  filledByName: null,
   createdAt: null,
   updatedAt: null,
   ...over,

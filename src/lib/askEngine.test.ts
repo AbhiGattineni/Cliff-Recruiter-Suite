@@ -188,7 +188,8 @@ describe("runPlan grouped metric aggregation", () => {
 function entry(name: string, jobs: TimesheetEntry["jobs"]): TimesheetEntry {
   return {
     id: "e", uid: "u", email: `${name}@x.com`, displayName: name, date: "2026-08-04",
-    hours: jobs.reduce((s, j) => s + j.hours, 0), jobs, workedOn: "", createdAt: null, updatedAt: null,
+    hours: jobs.reduce((s, j) => s + j.hours, 0), jobs, workedOn: "",
+    filledByUid: null, filledByName: null, createdAt: null, updatedAt: null,
   };
 }
 

@@ -94,6 +94,9 @@ export interface TimesheetEntry {
   /** Per-requirement split. Empty on older entries. */
   jobs: JobHours[];
   workedOn: string;
+  /** Set when a manager/admin filled this day for the person, not the person themselves. */
+  filledByUid: string | null;
+  filledByName: string | null;
   createdAt: number | null;
   updatedAt: number | null;
 }
@@ -115,25 +118,39 @@ function rowToEntry(id: string, x: DocumentData): TimesheetEntry {
         }))
       : [],
     workedOn: String(x.workedOn ?? ""),
+    filledByUid: x.filledByUid ? String(x.filledByUid) : null,
+    filledByName: x.filledByName ? String(x.filledByName) : null,
     createdAt: toMillis(x.createdAt),
     updatedAt: toMillis(x.updatedAt),
   };
 }
 
+/**
+ * Save a timesheet day.
+ *
+ * Without `forUid` this is you filling your own, and the server only accepts
+ * today's date — so yesterday can never be edited or backdated. With `forUid`
+ * (admin/manager only) it fills a day for someone else who missed it, and the
+ * entry records who really typed it.
+ */
 export async function saveTimesheetEntry(
   date: string,
   hours: number,
   workedOn: string,
-  jobs: JobHours[] = []
+  jobs: JobHours[] = [],
+  forUid?: string
 ): Promise<TimesheetEntry> {
   ensureConfigured();
   const callable = httpsCallable<
-    { date: string; hours: number; workedOn: string; jobs: JobHours[] },
+    { date: string; hours: number; workedOn: string; jobs: JobHours[]; forUid?: string },
     { ok: boolean; entry: TimesheetEntry }
   >(functions, "saveTimesheetEntry");
-  const res = await callable({ date, hours, workedOn, jobs });
+  const res = await callable({ date, hours, workedOn, jobs, ...(forUid ? { forUid } : {}) });
   return res.data.entry;
 }
+
+/** The team's working day, so the client agrees with the server on "today". */
+export const TIMESHEET_ZONE = "Asia/Kolkata";
 
 export async function listMyTimesheets(uid: string, from: string, to: string): Promise<TimesheetEntry[]> {
   ensureConfigured();

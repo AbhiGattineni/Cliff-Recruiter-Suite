@@ -4,6 +4,7 @@ import { DateTime } from "luxon";
 import { friendlyError } from "../../lib/errors";
 import { listTeamTimesheets, listLeaveRequests, decideLeaveRequest, Role, TimesheetEntry } from "../../lib/timesheets";
 import { daysBetween, missingDays } from "../../lib/timesheetStats";
+import FillOnBehalfModal from "./FillOnBehalfModal";
 
 const todayIso = () => DateTime.local().toFormat("yyyy-MM-dd");
 const STATUS_PILL: Record<string, string> = { pending: "amber", approved: "green", rejected: "red" };
@@ -20,6 +21,9 @@ export default function TeamDashboardTab({ role }: { role: Role }) {
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [decideError, setDecideError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // The day being filled on someone's behalf, if any. A recruiter can only fill
+  // today, so a closed day is only ever recorded from here.
+  const [filling, setFilling] = useState<{ uid: string; name: string; date: string } | null>(null);
   const toggle = (uid: string) =>
     setExpanded((cur) => {
       const next = new Set(cur);
@@ -70,6 +74,14 @@ export default function TeamDashboardTab({ role }: { role: Role }) {
 
   return (
     <div>
+      {filling && (
+        <FillOnBehalfModal
+          uid={filling.uid}
+          name={filling.name}
+          date={filling.date}
+          onClose={() => setFilling(null)}
+        />
+      )}
       <div className="card">
         <div className="row" style={{ alignItems: "flex-end" }}>
           <div className="field">
@@ -134,7 +146,13 @@ export default function TeamDashboardTab({ role }: { role: Role }) {
                         <tr>
                           <td></td>
                           <td colSpan={5} style={{ background: "#f8fafc", padding: "0.6rem 0.75rem" }}>
-                            <TeamMemberDetail entries={r.entries} missing={r.missing} />
+                            <TeamMemberDetail
+                          entries={r.entries}
+                          missing={r.missing}
+                          onFill={(d) =>
+                            setFilling({ uid: r.user.uid, name: r.user.displayName || r.user.email, date: d })
+                          }
+                        />
                           </td>
                         </tr>
                       )}
@@ -250,15 +268,35 @@ export default function TeamDashboardTab({ role }: { role: Role }) {
 }
 
 /** One person's detail, expanded inline in the Timesheet completion table: which days are missing, and every entry actually filed. */
-function TeamMemberDetail({ entries, missing }: { entries: TimesheetEntry[]; missing: string[] }) {
+function TeamMemberDetail({
+  entries,
+  missing,
+  onFill,
+}: {
+  entries: TimesheetEntry[];
+  missing: string[];
+  onFill: (date: string) => void;
+}) {
   return (
     <>
       {missing.length > 0 && (
         <div style={{ marginBottom: "0.6rem" }}>
           <strong style={{ fontSize: "0.82rem" }}>Missing:</strong>{" "}
           {missing.map((d) => (
-            <span className="pill red" key={d} style={{ marginRight: "0.3rem" }}>{d}</span>
+            <button
+              type="button"
+              className="pill red"
+              key={d}
+              style={{ marginRight: "0.3rem", border: "none", cursor: "pointer", font: "inherit", fontWeight: 600 }}
+              title={`Fill ${d} on their behalf`}
+              onClick={() => onFill(d)}
+            >
+              {d} +
+            </button>
           ))}
+          <span className="muted" style={{ fontSize: "0.78rem" }}>
+            Click a day to fill it for them — it will show that you added it.
+          </span>
         </div>
       )}
       {entries.length === 0 ? (
@@ -271,6 +309,7 @@ function TeamMemberDetail({ entries, missing }: { entries: TimesheetEntry[]; mis
               <th style={{ textAlign: "right" }}>Hours</th>
               <th>Requirement(s)</th>
               <th>Notes</th>
+              <th>Filled by</th>
             </tr>
           </thead>
           <tbody>
@@ -284,6 +323,15 @@ function TeamMemberDetail({ entries, missing }: { entries: TimesheetEntry[]; mis
                     : "—"}
                 </td>
                 <td style={{ whiteSpace: "normal" }} className="muted">{e.workedOn || "—"}</td>
+                <td style={{ whiteSpace: "nowrap" }}>
+                  {e.filledByName ? (
+                    <span className="pill amber" title={`Added on their behalf by ${e.filledByName}`}>
+                      {e.filledByName}
+                    </span>
+                  ) : (
+                    <span className="muted">Themselves</span>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

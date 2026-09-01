@@ -21,6 +21,7 @@ import {
   getProfile,
   setRole,
   saveEntry,
+  saveEntryOnBehalf,
   createLeaveRequest,
   decideLeave,
 } from "./timesheets.js";
@@ -1068,8 +1069,15 @@ export const saveTimesheetEntry = onCall(
     const date = String(request.data?.date ?? "");
     const hours = Number(request.data?.hours);
     const workedOn = String(request.data?.workedOn ?? "");
+    // `forUid` = a manager/admin filling a day the person can no longer reach.
+    // Handled here rather than as its own callable: every 2nd-gen function is a
+    // Cloud Run service holding reserved CPU, and this project has repeatedly
+    // hit the region's allowable-CPU quota.
+    const forUid = String(request.data?.forUid ?? "").trim();
     try {
-      const entry = await saveEntry(profile, date, hours, workedOn, request.data?.jobs);
+      const entry = forUid
+        ? await saveEntryOnBehalf(profile, forUid, date, workedOn, request.data?.jobs)
+        : await saveEntry(profile, date, hours, workedOn, request.data?.jobs);
       return { ok: true, entry };
     } catch (e) {
       throw new HttpsError("invalid-argument", e instanceof Error ? e.message : String(e));
