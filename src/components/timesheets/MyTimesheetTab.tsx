@@ -42,22 +42,47 @@ export default function MyTimesheetTab() {
   // Open requirements for the picker — cached, so switching dates doesn't refetch.
   const openJobsQ = useQuery({ queryKey: ["openJobs"], queryFn: listOpenJobs, staleTime: 10 * 60_000 });
 
+  // "Today" has to stay live. This was computed once when the tab mounted, so a
+  // page left open across the rollover kept offering yesterday's date — which
+  // the server then refused with "you can only fill today's timesheet", and the
+  // date field is no longer editable, so the person was stuck until they
+  // reloaded. Re-checked on a timer and whenever the tab regains focus.
   const [date, setDate] = useState(todayIso());
+  useEffect(() => {
+    const sync = () => setDate((cur) => (todayIso() === cur ? cur : todayIso()));
+    const id = window.setInterval(sync, 60_000);
+    window.addEventListener("focus", sync);
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("focus", sync);
+      document.removeEventListener("visibilitychange", sync);
+    };
+  }, []);
   const [workedOn, setWorkedOn] = useState("");
   const [jobs, setJobs] = useState<JobHours[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [rolled, setRolledOver] = useState(false);
 
   // Today's entry, loaded into the form so a same-day correction starts from
   // what is already saved rather than from an empty form.
   const loadedFor = useRef<string | null>(null);
   useEffect(() => {
     if (loadedFor.current === date || !entriesQ.data) return;
+    const rolledOver = loadedFor.current !== null;
     loadedFor.current = date;
     const existing = byDate.get(date);
     setWorkedOn(existing?.workedOn ?? "");
     setJobs(existing?.jobs ?? []);
+    // A rollover under an open tab means anything typed was for yesterday, and
+    // yesterday is now closed — say so rather than silently moving the date.
+    if (rolledOver) {
+      setSaved(false);
+      setError(null);
+      setRolledOver(true);
+    }
   }, [date, entriesQ.data, byDate]);
 
   const selected = byDate.get(date);
@@ -113,6 +138,13 @@ export default function MyTimesheetTab() {
       <div className="card">
         <h2>Fill your timesheet</h2>
         {error && <div className="alert error">{error}</div>}
+        {rolled && !error && (
+          <div className="alert warn">
+            The day rolled over to <strong>{date}</strong> while this page was open. Anything you had
+            typed was for the previous day, which is now closed — a manager or admin can still fill it
+            for you.
+          </div>
+        )}
         {saved && !error && <div className="alert success">Saved {date}.</div>}
         <div className="row">
           <div className="field">
