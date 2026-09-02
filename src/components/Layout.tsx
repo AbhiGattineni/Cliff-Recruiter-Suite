@@ -15,6 +15,7 @@ const NAV = [
   { to: "/client-tracker", icon: "🤝", label: "Client Tracker" },
   { to: "/candidate-pool", icon: "👥", label: "Candidate Pool" },
   { to: "/timesheets", icon: "⏱️", label: "Timesheets" },
+  { to: "/consultants", icon: "🧾", label: "Consultants" },
   { to: "/preferences", icon: "⚙️", label: "Preferences" },
 ];
 

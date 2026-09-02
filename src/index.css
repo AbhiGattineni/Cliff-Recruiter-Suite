@@ -423,6 +423,26 @@ table.data th.colf-th { padding-right: 0.35rem; }
   .ask-chip-field select, .ask-chip-field input { max-width: 100%; }
 }
 
+/* ---------- Consultant portal ---------- */
+/* Its own shell, not the recruiter one with things switched off — a placed
+   consultant never sees the sidebar or learns the rest of the app exists. */
+.portal { min-height: 100vh; background: var(--bg); }
+.portal-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  background: var(--brand); color: #fff; padding: 0.85rem 1.5rem; font-size: 1rem;
+}
+.portal-bar .muted { color: #cddaeb; }
+.portal-who { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.portal-who .btn.ghost { color: #fff; border-color: rgba(255,255,255,0.45); }
+.portal-who .btn.ghost:hover { background: rgba(255,255,255,0.12); }
+.portal-main { max-width: 900px; margin: 0 auto; padding: 1.5rem; }
+.portal-main input[type="number"] { max-width: 120px; }
+
+@media (max-width: 768px) {
+  .portal-bar { padding: 0.75rem 1rem; flex-wrap: wrap; }
+  .portal-main { padding: 1rem; }
+}
+
 /* ---------- Alerts ---------- */
 .alert { padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.9rem; }
 .alert.info { background: #eaf2fb; color: #1c4e80; border: 1px solid #c5dbf2; }
