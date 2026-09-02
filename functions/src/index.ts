@@ -44,6 +44,19 @@ const LINKEDIN_API_KEY = defineSecret("LINKEDIN_API_KEY");
 const commonOpts = {
   region: "us-central1",
   cors: true,
+  // Cloud Run charges the regional CPU quota by what a service is *allowed* to
+  // scale to — cpu × maxInstances — not by what it actually uses. Left at the
+  // platform default of 100 instances, twenty-odd idle callables reserved
+  // thousands of CPUs between them and put the project within one function of
+  // its limit: the deploy that added the twenty-second one failed with "Quota
+  // exceeded for total allowable CPU per project per region", and took every
+  // other function's update down with it.
+  //
+  // Ten is far more than this app can use (a v2 callable serves 80 concurrent
+  // requests per instance, and there are a few dozen people on the whole
+  // suite), and it keeps the reservation small enough that adding a function is
+  // no longer an event.
+  maxInstances: 10,
   // These non-secret values come from environment (.env for emulator, or set on deploy).
 };
 

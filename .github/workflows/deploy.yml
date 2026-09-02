@@ -128,5 +128,31 @@ jobs:
       - name: Deploy hosting + Firestore rules
         run: npx firebase-tools@13 deploy --only hosting,firestore:rules --project cliff-services --non-interactive --force
 
+      # Two passes, for the same quota reason.
+      #
+      # The regional CPU quota is spent on the ceiling each service is allowed
+      # to scale to, so a deploy that lowers those ceilings frees the headroom a
+      # *new* function needs — but only once it has landed. Doing it in one pass
+      # is a chicken-and-egg: the new function is created in the same breath
+      # that would have made room for it, and fails.
+      #
+      # So refresh what is already deployed first, then deploy the lot. The
+      # second pass is a no-op for anything the first one already settled, and
+      # if the listing fails it simply falls back to a single ordinary deploy.
       - name: Deploy Cloud Functions
-        run: npx firebase-tools@13 deploy --only functions --project cliff-services --non-interactive --force
+        run: |
+          set -euo pipefail
+          in_source=$(grep -oP '^export const \K\w+(?= = onCall)' functions/src/index.ts | sort -u)
+          deployed=$(npx firebase-tools@13 functions:list --project cliff-services --json 2>/dev/null \
+            | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{for(const f of JSON.parse(s).result||[])if(f.id)console.log(f.id)}catch{}})' \
+            | sort -u)
+          only=$(comm -12 <(echo "$in_source") <(echo "$deployed") | sed 's/^/functions:/' | paste -sd, -)
+          if [ -n "$only" ]; then
+            # Not fatal: pass 1 exists only to free quota, and it is expected to
+            # report a failure for anything already wedged by the shortage it is
+            # there to clear. Pass 2 below is the one that has to pass.
+            echo "Pass 1 — already deployed: $only"
+            npx firebase-tools@13 deploy --only "$only" --project cliff-services --non-interactive --force || true
+          fi
+          echo "Pass 2 — all functions"
+          npx firebase-tools@13 deploy --only functions --project cliff-services --non-interactive --force
