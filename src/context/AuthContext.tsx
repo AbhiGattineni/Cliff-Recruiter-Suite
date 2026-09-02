@@ -109,15 +109,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [fetchProfile]);
 
+  /**
+   * Signing IN is open to any address.
+   *
+   * The domain check here used to be the app's front door, back when every
+   * account belonged to staff. It isn't any more: a placed consultant is
+   * invited on their own email — usually a personal one — and refusing them at
+   * the door meant an account we deliberately created could never be used.
+   *
+   * Nothing is lost by dropping it. An account only exists if we made it (an
+   * invite, server-side) or if someone signed up, and signing UP is still
+   * restricted below. What an account can then reach is decided by its role,
+   * enforced in firestore.rules — never by the shape of its email.
+   */
   const signIn = async (email: string, password: string) => {
-    if (!isAllowedEmail(email)) throw new Error(DOMAIN_MSG);
-    const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
-    if (!isAllowedEmail(cred.user.email || "")) {
-      await fbSignOut(auth);
-      throw new Error(DOMAIN_MSG);
-    }
+    await signInWithEmailAndPassword(auth, email.trim(), password);
   };
 
+  /**
+   * Signing UP is still staff-only. Consultants are invited, never self-served,
+   * so opening this would just let anyone create an account.
+   */
   const signUp = async (email: string, password: string, displayName?: string) => {
     if (!isAllowedEmail(email)) throw new Error(DOMAIN_MSG);
     const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
