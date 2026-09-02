@@ -66,6 +66,32 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ---- Placed-consultant billing ----------------------------------------
+    // A consultant may read their own assignment (they need to know what they
+    // are filing against) but never anyone else's, and never the rates.
+    match /assignments/{assignmentId} {
+      allow get, list: if isStaff() ||
+        (myRole() == "consultant" && resource.data.consultantUid == request.auth.uid);
+      allow write: if false; // via the consultantOps callable only
+    }
+
+    // Bill and pay rates live apart from the assignment for exactly this rule:
+    // Firestore grants whole documents, so a field can't be hidden inside one.
+    // Staff only, with no exception for the consultant the rates concern.
+    match /assignmentRates/{assignmentId} {
+      allow get, list: if isStaff();
+      allow write: if false;
+    }
+
+    // A consultant reads their own weeks; staff read everyone's to approve and
+    // to bill. Writes are the callable's, so status can only move through the
+    // submit/approve path rather than being set directly.
+    match /consultantTimesheets/{sheetId} {
+      allow get, list: if isStaff() ||
+        (myRole() == "consultant" && resource.data.consultantUid == request.auth.uid);
+      allow write: if false;
+    }
+
     // Signup OTP records — written/read only by Cloud Functions (the admin SDK
     // bypasses these rules). Clients must never touch them.
     match /signupOtps/{emailKey} {

@@ -26,6 +26,7 @@ import {
   createLeaveRequest,
   decideLeave,
 } from "./timesheets.js";
+import { inviteConsultant, saveAssignment, submitTimesheet, decideTimesheet } from "./consultants.js";
 
 initializeApp();
 
@@ -1121,6 +1122,64 @@ export const decideLeaveRequest = onCall(
       const leave = await decideLeave(profile, id, decision, note);
       return { ok: true, leave };
     } catch (e) {
+      throw new HttpsError("failed-precondition", e instanceof Error ? e.message : String(e));
+    }
+  }
+);
+
+/**
+ * Consultant billing: invites, assignments, weekly timesheets, approval.
+ *
+ * One callable branching on `action`, not five separate ones. Every 2nd-gen
+ * function is its own Cloud Run service holding reserved CPU, and this project
+ * has repeatedly failed to deploy on "quota exceeded for total allowable CPU
+ * per project per region" — see the `ai` callable, which was merged for the
+ * same reason. A new module is exactly where that bill comes due, so it costs
+ * one service rather than five.
+ */
+export const consultantOps = onCall(
+  { ...commonOpts, timeoutSeconds: 30 },
+  async (request) => {
+    const profile = await requireProfile(request.auth);
+    const action = String(request.data?.action ?? "");
+    try {
+      switch (action) {
+        case "invite": {
+          const user = await inviteConsultant(
+            profile,
+            String(request.data?.email ?? ""),
+            String(request.data?.displayName ?? "")
+          );
+          return { ok: true, user };
+        }
+        case "saveAssignment": {
+          const assignment = await saveAssignment(profile, (request.data ?? {}) as Record<string, unknown>);
+          return { ok: true, assignment };
+        }
+        case "submitTimesheet": {
+          const timesheet = await submitTimesheet(
+            profile,
+            String(request.data?.assignmentId ?? ""),
+            String(request.data?.weekStart ?? ""),
+            request.data?.hours,
+            String(request.data?.note ?? "")
+          );
+          return { ok: true, timesheet };
+        }
+        case "decideTimesheet": {
+          const timesheet = await decideTimesheet(
+            profile,
+            String(request.data?.id ?? ""),
+            request.data?.decision === "approved" ? "approved" : "rejected",
+            String(request.data?.decisionNote ?? "")
+          );
+          return { ok: true, timesheet };
+        }
+        default:
+          throw new HttpsError("invalid-argument", `Unknown action "${action}".`);
+      }
+    } catch (e) {
+      if (e instanceof HttpsError) throw e;
       throw new HttpsError("failed-precondition", e instanceof Error ? e.message : String(e));
     }
   }
