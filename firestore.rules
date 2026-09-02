@@ -16,6 +16,16 @@ service cloud.firestore {
         : null;
     }
 
+    // Staff = people who work for Cliff. Consultants are outsiders we placed at
+    // a client; they sign in only to file their own billable hours.
+    //
+    // Everything below asks for staff explicitly. "Signed in" is no longer a
+    // sufficient test for anything, because signing in no longer implies
+    // working here.
+    function isStaff() {
+      return myRole() in ["admin", "manager", "employee"];
+    }
+
     // Timesheets/leave/roles: reads happen directly from the client (cheaper
     // than a Cloud Function per read, and avoids deploying a Cloud Run
     // service for every list endpoint). Writes still go through Cloud
@@ -23,19 +33,24 @@ service cloud.firestore {
     // approval-chain / role-assignment logic stays in tested server code
     // rather than the rules DSL.
     match /userProfiles/{uid} {
+      // Your own profile is how the app learns your role, so everyone can read
+      // theirs. Reading anyone else's, or listing the roster, is staff-only.
       allow get: if request.auth != null && (request.auth.uid == uid || myRole() in ["admin", "manager"]);
       allow list: if myRole() in ["admin", "manager"];
       allow write: if false;
     }
 
+    // STAFF timesheets (recruiters logging against requirements). A consultant
+    // has no business here even for their own uid — their hours live in their
+    // own collection, with rates and approval attached.
     match /timesheetEntries/{entryId} {
-      allow get, list: if request.auth != null &&
+      allow get, list: if isStaff() &&
         (resource.data.uid == request.auth.uid || myRole() in ["admin", "manager"]);
       allow write: if false;
     }
 
     match /leaveRequests/{leaveId} {
-      allow get, list: if request.auth != null && (
+      allow get, list: if isStaff() && (
         resource.data.uid == request.auth.uid ||
         myRole() == "admin" ||
         (myRole() == "manager" && resource.data.role == "employee")
@@ -43,10 +58,11 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Shared report/resume run history: any signed-in user of this org may read;
-    // writes go through Cloud Functions (admin) only.
+    // Shared report/resume run history. This used to be readable by any
+    // signed-in user, which was fine while every account belonged to staff.
+    // Consultants have accounts now, so it asks for staff explicitly.
     match /runs/{runId} {
-      allow read: if request.auth != null;
+      allow read: if isStaff();
       allow write: if false;
     }
 

@@ -21,7 +21,16 @@ import { functions, db } from "../firebase";
 import { ensureConfigured } from "./errors";
 import { setServerNow, todayInZone } from "./serverClock";
 
-export type Role = "admin" | "manager" | "employee";
+/**
+ * admin/manager/employee are STAFF. consultant is someone we placed at a
+ * client, who signs in only to file billable hours — see functions/src/timesheets.ts.
+ */
+export type Role = "admin" | "manager" | "employee" | "consultant";
+
+/** Staff see the recruiter suite; consultants see only their own portal. */
+export function isStaff(role: Role | undefined | null): boolean {
+  return !!role && role !== "consultant";
+}
 
 export interface UserProfile {
   uid: string;

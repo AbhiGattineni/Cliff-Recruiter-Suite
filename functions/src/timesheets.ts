@@ -10,7 +10,32 @@
 
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
-export type Role = "admin" | "manager" | "employee";
+/**
+ * admin/manager/employee are STAFF — people who work for Cliff.
+ * consultant is an OUTSIDER — someone we placed at a client, who signs in only
+ * to file the hours we bill for them. They must never reach anything staff can
+ * see, so every role check that means "staff" has to say so explicitly rather
+ * than assuming "signed in" is enough.
+ */
+export type Role = "admin" | "manager" | "employee" | "consultant";
+
+export const STAFF_ROLES: Role[] = ["admin", "manager", "employee"];
+
+export function isStaff(role: Role): boolean {
+  return role !== "consultant";
+}
+
+/** Emails at this domain are staff; anyone else signing in is an outsider. */
+export const STAFF_EMAIL_DOMAIN = "cliff-services.com";
+
+export function roleForNewAccount(email: string): Role {
+  const e = email.trim().toLowerCase();
+  if (e === PERMANENT_ADMIN_EMAIL) return "admin";
+  // Defaulting an outside email to "employee" would drop a placed consultant
+  // into the recruiters' own timesheets and the Team Dashboard completion
+  // table. Anyone off the staff domain starts as a consultant instead.
+  return e.endsWith("@" + STAFF_EMAIL_DOMAIN) ? "employee" : "consultant";
+}
 
 // This account is always admin, regardless of what's stored in Firestore —
 // it's the seed of the whole role system, since nothing else can grant the
@@ -78,7 +103,7 @@ export async function getOrCreateProfile(uid: string, email: string, displayName
   const isPermanentAdmin = email.trim().toLowerCase() === PERMANENT_ADMIN_EMAIL;
 
   if (!snap.exists) {
-    const role: Role = isPermanentAdmin ? "admin" : "employee";
+    const role: Role = roleForNewAccount(email);
     await ref.set({
       email,
       displayName,

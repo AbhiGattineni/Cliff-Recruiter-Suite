@@ -5,7 +5,7 @@ import { listUsers, setUserRole, Role } from "../lib/timesheets";
 import { useAuth } from "../context/AuthContext";
 
 const PERMANENT_ADMIN_EMAIL = "abhishek.g@cliff-services.com";
-const ROLES: Role[] = ["admin", "manager", "employee"];
+const ROLES: Role[] = ["admin", "manager", "employee", "consultant"];
 
 export default function RoleManagement() {
   const qc = useQueryClient();

@@ -1054,7 +1054,7 @@ export const setUserRole = onCall(
     const targetUid = String(request.data?.uid ?? "");
     const role = request.data?.role;
     if (!targetUid) throw new HttpsError("invalid-argument", "uid is required.");
-    if (role !== "admin" && role !== "manager" && role !== "employee") {
+    if (role !== "admin" && role !== "manager" && role !== "employee" && role !== "consultant") {
       throw new HttpsError("invalid-argument", "role must be admin, manager, or employee.");
     }
     try {
