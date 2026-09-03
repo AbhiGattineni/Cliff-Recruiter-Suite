@@ -156,3 +156,35 @@ jobs:
           fi
           echo "Pass 2 — all functions"
           npx firebase-tools@13 deploy --only functions --project cliff-services --non-interactive --force
+
+      # A callable is a Cloud Run service, and the browser reaches it as an
+      # anonymous caller — the user's identity travels in the request body, not
+      # as a Google credential — so the service has to allow unauthenticated
+      # invocation. `firebase deploy` grants that when it CREATES a function and
+      # never revisits it, which is a gap the quota failures walked straight
+      # into: consultantOps failed part-way through its create, and the deploy
+      # that finally succeeded saw an existing service and only updated it. The
+      # function was live and healthy and every call from the app was rejected
+      # 403 by Cloud Run — which the client SDK reports as an "internal" error,
+      # i.e. indistinguishable from a function that was never deployed.
+      #
+      # Authentication is not being given up here: every callable checks
+      # request.auth itself and refuses anonymous callers, and this is already
+      # the binding every other function in the project has. Adding it is
+      # idempotent, so this just keeps them all in the same state.
+      - name: Ensure callables are publicly invokable
+        run: |
+          set -uo pipefail
+          for fn in $(grep -oP '^export const \K\w+(?= = onCall)' functions/src/index.ts | sort -u); do
+            svc=$(echo "$fn" | tr '[:upper:]' '[:lower:]')
+            if gcloud run services get-iam-policy "$svc" --region us-central1 --project cliff-services \
+                 --format=json 2>/dev/null | grep -q '"allUsers"'; then
+              echo "ok       $fn"
+            else
+              echo "MISSING  $fn — granting run.invoker to allUsers"
+              gcloud run services add-iam-policy-binding "$svc" \
+                --region us-central1 --project cliff-services \
+                --member allUsers --role roles/run.invoker --quiet \
+                && echo "fixed    $fn" || echo "FAILED   $fn (needs run.setIamPolicy on the deploy account)"
+            fi
+          done
