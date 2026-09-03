@@ -11,6 +11,7 @@
 // read their own assignment to know what they're filing against, and there is
 // no way to hide a field from them inside it.
 
+import { randomUUID } from "node:crypto";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
 import { UserProfile, Role } from "./timesheets.js";
@@ -78,16 +79,39 @@ function toMillis(v: unknown): number | null {
 /**
  * Create a consultant's login and profile.
  *
- * No password is set here and none is sent: the client follows this with
- * Firebase's own password-reset email, which doubles as a "choose your
- * password" link. That keeps us out of the business of transmitting
- * credentials, and needs no SMTP of our own.
+ * We never choose or transmit a password. Firebase's own password-reset email
+ * doubles as a "set your password" link, so there is no SMTP of ours in the
+ * path and no credential to leak.
+ *
+ * The account is created WITH a random password all the same — one nobody ever
+ * sees, not even us. An account made with no password at all has no
+ * email/password provider attached, and Firebase will not send a reset for an
+ * address it cannot find a password identity for: the invite appeared to work
+ * and the email silently never came. The random value exists only so that
+ * identity exists; it is discarded here and can never be used, because the only
+ * way into the account is the reset link.
+ *
+ * A link is generated and returned as well. Email is the nice path, not a
+ * dependable one — spam filters, a typo'd address, a corporate gateway — and
+ * whoever sent the invite should be able to pass it on by hand rather than be
+ * stuck waiting on someone else's mail server.
  */
+export interface Invite {
+  user: UserProfile;
+  /** Firebase's set-password link. A credential: only ever returned to the staff member inviting. */
+  resetLink: string;
+}
+
+/** Never used to sign in — only to give the account a password identity to reset. */
+function throwawayPassword(): string {
+  return `Cf-${randomUUID()}-${randomUUID()}`;
+}
+
 export async function inviteConsultant(
   actor: UserProfile,
   email: string,
   displayName: string
-): Promise<UserProfile> {
+): Promise<Invite> {
   requireStaff(actor);
   const mail = String(email ?? "").trim().toLowerCase();
   const name = String(displayName ?? "").trim().slice(0, 120);
@@ -99,8 +123,19 @@ export async function inviteConsultant(
   try {
     const existing = await auth.getUserByEmail(mail);
     uid = existing.uid;
+    // Repair anyone invited before this function set a password: without a
+    // password provider their reset email was never deliverable, so re-sending
+    // it would fail exactly as the first one did.
+    if (!existing.providerData.some((p) => p.providerId === "password")) {
+      await auth.updateUser(uid, { password: throwawayPassword() });
+    }
   } catch {
-    const created = await auth.createUser({ email: mail, displayName: name, emailVerified: false });
+    const created = await auth.createUser({
+      email: mail,
+      displayName: name,
+      emailVerified: false,
+      password: throwawayPassword(),
+    });
     uid = created.uid;
   }
 
@@ -126,13 +161,28 @@ export async function inviteConsultant(
   const saved = await ref.get();
   const d = saved.data()!;
   return {
-    uid,
-    email: String(d.email ?? ""),
-    displayName: String(d.displayName ?? ""),
-    role: (d.role as Role) ?? "consultant",
-    createdAt: toMillis(d.createdAt),
-    updatedAt: toMillis(d.updatedAt),
+    user: {
+      uid,
+      email: String(d.email ?? ""),
+      displayName: String(d.displayName ?? ""),
+      role: (d.role as Role) ?? "consultant",
+      createdAt: toMillis(d.createdAt),
+      updatedAt: toMillis(d.updatedAt),
+    },
+    resetLink: await auth.generatePasswordResetLink(mail),
   };
+}
+
+/** A fresh set-password link for someone whose invite never arrived. Staff only. */
+export async function consultantResetLink(actor: UserProfile, email: string): Promise<string> {
+  requireStaff(actor);
+  const mail = String(email ?? "").trim().toLowerCase();
+  const auth = getAuth();
+  const user = await auth.getUserByEmail(mail);
+  if (!user.providerData.some((p) => p.providerId === "password")) {
+    await auth.updateUser(user.uid, { password: throwawayPassword() });
+  }
+  return auth.generatePasswordResetLink(mail);
 }
 
 // ---- Assignments ------------------------------------------------------------

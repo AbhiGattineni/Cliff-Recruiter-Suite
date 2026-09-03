@@ -10,7 +10,7 @@ import { httpsCallable } from "firebase/functions";
 import { collection, getDocs, query, where, type DocumentData } from "firebase/firestore";
 import { sendPasswordResetEmail } from "firebase/auth";
 import { auth, functions, db } from "../firebase";
-import { ensureConfigured } from "./errors";
+import { ensureConfigured, friendlyError } from "./errors";
 import { UserProfile } from "./timesheets";
 
 export interface Assignment {
@@ -78,20 +78,44 @@ function call<T>(data: Record<string, unknown>): Promise<T> {
  * We never generate or transmit a password. The reset email is Firebase's, so
  * there is no SMTP of ours in the path and nothing to leak.
  */
-export async function inviteConsultant(email: string, displayName: string): Promise<UserProfile> {
-  const res = await call<{ ok: boolean; user: UserProfile }>({
+export interface Invite {
+  user: UserProfile;
+  /** Firebase's set-password link, to pass on by hand. */
+  resetLink: string;
+  /** Why the email didn't go out, or null if it did. The account exists either way. */
+  emailError: string | null;
+}
+
+export async function inviteConsultant(email: string, displayName: string): Promise<Invite> {
+  const res = await call<{ ok: boolean; user: UserProfile; resetLink: string }>({
     action: "invite",
     email,
     displayName,
   });
-  await sendPasswordResetEmail(auth, email.trim());
-  return res.user;
+  // The account is made whether or not the mail goes out, so a failure here is
+  // not an invite failure and must not be reported as one — it used to throw,
+  // which left the consultant created, the modal showing an error, and nobody
+  // any the wiser about which of the two had actually happened. The returned
+  // link is the way through regardless.
+  let emailError: string | null = null;
+  try {
+    await sendPasswordResetEmail(auth, email.trim());
+  } catch (e) {
+    emailError = friendlyError(e);
+  }
+  return { ...res, emailError };
 }
 
-/** Re-send the set-password link for someone who lost the first one. */
-export async function resendInvite(email: string): Promise<void> {
-  ensureConfigured();
-  await sendPasswordResetEmail(auth, email.trim());
+/** A fresh set-password link for someone whose invite never arrived. */
+export async function resendInvite(email: string): Promise<{ resetLink: string; emailError: string | null }> {
+  const res = await call<{ ok: boolean; resetLink: string }>({ action: "resetLink", email });
+  let emailError: string | null = null;
+  try {
+    await sendPasswordResetEmail(auth, email.trim());
+  } catch (e) {
+    emailError = friendlyError(e);
+  }
+  return { resetLink: res.resetLink, emailError };
 }
 
 // ---- Assignments -----------------------------------------------------------

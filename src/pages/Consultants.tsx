@@ -315,6 +315,61 @@ function Assignments({
   );
 }
 
+/**
+ * The set-password link, shown to whoever sent the invite.
+ *
+ * Email is the intended path and this is the way through when it fails, which
+ * it does quietly and often — spam, a corporate gateway, a typo'd address. It
+ * is a credential, so it goes no further than the staff member who just created
+ * the account and could equally have created it under any other address.
+ */
+function SetPasswordLink({
+  to,
+  link,
+  emailError,
+}: {
+  to: string;
+  link: string;
+  emailError: string | null;
+}) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard blocked (insecure context, or the browser said no) — the
+      // link is on screen and selectable, so there is nothing to recover from.
+    }
+  };
+
+  return (
+    <div className={`alert ${emailError ? "warn" : "success"}`} style={{ fontSize: "0.85rem" }}>
+      {emailError ? (
+        <>
+          <strong>The account is ready, but the email didn&#39;t send.</strong> {emailError} Send them
+          this link instead — it&#39;s the same one the email would have carried.
+        </>
+      ) : (
+        <>
+          Set-password link sent to <strong>{to}</strong>. If it doesn&#39;t arrive within a few
+          minutes, check their spam folder or just send them this link:
+        </>
+      )}
+      <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginTop: "0.5rem" }}>
+        <input type="text" readOnly value={link} onFocus={(e) => e.currentTarget.select()} style={{ flex: 1, minWidth: 0 }} />
+        <button className="btn ghost" style={{ padding: "0.3rem 0.7rem", whiteSpace: "nowrap" }} onClick={copy}>
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <span className="muted" style={{ fontSize: "0.78rem" }}>
+        Single use, and it expires — generate a fresh one with “Re-send invite” if it goes stale.
+      </span>
+    </div>
+  );
+}
+
 // ---- People ----------------------------------------------------------------
 
 function People({
@@ -326,14 +381,15 @@ function People({
   loading: boolean;
   onInvite: () => void;
 }) {
-  const [sent, setSent] = useState<string | null>(null);
+  const [sent, setSent] = useState<{ email: string; link: string; emailError: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const resend = async (email: string) => {
     setError(null);
+    setSent(null);
     try {
-      await resendInvite(email);
-      setSent(email);
+      const { resetLink, emailError } = await resendInvite(email);
+      setSent({ email, link: resetLink, emailError });
     } catch (e) {
       setError(friendlyError(e));
     }
@@ -350,7 +406,7 @@ function People({
         or store a password.
       </p>
       {error && <div className="alert error">{error}</div>}
-      {sent && <div className="alert success">Set-password link re-sent to {sent}.</div>}
+      {sent && <SetPasswordLink to={sent.email} link={sent.link} emailError={sent.emailError} />}
       {loading ? (
         <div className="center-load" style={{ minHeight: "20vh" }}><div className="spinner dark" /></div>
       ) : people.length === 0 ? (
@@ -518,12 +574,17 @@ function InviteModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<{ link: string; emailError: string | null } | null>(null);
 
   const submit = async () => {
     setSaving(true);
     setError(null);
     try {
-      await inviteConsultant(email, name);
+      const { resetLink, emailError } = await inviteConsultant(email, name);
+      // Don't close on success: the link is the one thing here that can't be
+      // recovered by looking at the list, and closing straight past it is how
+      // an undelivered email turns into a stuck consultant.
+      setDone({ link: resetLink, emailError });
       onSaved();
     } catch (e) {
       setError(friendlyError(e));
@@ -531,6 +592,17 @@ function InviteModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
       setSaving(false);
     }
   };
+
+  if (done) {
+    return (
+      <Modal open title={`${name} invited`} onClose={onClose}>
+        <SetPasswordLink to={email.trim()} link={done.link} emailError={done.emailError} />
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button className="btn" onClick={onClose}>Done</button>
+        </div>
+      </Modal>
+    );
+  }
 
   return (
     <Modal open title="Invite a consultant" onClose={onClose}>

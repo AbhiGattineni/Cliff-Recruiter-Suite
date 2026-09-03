@@ -26,7 +26,13 @@ import {
   createLeaveRequest,
   decideLeave,
 } from "./timesheets.js";
-import { inviteConsultant, saveAssignment, submitTimesheet, decideTimesheet } from "./consultants.js";
+import {
+  inviteConsultant,
+  consultantResetLink,
+  saveAssignment,
+  submitTimesheet,
+  decideTimesheet,
+} from "./consultants.js";
 
 initializeApp();
 
@@ -1158,12 +1164,16 @@ export const consultantOps = onCall(
     try {
       switch (action) {
         case "invite": {
-          const user = await inviteConsultant(
+          const invite = await inviteConsultant(
             profile,
             String(request.data?.email ?? ""),
             String(request.data?.displayName ?? "")
           );
-          return { ok: true, user };
+          return { ok: true, ...invite };
+        }
+        case "resetLink": {
+          const resetLink = await consultantResetLink(profile, String(request.data?.email ?? ""));
+          return { ok: true, resetLink };
         }
         case "saveAssignment": {
           const assignment = await saveAssignment(profile, (request.data ?? {}) as Record<string, unknown>);
