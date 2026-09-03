@@ -164,8 +164,84 @@ export default function MyTimesheetTab() {
     [days]
   );
 
+  // Where you stand goes above what you're filling in: the question this tab
+  // is usually opened to answer is "what have I missed", and that answer has no
+  // business sitting below the form.
+  const statsCard = (
+    <div className="card">
+      <h2>Your last {RANGE_DAYS} days</h2>
+      <p className="sub">
+        Counted over working days only — weekends and approved leave are never owed.
+      </p>
+      {entriesQ.isLoading ? (
+        <div className="center-load" style={{ minHeight: "20vh" }}>
+          <div className="spinner dark" />
+        </div>
+      ) : entriesQ.error ? (
+        <div className="alert error">{friendlyError(entriesQ.error)}</div>
+      ) : (
+        <>
+          <div className="stat-grid">
+            <div className="stat">
+              <div className="num">
+                {totals.completion}
+                <span style={{ fontSize: "1rem" }}>%</span>
+              </div>
+              <div className="lbl">
+                Days accounted for ({totals.filled + totals.short} of {totals.expectedDays})
+              </div>
+            </div>
+            <div className="stat">
+              <div className="num">{totals.filled}</div>
+              <div className="lbl">Full days ({EXPECTED_DAILY_HOURS}h or more)</div>
+            </div>
+            <div className="stat">
+              <div className="num" style={totals.short ? { color: "#a9700a" } : undefined}>
+                {totals.short}
+              </div>
+              <div className="lbl">Short days</div>
+            </div>
+            <div className="stat">
+              <div className="num" style={totals.missing ? { color: "var(--danger)" } : undefined}>
+                {totals.missing}
+              </div>
+              <div className="lbl">Not filled</div>
+            </div>
+            <div className="stat">
+              <div className="num">{totals.leave}</div>
+              <div className="lbl">Approved leave</div>
+            </div>
+            <div className="stat">
+              <div className="num">{totals.hours}</div>
+              <div className="lbl">Hours logged</div>
+            </div>
+          </div>
+
+          {totals.shortfallHours > 0 ? (
+            <p className="muted" style={{ fontSize: "0.85rem", marginTop: "0.9rem", marginBottom: 0 }}>
+              <strong>{totals.shortfallHours}h</strong> behind the{" "}
+              {totals.expectedDays * EXPECTED_DAILY_HOURS}h expected across {totals.expectedDays} working
+              day{totals.expectedDays === 1 ? "" : "s"}
+              {totals.missing > 0 && (
+                <> — a closed day can only be filled by a manager or admin, so ask them for those</>
+              )}
+              .
+            </p>
+          ) : (
+            totals.expectedDays > 0 && (
+              <p className="muted" style={{ fontSize: "0.85rem", marginTop: "0.9rem", marginBottom: 0 }}>
+                Every working day in the last {RANGE_DAYS} days is filled in full. Nothing outstanding.
+              </p>
+            )
+          )}
+        </>
+      )}
+    </div>
+  );
+
   return (
     <div>
+      {statsCard}
       <div className="card">
         <h2>Fill your timesheet</h2>
         {error && <div className="alert error">{error}</div>}
@@ -249,76 +325,6 @@ export default function MyTimesheetTab() {
           Date, hours and at least one requirement worked on are all required. A full working day is{" "}
           {EXPECTED_DAILY_HOURS} hours.
         </p>
-      </div>
-
-      <div className="card">
-        <h2>Your last {RANGE_DAYS} days</h2>
-        <p className="sub">
-          Counted over working days only — weekends and approved leave are never owed.
-        </p>
-        {entriesQ.isLoading ? (
-          <div className="center-load" style={{ minHeight: "20vh" }}>
-            <div className="spinner dark" />
-          </div>
-        ) : entriesQ.error ? (
-          <div className="alert error">{friendlyError(entriesQ.error)}</div>
-        ) : (
-          <>
-            <div className="stat-grid">
-              <div className="stat">
-                <div className="num">
-                  {totals.completion}
-                  <span style={{ fontSize: "1rem" }}>%</span>
-                </div>
-                <div className="lbl">
-                  Days accounted for ({totals.filled + totals.short} of {totals.expectedDays})
-                </div>
-              </div>
-              <div className="stat">
-                <div className="num">{totals.filled}</div>
-                <div className="lbl">Full days ({EXPECTED_DAILY_HOURS}h or more)</div>
-              </div>
-              <div className="stat">
-                <div className="num" style={totals.short ? { color: "#a9700a" } : undefined}>
-                  {totals.short}
-                </div>
-                <div className="lbl">Short days</div>
-              </div>
-              <div className="stat">
-                <div className="num" style={totals.missing ? { color: "var(--danger)" } : undefined}>
-                  {totals.missing}
-                </div>
-                <div className="lbl">Not filled</div>
-              </div>
-              <div className="stat">
-                <div className="num">{totals.leave}</div>
-                <div className="lbl">Approved leave</div>
-              </div>
-              <div className="stat">
-                <div className="num">{totals.hours}</div>
-                <div className="lbl">Hours logged</div>
-              </div>
-            </div>
-
-            {totals.shortfallHours > 0 ? (
-              <p className="muted" style={{ fontSize: "0.85rem", marginTop: "0.9rem", marginBottom: 0 }}>
-                <strong>{totals.shortfallHours}h</strong> behind the{" "}
-                {totals.expectedDays * EXPECTED_DAILY_HOURS}h expected across {totals.expectedDays} working
-                day{totals.expectedDays === 1 ? "" : "s"}
-                {totals.missing > 0 && (
-                  <> — a closed day can only be filled by a manager or admin, so ask them for those</>
-                )}
-                .
-              </p>
-            ) : (
-              totals.expectedDays > 0 && (
-                <p className="muted" style={{ fontSize: "0.85rem", marginTop: "0.9rem", marginBottom: 0 }}>
-                  Every working day in the last {RANGE_DAYS} days is filled in full. Nothing outstanding.
-                </p>
-              )
-            )}
-          </>
-        )}
       </div>
 
       {!entriesQ.isLoading && !entriesQ.error && (
