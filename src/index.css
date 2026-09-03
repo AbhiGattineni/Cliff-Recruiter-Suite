@@ -242,6 +242,8 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--brand-light
 .pill.amber { background: #fdf1dc; color: #a9700a; }
 .pill.red { background: #fdecec; color: var(--danger); }
 .pill.grey { background: #eef1f5; color: #475569; }
+/* An unfilled day is the row you're meant to notice, so it carries the tint. */
+.data tr.day-missing td { background: #fff6f6; }
 
 /* ---------- Tables ---------- */
 .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }

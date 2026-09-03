@@ -77,6 +77,93 @@ export function shortDays(
     .map((d) => ({ date: d, hours: hoursByDate.get(d) ?? 0 }));
 }
 
+/**
+ * What a single calendar day amounts to for one person.
+ *
+ * `missingDays` and `shortDays` each answer half of this and are what the
+ * warnings are built from; this answers all of it at once, so a day-by-day
+ * table can show the gaps *between* the entries rather than only the days that
+ * happen to have one. The three stay in step because the rules below are the
+ * same rules, in the same order: nothing is expected of a future day, a
+ * weekend, or a day on approved leave, and a day with an entry is judged
+ * against `EXPECTED_DAILY_HOURS`.
+ */
+export type DayStatus = "filled" | "short" | "missing" | "leave" | "weekend" | "future";
+
+export interface DaySummary {
+  date: string;
+  status: DayStatus;
+  /** Hours logged. Zero when there is no entry — including on leave and weekends. */
+  hours: number;
+}
+
+export function dayBreakdown(
+  from: string,
+  to: string,
+  today: string,
+  hoursByDate: Map<string, number>,
+  approvedLeaveDates: Set<string>
+): DaySummary[] {
+  if (!from || !to) return [];
+  return daysBetween(from, to).map((date) => {
+    const hours = hoursByDate.get(date) ?? 0;
+    const status: DayStatus =
+      date > today
+        ? "future"
+        : [6, 7].includes(DateTime.fromISO(date).weekday)
+          ? "weekend"
+          : approvedLeaveDates.has(date)
+            ? "leave"
+            : !hoursByDate.has(date)
+              ? "missing"
+              : hours < EXPECTED_DAILY_HOURS
+                ? "short"
+                : "filled";
+    return { date, status, hours };
+  });
+}
+
+export interface DayTotals {
+  /** Days something was expected: everything but weekends, leave and the future. */
+  expectedDays: number;
+  filled: number;
+  short: number;
+  missing: number;
+  leave: number;
+  hours: number;
+  /** Hours owed on the days that were expected, minus what was logged. Never negative. */
+  shortfallHours: number;
+  /** Expected days accounted for (filled or short), 0–100. 100 when nothing was expected. */
+  completion: number;
+}
+
+export function summariseDays(days: DaySummary[]): DayTotals {
+  const t: DayTotals = {
+    expectedDays: 0,
+    filled: 0,
+    short: 0,
+    missing: 0,
+    leave: 0,
+    hours: 0,
+    shortfallHours: 0,
+    completion: 100,
+  };
+  for (const d of days) {
+    t.hours += d.hours;
+    if (d.status === "leave") t.leave += 1;
+    if (d.status === "weekend" || d.status === "future" || d.status === "leave") continue;
+    t.expectedDays += 1;
+    t[d.status] += 1;
+    t.shortfallHours += Math.max(0, EXPECTED_DAILY_HOURS - d.hours);
+  }
+  t.hours = Math.round(t.hours * 100) / 100;
+  t.shortfallHours = Math.round(t.shortfallHours * 100) / 100;
+  if (t.expectedDays > 0) {
+    t.completion = Math.round(((t.filled + t.short) / t.expectedDays) * 100);
+  }
+  return t;
+}
+
 export interface JobEffort {
   jobCode: string;
   jobTitle: string;

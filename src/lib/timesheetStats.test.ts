@@ -9,6 +9,8 @@ import {
   daysBetween,
   missingDays,
   shortDays,
+  dayBreakdown,
+  summariseDays,
   EXPECTED_DAILY_HOURS,
 } from "./timesheetStats";
 import { TimesheetEntry } from "./timesheets";
@@ -191,5 +193,62 @@ describe("shortDays", () => {
   it("does not flag a full or over-full day", () => {
     const hours = new Map([["2026-08-03", EXPECTED_DAILY_HOURS], ["2026-08-04", EXPECTED_DAILY_HOURS + 2]]);
     expect(shortDays("2026-08-03", "2026-08-04", "2026-08-04", hours, noLeave)).toEqual([]);
+  });
+});
+
+// 2026-08-03 is a Monday, so 08-08 and 08-09 are the weekend.
+describe("dayBreakdown / summariseDays", () => {
+  const hours = new Map([
+    ["2026-08-03", EXPECTED_DAILY_HOURS], // full
+    ["2026-08-04", 4], // short
+    ["2026-08-07", 11], // over a full day still reads as filled
+    ["2026-08-08", 3], // Saturday — logged, but never expected
+  ]);
+  const leave = new Set(["2026-08-06"]);
+  const days = dayBreakdown("2026-08-03", "2026-08-10", "2026-08-09", hours, leave);
+
+  it("labels every day in the range, gaps included", () => {
+    expect(days.map((d) => [d.date, d.status])).toEqual([
+      ["2026-08-03", "filled"],
+      ["2026-08-04", "short"],
+      ["2026-08-05", "missing"],
+      ["2026-08-06", "leave"],
+      ["2026-08-07", "filled"],
+      ["2026-08-08", "weekend"],
+      ["2026-08-09", "weekend"],
+      ["2026-08-10", "future"],
+    ]);
+  });
+
+  it("carries the hours logged, whatever the status", () => {
+    expect(days.find((d) => d.date === "2026-08-08")?.hours).toBe(3);
+    expect(days.find((d) => d.date === "2026-08-05")?.hours).toBe(0);
+  });
+
+  it("agrees with missingDays and shortDays", () => {
+    const from = "2026-08-03";
+    const to = "2026-08-10";
+    const today = "2026-08-09";
+    expect(days.filter((d) => d.status === "missing").map((d) => d.date)).toEqual(
+      missingDays(from, to, today, new Set(hours.keys()), leave)
+    );
+    expect(days.filter((d) => d.status === "short").map((d) => d.date)).toEqual(
+      shortDays(from, to, today, hours, leave).map((d) => d.date)
+    );
+  });
+
+  it("counts only the days something was expected on", () => {
+    const t = summariseDays(days);
+    expect(t).toMatchObject({ expectedDays: 4, filled: 2, short: 1, missing: 1, leave: 1 });
+    // Every hour logged counts toward the total, weekend included.
+    expect(t.hours).toBe(EXPECTED_DAILY_HOURS + 4 + 11 + 3);
+    // Short by 5h, missing a whole 9h day; the 11h day owes nothing.
+    expect(t.shortfallHours).toBe(EXPECTED_DAILY_HOURS - 4 + EXPECTED_DAILY_HOURS);
+    expect(t.completion).toBe(75);
+  });
+
+  it("reports a clean sheet when nothing was expected", () => {
+    const weekend = dayBreakdown("2026-08-08", "2026-08-09", "2026-08-09", new Map(), new Set());
+    expect(summariseDays(weekend)).toMatchObject({ expectedDays: 0, completion: 100, shortfallHours: 0 });
   });
 });

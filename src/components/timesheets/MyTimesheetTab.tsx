@@ -11,7 +11,13 @@ import {
   TimesheetEntry,
   JobHours,
 } from "../../lib/timesheets";
-import { EXPECTED_DAILY_HOURS, daysBetween, missingDays, shortDays } from "../../lib/timesheetStats";
+import {
+  EXPECTED_DAILY_HOURS,
+  daysBetween,
+  dayBreakdown,
+  summariseDays,
+  DayStatus,
+} from "../../lib/timesheetStats";
 import { listOpenJobs } from "../../lib/openJobs";
 import JobHoursPicker from "./JobHoursPicker";
 import { useAuth } from "../../context/AuthContext";
@@ -21,6 +27,26 @@ import { useAuth } from "../../context/AuthContext";
 // system date offered a day the server refused; this follows the server instead.
 const todayIso = () => timesheetToday();
 const RANGE_DAYS = 30;
+
+/** The one place a day's status turns into words, so the table reads the same way the totals count. */
+function StatusPill({ status, hours }: { status: DayStatus; hours: number }) {
+  switch (status) {
+    case "filled":
+      return <span className="pill green">Full day</span>;
+    case "short":
+      return (
+        <span className="pill amber" title={`${EXPECTED_DAILY_HOURS - hours}h short of a full day`}>
+          Short · {hours}h of {EXPECTED_DAILY_HOURS}
+        </span>
+      );
+    case "missing":
+      return <span className="pill red">Not filled</span>;
+    case "leave":
+      return <span className="pill grey">Approved leave</span>;
+    default:
+      return <span className="muted">—</span>;
+  }
+}
 
 export default function MyTimesheetTab() {
   const qc = useQueryClient();
@@ -121,18 +147,22 @@ export default function MyTimesheetTab() {
     return set;
   }, [leavesQ.data]);
 
-  // Both use the shared definitions in timesheetStats, so this tab, the Team
-  // Dashboard and Recruiter Performance agree on what "unfilled" and "short"
-  // mean. This tab used to count its own way and flagged weekends as missing.
-  const missing = useMemo(
-    () => missingDays(from, to, todayIso(), new Set(byDate.keys()), leaveDates),
-    [byDate, leaveDates, from, to]
-  );
-  const short = useMemo(() => {
+  // One pass over the whole range, from the shared definitions in
+  // timesheetStats — so this tab, the Team Dashboard and Recruiter Performance
+  // agree on what "unfilled" and "short" mean, and the counts below can't drift
+  // from the rows they summarise.
+  const days = useMemo(() => {
     const hoursByDate = new Map<string, number>();
     for (const [d, e] of byDate) hoursByDate.set(d, Number(e.hours) || 0);
-    return shortDays(from, to, todayIso(), hoursByDate, leaveDates);
+    return dayBreakdown(from, to, todayIso(), hoursByDate, leaveDates);
   }, [byDate, leaveDates, from, to]);
+  const totals = useMemo(() => summariseDays(days), [days]);
+  // Newest first, and weekends dropped — nothing is owed on them, so listing
+  // them would pad the table with rows nobody has to act on.
+  const rows = useMemo(
+    () => days.filter((d) => d.status !== "weekend" && d.status !== "future").reverse(),
+    [days]
+  );
 
   return (
     <div>
@@ -221,26 +251,11 @@ export default function MyTimesheetTab() {
         </p>
       </div>
 
-      {missing.length > 0 && (
-        <div className="alert warn">
-          You&#39;re missing <strong>{missing.length}</strong> working day{missing.length === 1 ? "" : "s"} in the
-          last {RANGE_DAYS} days: {missing.slice(0, 8).join(", ")}
-          {missing.length > 8 ? "…" : ""}. A closed day can only be filled by a manager or admin — ask
-          them to add it for you.
-        </div>
-      )}
-
-      {short.length > 0 && (
-        <div className="alert warn">
-          <strong>{short.length}</strong> day{short.length === 1 ? "" : "s"} logged under the expected{" "}
-          {EXPECTED_DAILY_HOURS}h:{" "}
-          {short.slice(0, 8).map((d) => `${d.date} (${d.hours}h)`).join(", ")}
-          {short.length > 8 ? "…" : ""}
-        </div>
-      )}
-
       <div className="card">
-        <h2>Last {RANGE_DAYS} days</h2>
+        <h2>Your last {RANGE_DAYS} days</h2>
+        <p className="sub">
+          Counted over working days only — weekends and approved leave are never owed.
+        </p>
         {entriesQ.isLoading ? (
           <div className="center-load" style={{ minHeight: "20vh" }}>
             <div className="spinner dark" />
@@ -248,11 +263,77 @@ export default function MyTimesheetTab() {
         ) : entriesQ.error ? (
           <div className="alert error">{friendlyError(entriesQ.error)}</div>
         ) : (
+          <>
+            <div className="stat-grid">
+              <div className="stat">
+                <div className="num">
+                  {totals.completion}
+                  <span style={{ fontSize: "1rem" }}>%</span>
+                </div>
+                <div className="lbl">
+                  Days accounted for ({totals.filled + totals.short} of {totals.expectedDays})
+                </div>
+              </div>
+              <div className="stat">
+                <div className="num">{totals.filled}</div>
+                <div className="lbl">Full days ({EXPECTED_DAILY_HOURS}h or more)</div>
+              </div>
+              <div className="stat">
+                <div className="num" style={totals.short ? { color: "#a9700a" } : undefined}>
+                  {totals.short}
+                </div>
+                <div className="lbl">Short days</div>
+              </div>
+              <div className="stat">
+                <div className="num" style={totals.missing ? { color: "var(--danger)" } : undefined}>
+                  {totals.missing}
+                </div>
+                <div className="lbl">Not filled</div>
+              </div>
+              <div className="stat">
+                <div className="num">{totals.leave}</div>
+                <div className="lbl">Approved leave</div>
+              </div>
+              <div className="stat">
+                <div className="num">{totals.hours}</div>
+                <div className="lbl">Hours logged</div>
+              </div>
+            </div>
+
+            {totals.shortfallHours > 0 ? (
+              <p className="muted" style={{ fontSize: "0.85rem", marginTop: "0.9rem", marginBottom: 0 }}>
+                <strong>{totals.shortfallHours}h</strong> behind the{" "}
+                {totals.expectedDays * EXPECTED_DAILY_HOURS}h expected across {totals.expectedDays} working
+                day{totals.expectedDays === 1 ? "" : "s"}
+                {totals.missing > 0 && (
+                  <> — a closed day can only be filled by a manager or admin, so ask them for those</>
+                )}
+                .
+              </p>
+            ) : (
+              totals.expectedDays > 0 && (
+                <p className="muted" style={{ fontSize: "0.85rem", marginTop: "0.9rem", marginBottom: 0 }}>
+                  Every working day in the last {RANGE_DAYS} days is filled in full. Nothing outstanding.
+                </p>
+              )
+            )}
+          </>
+        )}
+      </div>
+
+      {!entriesQ.isLoading && !entriesQ.error && (
+        <div className="card">
+          <h2>Day by day</h2>
+          <p className="sub">
+            Every working day in the range, filled or not — a gap shows up as a row rather than simply
+            being absent.
+          </p>
           <div className="table-wrap">
             <table className="data">
               <thead>
                 <tr>
                   <th>Date</th>
+                  <th>Status</th>
                   <th style={{ textAlign: "right" }}>Hours</th>
                   <th>Requirements</th>
                   <th>Notes</th>
@@ -260,45 +341,60 @@ export default function MyTimesheetTab() {
                 </tr>
               </thead>
               <tbody>
-                {(entriesQ.data ?? []).map((e) => (
-                  <tr key={e.id}>
-                    <td>{e.date}</td>
-                    <td style={{ textAlign: "right" }}>{e.hours}</td>
-                    <td style={{ whiteSpace: "normal" }}>
-                      {e.jobs?.length ? (
-                        e.jobs.map((j) => (
-                          <span className="pill grey" key={j.jobCode} style={{ marginRight: "0.3rem" }}>
-                            {j.jobCode} · {j.hours}h
+                {rows.map((d) => {
+                  const e = byDate.get(d.date);
+                  return (
+                    <tr key={d.date} className={d.status === "missing" ? "day-missing" : undefined}>
+                      <td style={{ whiteSpace: "nowrap" }}>
+                        {d.date}{" "}
+                        <span className="muted">{DateTime.fromISO(d.date).toFormat("ccc")}</span>
+                      </td>
+                      <td>
+                        <StatusPill status={d.status} hours={d.hours} />
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        {e ? d.hours : <span className="muted">—</span>}
+                      </td>
+                      <td style={{ whiteSpace: "normal" }}>
+                        {e?.jobs?.length ? (
+                          e.jobs.map((j) => (
+                            <span className="pill grey" key={j.jobCode} style={{ marginRight: "0.3rem" }}>
+                              {j.jobCode} · {j.hours}h
+                            </span>
+                          ))
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
+                      <td style={{ whiteSpace: "normal" }}>
+                        {e?.workedOn || <span className="muted">—</span>}
+                      </td>
+                      <td style={{ whiteSpace: "normal" }}>
+                        {!e ? (
+                          <span className="muted">—</span>
+                        ) : e.filledByName ? (
+                          <span className="pill amber" title={`Filled on your behalf by ${e.filledByName}`}>
+                            {e.filledByName}
                           </span>
-                        ))
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
-                    </td>
-                    <td style={{ whiteSpace: "normal" }}>{e.workedOn || <span className="muted">—</span>}</td>
-                    <td style={{ whiteSpace: "normal" }}>
-                      {e.filledByName ? (
-                        <span className="pill amber" title={`Filled on your behalf by ${e.filledByName}`}>
-                          {e.filledByName}
-                        </span>
-                      ) : (
-                        <span className="muted">You</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                {(entriesQ.data ?? []).length === 0 && (
+                        ) : (
+                          <span className="muted">You</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {rows.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="muted" style={{ textAlign: "center", padding: "1rem" }}>
-                      No entries yet.
+                    <td colSpan={6} className="muted" style={{ textAlign: "center", padding: "1rem" }}>
+                      No working days in this range yet.
                     </td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
