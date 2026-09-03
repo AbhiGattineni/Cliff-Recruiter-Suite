@@ -126,6 +126,14 @@ h2 { font-size: 1.25rem; }
   height: 56px; background: var(--card); border-bottom: 1px solid var(--line);
   display: flex; align-items: center; padding: 0 1.5rem; font-weight: 600;
 }
+.topbar-user { margin-left: auto; display: flex; align-items: center; gap: 0.75rem; font-weight: 400; }
+.topbar-email {
+  color: var(--muted); font-size: 0.85rem; max-width: 240px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.topbar-user .btn { padding: 0.35rem 0.8rem; font-size: 0.85rem; }
+.topbar-user .btn.ghost:hover { background: #f1f5f9; color: var(--ink); text-decoration: none; }
+
 .content { padding: 1.5rem; width: 100%; }
 
 /* ---------- Cards ---------- */
@@ -630,6 +638,8 @@ table.data th.colf-th { padding-right: 0.35rem; }
   .content { padding: 1rem; }
   .card { padding: 1rem; margin-bottom: 1rem; }
   .topbar { padding: 0 1rem; }
+  /* Not enough width for both — the button is the part that has to stay. */
+  .topbar-email { display: none; }
 
   /* Sidebar → off-canvas slide-over drawer */
   .sidebar {

@@ -99,6 +99,19 @@ export default function Layout() {
             ☰
           </button>
           <span>Recruiter Tools</span>
+          {/* The sidebar has a sign-out too, but only once the rail is expanded
+              — and the rail starts collapsed on every load, so on a fresh page
+              there was no way out of the app without first finding the menu. */}
+          <div className="topbar-user">
+            {user ? (
+              <>
+                <span className="topbar-email" title={user.email ?? undefined}>{user.email}</span>
+                <button className="btn ghost" onClick={() => signOut()}>Sign out</button>
+              </>
+            ) : (
+              <Link className="btn ghost" to="/login">Sign in</Link>
+            )}
+          </div>
         </div>
         <div className="content">
           {isPlaceholderConfig && (
