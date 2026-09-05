@@ -707,7 +707,7 @@ function HeaderFilter({ options, selected, onChange }: {
   const [q, setQ] = useState("");
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number; maxH: number }>({ left: 0, top: 0, maxH: 320 });
 
   useEffect(() => {
     if (!open) return;
@@ -731,7 +731,17 @@ function HeaderFilter({ options, selected, onChange }: {
     if (!open && btnRef.current) {
       const r = btnRef.current.getBoundingClientRect();
       const width = 230;
-      setPos({ top: r.bottom + 4, left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)) });
+      const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+      const spaceBelow = window.innerHeight - r.bottom - 12;
+      const spaceAbove = r.top - 12;
+      // Flip the panel upward when there isn't enough room beneath the header,
+      // and cap its height to the space actually available so it never runs off
+      // the bottom (or top) of the screen — the list scrolls inside.
+      const openUp = spaceBelow < 240 && spaceAbove > spaceBelow;
+      const maxH = Math.max(160, Math.min(340, openUp ? spaceAbove : spaceBelow));
+      setPos(openUp
+        ? { left, bottom: window.innerHeight - r.top + 4, maxH }
+        : { left, top: r.bottom + 4, maxH });
     }
     setOpen((o) => !o);
   };
@@ -762,10 +772,14 @@ function HeaderFilter({ options, selected, onChange }: {
         <div
           ref={panelRef}
           style={{
-            position: "fixed", top: pos.top, left: pos.left, zIndex: 1000, width: 230,
-            background: "#fff", border: "1px solid var(--line)", borderRadius: 8,
+            position: "fixed", left: pos.left,
+            ...(pos.top != null ? { top: pos.top } : {}),
+            ...(pos.bottom != null ? { bottom: pos.bottom } : {}),
+            zIndex: 1000, width: 230,
+            background: "#fff", color: "#1f2937",
+            border: "1px solid var(--line)", borderRadius: 8,
             boxShadow: "0 8px 24px rgba(16,24,40,0.14)", padding: "0.5rem",
-            maxHeight: 320, display: "flex", flexDirection: "column",
+            maxHeight: pos.maxH, display: "flex", flexDirection: "column",
             fontWeight: 400, textAlign: "left",
           }}
         >
