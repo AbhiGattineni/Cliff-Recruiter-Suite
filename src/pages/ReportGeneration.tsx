@@ -17,6 +17,7 @@ import { currentActor } from "../lib/auth";
 import { logReportRun } from "../lib/dashboard";
 import MultiSelect from "../components/MultiSelect";
 import BarChart from "../components/BarChart";
+import PieChart from "../components/PieChart";
 import ColumnPicker from "../components/ColumnPicker";
 import Pagination, { usePagination } from "../components/Pagination";
 import ColumnFilter from "../components/ColumnFilter";
@@ -41,6 +42,16 @@ const TIME_SLOTS = [
   "Time Taken – 3rd Submission",
 ];
 const TIME_SLOT_TITLES = ["1st Submission", "2nd Submission", "3rd Submission"];
+// Coarse ranges for the pie-chart view.
+const TIME_BUCKETS = [
+  { key: "< 4h", max: 4, color: "#1e7e34" },
+  { key: "4–8h", max: 8, color: "#4a9e5c" },
+  { key: "8–16h", max: 16, color: "#e0a800" },
+  { key: "16–24h", max: 24, color: "#e8590c" },
+  { key: "24–48h", max: 48, color: "#c92a2a" },
+  { key: "48h+", max: Infinity, color: "#6b7280" },
+];
+
 // Per-hour bucket color, green (fast) → red (slow) across n buckets.
 function hourColor(i: number, n: number): string {
   const t = n <= 1 ? 0 : i / (n - 1);
@@ -211,7 +222,17 @@ export default function ReportGeneration() {
       }
       return c;
     });
-    return { counts, jobs, buckets };
+    // Coarse-range counts for the pie-chart view.
+    const coarseCounts = perSlot.map((arr) => {
+      const c = TIME_BUCKETS.map(() => 0);
+      for (const h of arr) {
+        let bi = TIME_BUCKETS.findIndex((b) => h < b.max);
+        if (bi < 0) bi = TIME_BUCKETS.length - 1;
+        c[bi]++;
+      }
+      return c;
+    });
+    return { counts, coarseCounts, jobs, buckets };
   }, [viewRows]);
 
   const clearFilters = () => {
@@ -643,6 +664,22 @@ export default function ReportGeneration() {
               ({timeStats.jobs} job{timeStats.jobs === 1 ? "" : "s"} in view
               {anyFilter ? ", filtered" : ""}).
             </p>
+            <h3 style={{ margin: "0.5rem 0 0.75rem", fontSize: "0.95rem", color: "var(--muted)" }}>By range</h3>
+            <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", justifyContent: "space-around" }}>
+              {TIME_SLOTS.map((slot, si) => (
+                <PieChart
+                  key={slot}
+                  title={TIME_SLOT_TITLES[si]}
+                  data={TIME_BUCKETS.map((b, bi) => ({
+                    label: b.key,
+                    value: timeStats.coarseCounts[si][bi],
+                    color: b.color,
+                  }))}
+                />
+              ))}
+            </div>
+
+            <h3 style={{ margin: "1.75rem 0 0.75rem", fontSize: "0.95rem", color: "var(--muted)" }}>By hour</h3>
             <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap" }}>
               {TIME_SLOTS.map((slot, si) => (
                 <div key={slot} style={{ flex: "1 1 280px", minWidth: 260 }}>
