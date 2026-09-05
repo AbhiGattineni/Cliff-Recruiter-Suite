@@ -16,7 +16,7 @@ import { friendlyError } from "../lib/errors";
 import { currentActor } from "../lib/auth";
 import { logReportRun } from "../lib/dashboard";
 import MultiSelect from "../components/MultiSelect";
-import PieChart from "../components/PieChart";
+import BarChart from "../components/BarChart";
 import ColumnPicker from "../components/ColumnPicker";
 import Pagination, { usePagination } from "../components/Pagination";
 import ColumnFilter from "../components/ColumnFilter";
@@ -41,14 +41,12 @@ const TIME_SLOTS = [
   "Time Taken – 3rd Submission",
 ];
 const TIME_SLOT_TITLES = ["1st Submission", "2nd Submission", "3rd Submission"];
-const TIME_BUCKETS = [
-  { key: "< 4h", max: 4, color: "#1e7e34" },
-  { key: "4–8h", max: 8, color: "#4a9e5c" },
-  { key: "8–16h", max: 16, color: "#e0a800" },
-  { key: "16–24h", max: 24, color: "#e8590c" },
-  { key: "24–48h", max: 48, color: "#c92a2a" },
-  { key: "48h+", max: Infinity, color: "#6b7280" },
-];
+// Per-hour bucket color, green (fast) → red (slow) across n buckets.
+function hourColor(i: number, n: number): string {
+  const t = n <= 1 ? 0 : i / (n - 1);
+  const hue = 130 - t * 130; // 130 = green, 0 = red
+  return `hsl(${hue}, 62%, 42%)`;
+}
 
 // Parse a "Xd Yh Zm" duration cell into total hours (null if not a duration).
 function durationHours(s: string): number | null {
@@ -176,8 +174,9 @@ export default function ReportGeneration() {
   // Distribution of time-to-submission, bucketed, counted once per job (time-taken
   // is a job-level value repeated on each candidate row → dedupe by Job Code).
   const timeStats = useMemo(() => {
-    const counts = TIME_SLOTS.map(() => TIME_BUCKETS.map(() => 0));
+    // Collect durations per submission slot, once per job.
     const seen = new Set<string>();
+    const perSlot: number[][] = TIME_SLOTS.map(() => []);
     let jobs = 0;
     for (const r of viewRows) {
       const code = r.cells["Job Code"] || "";
@@ -188,13 +187,31 @@ export default function ReportGeneration() {
       jobs++;
       TIME_SLOTS.forEach((slot, si) => {
         const h = durationHours(r.cells[slot]);
-        if (h == null) return;
-        let bi = TIME_BUCKETS.findIndex((b) => h < b.max);
-        if (bi < 0) bi = TIME_BUCKETS.length - 1;
-        counts[si][bi]++;
+        if (h != null) perSlot[si].push(h);
       });
     }
-    return { counts, jobs };
+    // Individual-hour buckets sized to the data: bucket "Nh" covers up to N hours
+    // (h < N). Always show at least 1–4h; extend to the largest value; cap at 48h.
+    const maxH = Math.max(0, ...perSlot.flat());
+    const nHours = Math.min(48, Math.max(4, Math.ceil(maxH)));
+    const buckets = Array.from({ length: nHours }, (_, i) => ({
+      key: `${i + 1}h`,
+      max: i + 1,
+      color: hourColor(i, nHours),
+    }));
+    if (perSlot.some((arr) => arr.some((h) => h >= nHours))) {
+      buckets.push({ key: `${nHours}h+`, max: Infinity, color: "#6b7280" });
+    }
+    const counts = perSlot.map((arr) => {
+      const c = buckets.map(() => 0);
+      for (const h of arr) {
+        let bi = buckets.findIndex((b) => h < b.max);
+        if (bi < 0) bi = buckets.length - 1;
+        c[bi]++;
+      }
+      return c;
+    });
+    return { counts, jobs, buckets };
   }, [viewRows]);
 
   const clearFilters = () => {
@@ -626,17 +643,18 @@ export default function ReportGeneration() {
               ({timeStats.jobs} job{timeStats.jobs === 1 ? "" : "s"} in view
               {anyFilter ? ", filtered" : ""}).
             </p>
-            <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", justifyContent: "space-around" }}>
+            <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap" }}>
               {TIME_SLOTS.map((slot, si) => (
-                <PieChart
-                  key={slot}
-                  title={TIME_SLOT_TITLES[si]}
-                  data={TIME_BUCKETS.map((b, bi) => ({
-                    label: b.key,
-                    value: timeStats.counts[si][bi],
-                    color: b.color,
-                  }))}
-                />
+                <div key={slot} style={{ flex: "1 1 280px", minWidth: 260 }}>
+                  <BarChart
+                    title={TIME_SLOT_TITLES[si]}
+                    data={timeStats.buckets.map((b, bi) => ({
+                      label: b.key,
+                      value: timeStats.counts[si][bi],
+                      color: b.color,
+                    }))}
+                  />
+                </div>
               ))}
             </div>
           </div>
