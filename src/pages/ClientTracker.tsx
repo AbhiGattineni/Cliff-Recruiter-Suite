@@ -716,33 +716,44 @@ function HeaderFilter({ options, selected, onChange }: {
       if (btnRef.current?.contains(t) || panelRef.current?.contains(t)) return;
       setOpen(false);
     };
-    const close = () => setOpen(false);
+    const reposition = (e: Event) => {
+      // Scrolling inside the panel's own list shouldn't move it; any other
+      // scroll (the table body, the page) re-anchors the panel to its button.
+      const t = e.target as Node | null;
+      if (t && panelRef.current?.contains(t)) return;
+      place();
+    };
     document.addEventListener("mousedown", onDoc);
-    window.addEventListener("resize", close);
-    window.addEventListener("scroll", close, true); // capture: any ancestor scroll
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true); // capture: catch ancestor scrolls
     return () => {
       document.removeEventListener("mousedown", onDoc);
-      window.removeEventListener("resize", close);
-      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
     };
   }, [open]);
 
+  // Anchor the fixed panel to the button. Called on open and on any
+  // scroll/resize so the panel follows the header instead of being dismissed.
+  const place = () => {
+    const btn = btnRef.current;
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
+    const width = 230;
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+    const spaceBelow = window.innerHeight - r.bottom - 12;
+    const spaceAbove = r.top - 12;
+    // Flip upward when there isn't enough room below; cap height to the space
+    // available so it never runs off-screen — the list scrolls inside.
+    const openUp = spaceBelow < 240 && spaceAbove > spaceBelow;
+    const maxH = Math.max(160, Math.min(340, openUp ? spaceAbove : spaceBelow));
+    setPos(openUp
+      ? { left, bottom: window.innerHeight - r.top + 4, maxH }
+      : { left, top: r.bottom + 4, maxH });
+  };
+
   const openPanel = () => {
-    if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      const width = 230;
-      const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
-      const spaceBelow = window.innerHeight - r.bottom - 12;
-      const spaceAbove = r.top - 12;
-      // Flip the panel upward when there isn't enough room beneath the header,
-      // and cap its height to the space actually available so it never runs off
-      // the bottom (or top) of the screen — the list scrolls inside.
-      const openUp = spaceBelow < 240 && spaceAbove > spaceBelow;
-      const maxH = Math.max(160, Math.min(340, openUp ? spaceAbove : spaceBelow));
-      setPos(openUp
-        ? { left, bottom: window.innerHeight - r.top + 4, maxH }
-        : { left, top: r.bottom + 4, maxH });
-    }
+    if (!open) place();
     setOpen((o) => !o);
   };
   const toggleVal = (v: string) =>
