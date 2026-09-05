@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DateTime } from "luxon";
 import { fetchCeipalReport, reportMeta } from "../lib/ceipal";
@@ -53,6 +53,41 @@ const TREND: Record<Trend, { icon: string; color: string; title: string }> = {
   flat: { icon: "→", color: "#8aa4c8", title: "Response rate steady vs the prior period" },
   na: { icon: "·", color: "#adb5bd", title: "Not enough recent data to compare" },
 };
+
+// ---- Per-column header filters ----
+const TREND_LABEL: Record<Trend, string> = {
+  up: "↗ Rising",
+  down: "↘ Falling",
+  flat: "→ Steady",
+  na: "· N/A",
+};
+const REQ_STATUS_OPTS = ["Active", "On hold", "Closed", "Other"];
+const NO_SUBMISSIONS = "— No submissions";
+const FILTER_COLS = ["client", "reqStatus", "trend", "verdict"] as const;
+type FilterCol = (typeof FILTER_COLS)[number];
+type TrackerRow = { key: string; client: string; score: ClientScore | null; req: ClientRequirements | null };
+
+// The set of filterable values a row exposes for each column. Multiple values
+// (e.g. a client with both active and hold requirements) mean the row matches
+// if ANY selected value is present — same OR-within-column semantics as the
+// report-generation filters.
+function rowFacets(row: TrackerRow): Record<FilterCol, string[]> {
+  const s = row.score;
+  const req = row.req;
+  const reqStatus: string[] = [];
+  if (req) {
+    if (req.active > 0) reqStatus.push("Active");
+    if (req.onHold > 0) reqStatus.push("On hold");
+    if (req.closed > 0) reqStatus.push("Closed");
+    if (req.other > 0) reqStatus.push("Other");
+  }
+  return {
+    client: [row.client],
+    reqStatus,
+    trend: [s ? TREND_LABEL[s.trend] : TREND_LABEL.na],
+    verdict: [s ? VERDICT[s.verdict].label : NO_SUBMISSIONS],
+  };
+}
 
 // Proportional 5-stage funnel bar for one client.
 function StageMeter({ s }: { s: ClientScore }) {
@@ -211,7 +246,37 @@ export default function ClientTracker() {
     });
   }, [merged, scores, sortKey, allTimeByKey]);
 
-  const board = usePagination(sortedRows, 25, "clientTracker");
+  // Per-column header filters (value multi-select, like report generation).
+  const [colFilters, setColFilters] = useState<Record<string, string[]>>({});
+
+  const facetOptions = useMemo(() => {
+    const acc: Record<FilterCol, Set<string>> = {
+      client: new Set(), reqStatus: new Set(), trend: new Set(), verdict: new Set(),
+    };
+    for (const row of sortedRows) {
+      const f = rowFacets(row);
+      for (const c of FILTER_COLS) for (const v of f[c]) acc[c].add(v);
+    }
+    return {
+      client: [...acc.client].sort((a, b) => a.localeCompare(b)),
+      reqStatus: REQ_STATUS_OPTS.filter((o) => acc.reqStatus.has(o)),
+      trend: [TREND_LABEL.up, TREND_LABEL.down, TREND_LABEL.flat, TREND_LABEL.na].filter((o) => acc.trend.has(o)),
+      verdict: [VERDICT.prioritize.label, VERDICT.watch.label, VERDICT.reconsider.label, NO_SUBMISSIONS].filter((o) => acc.verdict.has(o)),
+    } as Record<FilterCol, string[]>;
+  }, [sortedRows]);
+
+  const anyColFilter = FILTER_COLS.some((c) => (colFilters[c]?.length ?? 0) > 0);
+
+  const visibleRows = useMemo(() => {
+    const active = FILTER_COLS.filter((c) => (colFilters[c]?.length ?? 0) > 0);
+    if (!active.length) return sortedRows;
+    return sortedRows.filter((row) => {
+      const f = rowFacets(row);
+      return active.every((c) => f[c].some((v) => colFilters[c].includes(v)));
+    });
+  }, [sortedRows, colFilters]);
+
+  const board = usePagination(visibleRows, 25, "clientTracker");
   const noSubmissionClients = useMemo(
     () => merged.filter((r) => !r.score && (r.req?.total ?? 0) > 0 && !r.req?.unassigned).length,
     [merged]
@@ -375,30 +440,61 @@ export default function ClientTracker() {
                 <p className="sub">
                   Click a client to see the individual profiles and its detailed metrics. Response = share of
                   submissions that got any feedback. A client is flagged 🔴 only when <strong>nothing has ever moved</strong> past submission.
+                  Use the ⏷ funnel on a column header to filter by its values.
                 </p>
+                {anyColFilter && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.6rem" }}>
+                    <span className="muted" style={{ fontSize: "0.82rem" }}>
+                      Column filters active — showing <strong>{visibleRows.length}</strong> of {sortedRows.length} clients.
+                    </span>
+                    <button className="btn ghost" style={{ padding: "0.25rem 0.6rem" }} onClick={() => setColFilters({})}>
+                      Clear filters
+                    </button>
+                  </div>
+                )}
                 <div className="table-wrap" style={{ maxHeight: "62vh" }}>
                   <table className="data">
                     <thead>
                       <tr>
                         <th style={{ width: 28 }}></th>
                         <th style={{ width: 40 }}>#</th>
-                        <th>Client / Vendor</th>
+                        <th>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                            Client / Vendor
+                            <HeaderFilter options={facetOptions.client} selected={colFilters.client ?? []} onChange={(v) => setColFilters((p) => ({ ...p, client: v }))} />
+                          </span>
+                        </th>
                         <th style={{ textAlign: "right" }} title="Every requirement this client has ever sent us — not affected by the date filter">
                           Total reqs<br /><span style={{ fontWeight: 400, fontSize: "0.72rem", opacity: 0.85 }}>all time</span>
                         </th>
                         <th style={{ textAlign: "right" }} title="Requirements this client sent us inside the selected date range">
                           Reqs<br /><span style={{ fontWeight: 400, fontSize: "0.72rem", opacity: 0.85 }}>in range</span>
                         </th>
-                        <th style={{ minWidth: 118 }} title="Status of the requirements in the selected range">Req status</th>
+                        <th style={{ minWidth: 118 }} title="Status of the requirements in the selected range">
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                            Req status
+                            <HeaderFilter options={facetOptions.reqStatus} selected={colFilters.reqStatus ?? []} onChange={(v) => setColFilters((p) => ({ ...p, reqStatus: v }))} />
+                          </span>
+                        </th>
                         <th style={{ textAlign: "right" }}>Submitted</th>
                         <th style={{ minWidth: 150 }}>Progress</th>
                         <th style={{ textAlign: "right" }}>Response</th>
-                        <th style={{ textAlign: "center" }} title="Response-rate trend, recent vs prior 45 days">Trend</th>
+                        <th style={{ textAlign: "center" }} title="Response-rate trend, recent vs prior 45 days">
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                            Trend
+                            <HeaderFilter options={facetOptions.trend} selected={colFilters.trend ?? []} onChange={(v) => setColFilters((p) => ({ ...p, trend: v }))} />
+                          </span>
+                        </th>
                         <th style={{ textAlign: "right" }} title="Avg days from submission to first response">Resp. time</th>
                         <th style={{ textAlign: "right" }}>Selected</th>
                         <th style={{ textAlign: "right" }}>Waiting</th>
                         <th>Last activity</th>
-                        <th>Verdict</th>
+                        <th>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                            Verdict
+                            <HeaderFilter options={facetOptions.verdict} selected={colFilters.verdict ?? []} onChange={(v) => setColFilters((p) => ({ ...p, verdict: v }))} />
+                          </span>
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -587,5 +683,108 @@ function Metric({ label, value }: { label: string; value: string }) {
       <div style={{ fontWeight: 700 }}>{value}</div>
       <div className="muted" style={{ fontSize: "0.75rem" }}>{label}</div>
     </div>
+  );
+}
+
+function FunnelIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"}
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4 5h16l-6 7v6l-4 2v-8z" />
+    </svg>
+  );
+}
+
+// A compact column-header filter: a funnel button that opens a searchable
+// checkbox list of the column's distinct values. The panel is position:fixed so
+// the table's scroll container can't clip it.
+function HeaderFilter({ options, selected, onChange }: {
+  options: string[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (btnRef.current?.contains(t) || panelRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const close = () => setOpen(false);
+    document.addEventListener("mousedown", onDoc);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true); // capture: any ancestor scroll
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [open]);
+
+  const openPanel = () => {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      const width = 230;
+      setPos({ top: r.bottom + 4, left: Math.max(8, Math.min(r.left, window.innerWidth - width - 8)) });
+    }
+    setOpen((o) => !o);
+  };
+  const toggleVal = (v: string) =>
+    onChange(selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v]);
+  const shown = options.filter((o) => o.toLowerCase().includes(q.toLowerCase()));
+  const active = selected.length > 0;
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={(e) => { e.stopPropagation(); openPanel(); }}
+        title="Filter this column"
+        aria-label="Filter column"
+        style={{
+          border: "none", background: active ? "var(--brand-light)" : "transparent",
+          color: active ? "var(--brand)" : "var(--muted)", cursor: "pointer",
+          borderRadius: 6, padding: "2px 4px", lineHeight: 1, display: "inline-flex",
+          alignItems: "center", gap: 2,
+        }}
+      >
+        <FunnelIcon filled={active} />
+        {active && <span style={{ fontSize: "0.68rem", fontWeight: 700 }}>{selected.length}</span>}
+      </button>
+      {open && (
+        <div
+          ref={panelRef}
+          style={{
+            position: "fixed", top: pos.top, left: pos.left, zIndex: 1000, width: 230,
+            background: "#fff", border: "1px solid var(--line)", borderRadius: 8,
+            boxShadow: "0 8px 24px rgba(16,24,40,0.14)", padding: "0.5rem",
+            maxHeight: 320, display: "flex", flexDirection: "column",
+            fontWeight: 400, textAlign: "left",
+          }}
+        >
+          <input className="ms-search" placeholder="Search…" value={q} autoFocus onChange={(e) => setQ(e.target.value)} />
+          <div className="ms-actions">
+            <button type="button" onClick={() => onChange(options)}>Select all</button>
+            <button type="button" onClick={() => onChange([])}>Clear</button>
+          </div>
+          <div className="ms-list">
+            {shown.map((o) => (
+              <label key={o} className="ms-item">
+                <input type="checkbox" checked={selected.includes(o)} onChange={() => toggleVal(o)} />
+                <span>{o}</span>
+              </label>
+            ))}
+            {shown.length === 0 && <div className="ms-empty">No matches</div>}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
