@@ -19,6 +19,19 @@ import {
   BucketKey,
   TARGET_PER_ASSIGNED,
 } from "../lib/recruiterStats";
+import {
+  Period,
+  RecruiterDelta,
+  TeamDelta,
+  Delta,
+  isCompletePeriod,
+  workingDays,
+  previousPeriod,
+  shiftedBack,
+  overlaps,
+  compareRecruiters,
+  compareTeam,
+} from "../lib/periodCompare";
 import { getRecruiterActivity, RecruiterActivity, ActivityCounts, activityNameKey } from "../lib/recruiterActivity";
 import { extensionFor } from "../lib/extensions";
 import { GUIDE, Lang } from "../lib/indexGuide";
@@ -108,6 +121,162 @@ const indexBreakdown = (s: RecruiterStat, lang: Lang) => {
     "Click the row for the full breakdown and how to improve it.",
   ].join("\n");
 };
+
+/**
+ * Choose a period to measure the current one against.
+ *
+ * The presets are the two questions people actually ask — "versus the run-up to
+ * this" and "versus the same stretch a month ago" — and custom covers the rest.
+ * Nothing here knows what the comparison is *for*.
+ */
+type CompareMode = "" | "prev" | "month" | "custom";
+
+function ComparePicker({
+  current,
+  mode,
+  custom,
+  enabled,
+  onMode,
+  onCustom,
+}: {
+  current: Period;
+  mode: CompareMode;
+  custom: Period | null;
+  enabled: boolean;
+  onMode: (m: CompareMode) => void;
+  onCustom: (p: Period) => void;
+}) {
+  const draft = custom ?? previousPeriod(current) ?? { from: "", to: "" };
+
+  return (
+    <div className="field" style={{ margin: 0, minWidth: 230 }}>
+      <label title="Measure the selected range against another one">Compare with</label>
+      <select
+        value={mode}
+        disabled={!enabled}
+        title={enabled ? undefined : "Set both an Activity from and an Activity to date first"}
+        onChange={(e) => {
+          const v = e.target.value as CompareMode;
+          // Seed the custom range from the previous period so switching to it
+          // lands on something sensible rather than two empty date boxes.
+          if (v === "custom" && !custom) onCustom(draft);
+          onMode(v);
+        }}
+      >
+        <option value="">No comparison</option>
+        <option value="prev">Previous period (same length)</option>
+        <option value="month">Same range, one month earlier</option>
+        <option value="custom">Custom range…</option>
+      </select>
+      {mode === "custom" && (
+        <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.4rem" }}>
+          <input type="date" value={draft.from} onChange={(e) => onCustom({ ...draft, from: e.target.value })} />
+          <input type="date" value={draft.to} onChange={(e) => onCustom({ ...draft, to: e.target.value })} />
+        </div>
+      )}
+      {!enabled && (
+        <span className="muted" style={{ fontSize: "0.75rem" }}>
+          Pick both dates above to compare.
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** A signed percentage, coloured by direction, or an honest dash when there is no baseline. */
+function Pct({ d }: { d: Delta }) {
+  if (d.pct === null) {
+    return (
+      <span className="muted" title="Nothing in the comparison period to measure against">
+        —
+      </span>
+    );
+  }
+  const good = d.pct > 0;
+  const flat = d.pct === 0;
+  return (
+    <span
+      style={{ color: flat ? "var(--muted)" : good ? "#1e7e34" : "var(--danger)", fontWeight: 600 }}
+      title={`${d.currentRate} vs ${d.baselineRate} per working day`}
+    >
+      {d.pct > 0 ? "+" : ""}
+      {d.pct}%
+    </span>
+  );
+}
+
+/** Team totals for the two periods, side by side. */
+function CompareSummary({
+  current,
+  baseline,
+  comparison,
+}: {
+  current: Period;
+  baseline: Period;
+  comparison: {
+    curDays: number;
+    baseDays: number;
+    team: TeamDelta;
+    overlapping: boolean;
+    rows: Map<string, RecruiterDelta>;
+  };
+}) {
+  const { team, curDays, baseDays, overlapping } = comparison;
+  // Anyone who worked then but not now has no row in the leaderboard — it is
+  // built from the current period — so their absence would otherwise read as
+  // "nothing to report" rather than as the change it is.
+  const gone = [...comparison.rows.values()].filter((r) => r.presence === "gone");
+  const cells: { label: string; d: Delta; suffix?: string }[] = [
+    { label: "Profiles", d: team.metrics.profiles },
+    { label: "Client/Vendor", d: team.metrics.clientCount },
+    { label: "Offers accepted", d: team.metrics.offers },
+    { label: "Conversion", d: team.conversion, suffix: "%" },
+    { label: "Avg index", d: team.metrics.index },
+  ];
+
+  return (
+    <div style={{ marginTop: "0.9rem", borderTop: "1px solid var(--line)", paddingTop: "0.9rem" }}>
+      <p className="muted" style={{ margin: "0 0 0.6rem", fontSize: "0.85rem" }}>
+        <strong>{current.from} → {current.to}</strong> ({curDays} working days) vs{" "}
+        <strong>{baseline.from} → {baseline.to}</strong> ({baseDays}). Counts are compared{" "}
+        <strong>per working day</strong>, so the two ranges need not be the same length.
+      </p>
+      {overlapping && (
+        <div className="alert warn" style={{ fontSize: "0.82rem", padding: "0.5rem 0.7rem" }}>
+          The two ranges overlap, so the same work is counted on both sides. Pick a baseline that ends
+          before the current range starts.
+        </div>
+      )}
+      {team.people.current !== team.people.baseline && (
+        <div className="alert warn" style={{ fontSize: "0.82rem", padding: "0.5rem 0.7rem" }}>
+          {team.people.baseline} recruiter{team.people.baseline === 1 ? "" : "s"} were active then,{" "}
+          {team.people.current} now. Team totals move with headcount — the per-recruiter rows below are
+          the fairer read.
+        </div>
+      )}
+      <div className="stat-grid">
+        {cells.map((c) => (
+          <div className="stat" key={c.label}>
+            <div className="num" style={{ fontSize: "1.25rem" }}>
+              {c.d.current}
+              {c.suffix ?? ""} <Pct d={c.d} />
+            </div>
+            <div className="lbl">
+              {c.label} · was {c.d.baseline}
+              {c.suffix ?? ""}
+            </div>
+          </div>
+        ))}
+      </div>
+      {gone.length > 0 && (
+        <p className="muted" style={{ margin: "0.6rem 0 0", fontSize: "0.82rem" }}>
+          Active then but not in this range, so they have no row below:{" "}
+          {gone.map((r) => `${r.name} (${r.metrics.profiles.baseline} profiles)`).join(", ")}.
+        </p>
+      )}
+    </div>
+  );
+}
 
 export default function RecruiterPerformance() {
   const [subs, setSubs] = useState<SubmissionEvent[] | null>(null);
@@ -238,6 +407,65 @@ export default function RecruiterPerformance() {
     [filteredSubs, jobs, dateActive]
   );
 
+  // ---- Compare with another period -----------------------------------------
+  //
+  // Submissions are fetched once and filtered in the browser, so a second
+  // period costs nothing but another pass over what is already in memory — no
+  // extra Ceipal call, no wait. Off unless a baseline is chosen: every hook
+  // below returns null until then and the page renders exactly as it did.
+  const current: Period = useMemo(
+    () => ({ from: submittedFrom, to: submittedTo }),
+    [submittedFrom, submittedTo]
+  );
+  // The MODE is the state, not the dates it resolves to. Storing the resolved
+  // baseline instead meant "previous period" stopped being the previous period
+  // the moment the main range moved — it kept pointing at the period before
+  // wherever the range used to be, and nothing on screen said so.
+  const [compareMode, setCompareMode] = useState<CompareMode>("");
+  const [customBaseline, setCustomBaseline] = useState<Period | null>(null);
+
+  // A baseline is only meaningful against a bounded range. Leaving either end
+  // open means "all time", which has no length to match and no period before
+  // it, so the control is disabled rather than quietly comparing nonsense.
+  const canCompare = isCompletePeriod(current);
+
+  const baseline: Period | null = useMemo(() => {
+    if (!canCompare) return null;
+    if (compareMode === "prev") return previousPeriod(current);
+    if (compareMode === "month") return shiftedBack(current, 1);
+    if (compareMode === "custom") return customBaseline && isCompletePeriod(customBaseline) ? customBaseline : null;
+    return null;
+  }, [compareMode, customBaseline, current, canCompare]);
+
+  const baselineSubs = useMemo(() => {
+    if (!subs || !baseline) return null;
+    return filterByActivity(
+      subs,
+      DateTime.fromISO(baseline.from),
+      DateTime.fromISO(baseline.to).endOf("day")
+    );
+  }, [subs, baseline]);
+
+  const baselineStats = useMemo(
+    () => (baselineSubs ? computeRecruiterStats(baselineSubs, jobs, { periodScoped: true }).stats : null),
+    [baselineSubs, jobs]
+  );
+
+  const comparison = useMemo(() => {
+    if (!baseline || !baselineStats) return null;
+    const curDays = workingDays(current);
+    const baseDays = workingDays(baseline);
+    return {
+      curDays,
+      baseDays,
+      team: compareTeam(allStats, baselineStats, curDays, baseDays),
+      rows: new Map(
+        compareRecruiters(allStats, baselineStats, curDays, baseDays).map((r) => [nameKey(r.name), r])
+      ),
+      overlapping: overlaps(current, baseline),
+    };
+  }, [allStats, baselineStats, baseline, current]);
+
   // Ranking by index is fixed (independent of sort/filter), so medals are stable.
   const rankByName = useMemo(() => {
     const m = new Map<string, number>();
@@ -338,6 +566,14 @@ export default function RecruiterPerformance() {
                   Clear dates
                 </button>
               )}
+              <ComparePicker
+                current={current}
+                mode={compareMode}
+                custom={customBaseline}
+                enabled={canCompare}
+                onMode={setCompareMode}
+                onCustom={setCustomBaseline}
+              />
               <div className="field" style={{ margin: 0, minWidth: 200 }}>
                 <label>Rank by</label>
                 <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
@@ -368,6 +604,9 @@ export default function RecruiterPerformance() {
                 changed</strong>, not when it was uploaded — so a candidate uploaded 31 Jul and submitted to
                 the client on 4 Aug counts as August work.
               </p>
+            )}
+            {comparison && baseline && (
+              <CompareSummary current={current} baseline={baseline} comparison={comparison} />
             )}
           </div>
 
@@ -431,16 +670,33 @@ export default function RecruiterPerformance() {
                     <tbody>
                       {board.pageItems.map((s) => {
                         const rank = rankByName.get(s.name) ?? 0;
+                        const cmp = comparison?.rows.get(nameKey(s.name));
                         return (
                           <tr key={s.name} style={{ cursor: "pointer" }} onClick={() => setSelected(s.name)}>
                             <td style={{ fontWeight: 600 }}>{rank < 3 ? medal[rank] : rank + 1}</td>
                             <td style={{ fontWeight: 600, whiteSpace: "normal" }}>{s.name}</td>
                             <td style={{ textAlign: "right" }}>{s.requirements}</td>
-                            <td style={{ textAlign: "right" }}>{s.profiles}</td>
+                            <td style={{ textAlign: "right" }}>
+                              {s.profiles}
+                              {cmp && (
+                                <div style={{ fontSize: "0.75rem" }}>
+                                  {cmp.presence === "new" ? (
+                                    <span className="pill green" title="No activity in the comparison period">new</span>
+                                  ) : (
+                                    <Pct d={cmp.metrics.profiles} />
+                                  )}
+                                </div>
+                              )}
+                            </td>
                             <td><StageBar counts={s.counts} statuses={statuses} /></td>
                             <td style={{ textAlign: "right" }}>
                               {s.clientCount}
                               <span className="muted" style={{ fontSize: "0.78rem" }}> · {pct(s.clientRate)}</span>
+                              {cmp && cmp.presence === "both" && (
+                                <div style={{ fontSize: "0.75rem" }}>
+                                  <Pct d={cmp.metrics.clientCount} />
+                                </div>
+                              )}
                             </td>
                             {(() => {
                               const e = effortFor(effort, s.name);
@@ -482,6 +738,11 @@ export default function RecruiterPerformance() {
                               >
                                 {s.index}
                               </span>
+                              {cmp && cmp.presence === "both" && (
+                                <div style={{ fontSize: "0.75rem" }}>
+                                  <Pct d={cmp.metrics.index} />
+                                </div>
+                              )}
                             </td>
                           </tr>
                         );
