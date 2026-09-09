@@ -10,6 +10,7 @@ import ResumeReports from "./pages/ResumeReports";
 import ReportGeneration from "./pages/ReportGeneration";
 import SavedReports from "./pages/SavedReports";
 import RecruiterPerformance from "./pages/RecruiterPerformance";
+import Submissions from "./pages/Submissions";
 import ClientTracker from "./pages/ClientTracker";
 import CandidatePool from "./pages/CandidatePool";
 import Preferences from "./pages/Preferences";
@@ -70,6 +71,7 @@ export default function App() {
         <Route path="/reports" element={<ReportGeneration />} />
         <Route path="/saved-reports" element={<SavedReports />} />
         <Route path="/recruiters" element={<RecruiterPerformance />} />
+        <Route path="/submissions" element={<Submissions />} />
         <Route path="/client-tracker" element={<ClientTracker />} />
         <Route path="/candidate-pool" element={<CandidatePool />} />
         <Route path="/timesheets" element={<Timesheets />} />
