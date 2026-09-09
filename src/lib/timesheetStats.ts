@@ -43,11 +43,12 @@ export function missingDays(
   to: string,
   today: string,
   filledDates: Set<string>,
-  approvedLeaveDates: Set<string>
+  approvedLeaveDates: Set<string>,
+  holidayDates: Set<string> = new Set()
 ): string[] {
   if (!from || !to) return [];
   return daysBetween(from, to).filter((d) => {
-    if (d > today || filledDates.has(d) || approvedLeaveDates.has(d)) return false;
+    if (d > today || filledDates.has(d) || approvedLeaveDates.has(d) || holidayDates.has(d)) return false;
     const weekday = DateTime.fromISO(d).weekday; // Luxon: 1=Monday ... 6=Saturday, 7=Sunday
     return weekday !== 6 && weekday !== 7;
   });
@@ -63,12 +64,13 @@ export function shortDays(
   to: string,
   today: string,
   hoursByDate: Map<string, number>,
-  approvedLeaveDates: Set<string>
+  approvedLeaveDates: Set<string>,
+  holidayDates: Set<string> = new Set()
 ): { date: string; hours: number }[] {
   if (!from || !to) return [];
   return daysBetween(from, to)
     .filter((d) => {
-      if (d > today || approvedLeaveDates.has(d)) return false;
+      if (d > today || approvedLeaveDates.has(d) || holidayDates.has(d)) return false;
       const weekday = DateTime.fromISO(d).weekday;
       if (weekday === 6 || weekday === 7) return false;
       const h = hoursByDate.get(d);
@@ -88,7 +90,7 @@ export function shortDays(
  * weekend, or a day on approved leave, and a day with an entry is judged
  * against `EXPECTED_DAILY_HOURS`.
  */
-export type DayStatus = "filled" | "short" | "missing" | "leave" | "weekend" | "future";
+export type DayStatus = "filled" | "short" | "missing" | "leave" | "holiday" | "weekend" | "future";
 
 export interface DaySummary {
   date: string;
@@ -102,23 +104,29 @@ export function dayBreakdown(
   to: string,
   today: string,
   hoursByDate: Map<string, number>,
-  approvedLeaveDates: Set<string>
+  approvedLeaveDates: Set<string>,
+  holidayDates: Set<string> = new Set()
 ): DaySummary[] {
   if (!from || !to) return [];
   return daysBetween(from, to).map((date) => {
     const hours = hoursByDate.get(date) ?? 0;
+    // A holiday is not leave and is labelled as its own thing: nobody spent an
+    // allowance on it, and a table that calls a company holiday "approved
+    // leave" is telling people something untrue about their own balance.
     const status: DayStatus =
       date > today
         ? "future"
         : [6, 7].includes(DateTime.fromISO(date).weekday)
           ? "weekend"
-          : approvedLeaveDates.has(date)
-            ? "leave"
-            : !hoursByDate.has(date)
-              ? "missing"
-              : hours < EXPECTED_DAILY_HOURS
-                ? "short"
-                : "filled";
+          : holidayDates.has(date)
+            ? "holiday"
+            : approvedLeaveDates.has(date)
+              ? "leave"
+              : !hoursByDate.has(date)
+                ? "missing"
+                : hours < EXPECTED_DAILY_HOURS
+                  ? "short"
+                  : "filled";
     return { date, status, hours };
   });
 }
@@ -130,6 +138,7 @@ export interface DayTotals {
   short: number;
   missing: number;
   leave: number;
+  holiday: number;
   hours: number;
   /** Hours owed on the days that were expected, minus what was logged. Never negative. */
   shortfallHours: number;
@@ -144,6 +153,7 @@ export function summariseDays(days: DaySummary[]): DayTotals {
     short: 0,
     missing: 0,
     leave: 0,
+    holiday: 0,
     hours: 0,
     shortfallHours: 0,
     completion: 100,
@@ -151,7 +161,10 @@ export function summariseDays(days: DaySummary[]): DayTotals {
   for (const d of days) {
     t.hours += d.hours;
     if (d.status === "leave") t.leave += 1;
-    if (d.status === "weekend" || d.status === "future" || d.status === "leave") continue;
+    if (d.status === "holiday") t.holiday += 1;
+    if (d.status === "weekend" || d.status === "future" || d.status === "leave" || d.status === "holiday") {
+      continue;
+    }
     t.expectedDays += 1;
     t[d.status] += 1;
     t.shortfallHours += Math.max(0, EXPECTED_DAILY_HOURS - d.hours);

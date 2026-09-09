@@ -4,6 +4,7 @@ import { DateTime } from "luxon";
 import { friendlyError } from "../../lib/errors";
 import { listTeamTimesheets, listLeaveRequests, decideLeaveRequest, Role, TimesheetEntry } from "../../lib/timesheets";
 import { daysBetween, missingDays } from "../../lib/timesheetStats";
+import { listHolidays, holidayDateSet } from "../../lib/holidays";
 import FillOnBehalfModal from "./FillOnBehalfModal";
 
 const todayIso = () => DateTime.local().toFormat("yyyy-MM-dd");
@@ -17,6 +18,9 @@ export default function TeamDashboardTab({ role }: { role: Role }) {
 
   const tsQ = useQuery({ queryKey: ["teamTimesheets", from, to], queryFn: () => listTeamTimesheets(from, to) });
   const leavesQ = useQuery({ queryKey: ["allLeaves", role], queryFn: () => listLeaveRequests(role) });
+  // Company holidays are owed by nobody, so they must not show as missing days
+  // here either — same list the Holidays tab writes and My Timesheet reads.
+  const holidaysQ = useQuery({ queryKey: ["holidays"], queryFn: listHolidays });
 
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [decideError, setDecideError] = useState<string | null>(null);
@@ -47,6 +51,8 @@ export default function TeamDashboardTab({ role }: { role: Role }) {
 
   const today = todayIso();
 
+  const holidayDates = useMemo(() => holidayDateSet(holidaysQ.data ?? []), [holidaysQ.data]);
+
   const rows = useMemo(() => {
     if (!tsQ.data) return [];
     const { entries, users } = tsQ.data;
@@ -62,12 +68,12 @@ export default function TeamDashboardTab({ role }: { role: Role }) {
         approvedLeaves
           .filter((l) => l.uid === u.uid)
           .forEach((l) => daysBetween(l.startDate, l.endDate).forEach((d) => myLeaveDates.add(d)));
-        const missing = missingDays(from, to, today, filledDates, myLeaveDates);
+        const missing = missingDays(from, to, today, filledDates, myLeaveDates, holidayDates);
         const totalHours = myEntries.reduce((s, e) => s + e.hours, 0);
         return { user: u, filled: filledDates.size, missing, totalHours, entries: myEntries };
       })
       .sort((a, b) => b.missing.length - a.missing.length || a.user.email.localeCompare(b.user.email));
-  }, [tsQ.data, leavesQ.data, from, to, today]);
+  }, [tsQ.data, leavesQ.data, holidayDates, from, to, today]);
 
   const pendingLeaves = (leavesQ.data ?? []).filter((l) => l.status === "pending");
   const decidedLeaves = (leavesQ.data ?? []).filter((l) => l.status !== "pending");

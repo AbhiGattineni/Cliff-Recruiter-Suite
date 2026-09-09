@@ -32,6 +32,7 @@ import {
   compareRecruiters,
   compareTeam,
 } from "../lib/periodCompare";
+import { listHolidays, holidayDateSet } from "../lib/holidays";
 import { getRecruiterActivity, RecruiterActivity, ActivityCounts, activityNameKey } from "../lib/recruiterActivity";
 import { extensionFor } from "../lib/extensions";
 import { GUIDE, Lang } from "../lib/indexGuide";
@@ -856,6 +857,11 @@ function RecruiterModal({
         .sort((a, b) => b.date.localeCompare(a.date)),
     [timesheetEntries, stat.name]
   );
+  // Company holidays, so a day nobody was expected to work isn't listed here as
+  // one they failed to account for. Cached under the same key as the Timesheets
+  // page, so opening a card costs no extra read.
+  const holidaysQ = useQuery({ queryKey: ["holidays"], queryFn: listHolidays });
+  const holidayDates = useMemo(() => holidayDateSet(holidaysQ.data ?? []), [holidaysQ.data]);
   const myMissingDays = useMemo(() => {
     if (!from || !to) return []; // "missing" is undefined over an unbounded range
     const filledDates = new Set(myEntries.map((e) => e.date));
@@ -863,8 +869,8 @@ function RecruiterModal({
     leaves
       .filter((l) => l.status === "approved" && nameKey(l.displayName || l.email) === nameKey(stat.name))
       .forEach((l) => daysBetween(l.startDate, l.endDate).forEach((d) => leaveDates.add(d)));
-    return missingDays(from, to, today, filledDates, leaveDates);
-  }, [myEntries, leaves, stat.name, from, to, today]);
+    return missingDays(from, to, today, filledDates, leaveDates, holidayDates);
+  }, [myEntries, leaves, holidayDates, stat.name, from, to, today]);
   // Requirements with hours logged but nothing sent to a client in this period.
   const noOutput = useMemo(() => {
     const subsByCode = new Map<string, number>();

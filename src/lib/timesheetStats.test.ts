@@ -252,3 +252,55 @@ describe("dayBreakdown / summariseDays", () => {
     expect(summariseDays(weekend)).toMatchObject({ expectedDays: 0, completion: 100, shortfallHours: 0 });
   });
 });
+
+describe("company holidays", () => {
+  // Mon 3rd through Fri 7th Aug 2026.
+  const noLeave = new Set<string>();
+  const holiday = new Set(["2026-08-05"]);
+
+  it("is never chased as a missing day", () => {
+    expect(missingDays("2026-08-03", "2026-08-05", "2026-08-05", new Set(), noLeave, holiday)).toEqual([
+      "2026-08-03",
+      "2026-08-04",
+    ]);
+  });
+
+  it("is not counted short when someone logged only part of it", () => {
+    const hours = new Map([["2026-08-05", 2]]);
+    expect(shortDays("2026-08-03", "2026-08-05", "2026-08-05", hours, noLeave, holiday)).toEqual([]);
+  });
+
+  it("is labelled as itself, not as approved leave", () => {
+    const days = dayBreakdown("2026-08-05", "2026-08-05", "2026-08-05", new Map(), noLeave, holiday);
+    expect(days[0].status).toBe("holiday");
+  });
+
+  it("wins over leave, so a day off booked on one is not spent", () => {
+    const both = dayBreakdown("2026-08-05", "2026-08-05", "2026-08-05", new Map(), holiday, holiday);
+    expect(both[0].status).toBe("holiday");
+  });
+
+  it("still shows hours for anyone who did work it", () => {
+    const hours = new Map([["2026-08-05", 6]]);
+    const days = dayBreakdown("2026-08-05", "2026-08-05", "2026-08-05", hours, noLeave, holiday);
+    expect(days[0]).toMatchObject({ status: "holiday", hours: 6 });
+  });
+
+  it("is owed by nobody, so it leaves the completion percentage alone", () => {
+    const hours = new Map([["2026-08-03", EXPECTED_DAILY_HOURS], ["2026-08-04", EXPECTED_DAILY_HOURS]]);
+    const days = dayBreakdown("2026-08-03", "2026-08-05", "2026-08-05", hours, noLeave, holiday);
+    const t = summariseDays(days);
+    expect(t).toMatchObject({ expectedDays: 2, filled: 2, holiday: 1, missing: 0 });
+    expect(t.completion).toBe(100);
+    expect(t.shortfallHours).toBe(0);
+  });
+
+  it("changes nothing when no holidays are passed at all", () => {
+    // The argument is optional so existing callers keep their behaviour.
+    expect(missingDays("2026-08-03", "2026-08-05", "2026-08-05", new Set(), noLeave)).toEqual([
+      "2026-08-03",
+      "2026-08-04",
+      "2026-08-05",
+    ]);
+  });
+});

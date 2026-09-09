@@ -18,6 +18,7 @@ import {
   summariseDays,
   DayStatus,
 } from "../../lib/timesheetStats";
+import { listHolidays, holidayDateSet } from "../../lib/holidays";
 import { listOpenJobs } from "../../lib/openJobs";
 import JobHoursPicker from "./JobHoursPicker";
 import { useAuth } from "../../context/AuthContext";
@@ -29,7 +30,7 @@ const todayIso = () => timesheetToday();
 const RANGE_DAYS = 30;
 
 /** The one place a day's status turns into words, so the table reads the same way the totals count. */
-function StatusPill({ status, hours }: { status: DayStatus; hours: number }) {
+function StatusPill({ status, hours, holiday }: { status: DayStatus; hours: number; holiday?: string }) {
   switch (status) {
     case "filled":
       return <span className="pill green">Full day</span>;
@@ -43,6 +44,13 @@ function StatusPill({ status, hours }: { status: DayStatus; hours: number }) {
       return <span className="pill red">Not filled</span>;
     case "leave":
       return <span className="pill grey">Approved leave</span>;
+    case "holiday":
+      // Named, because "holiday" on its own leaves people wondering which one.
+      return (
+        <span className="pill blue" title={holiday}>
+          {holiday || "Company holiday"}
+        </span>
+      );
     default:
       return <span className="muted">—</span>;
   }
@@ -68,6 +76,16 @@ export default function MyTimesheetTab() {
 
   // Open requirements for the picker — cached, so switching dates doesn't refetch.
   const openJobsQ = useQuery({ queryKey: ["openJobs"], queryFn: listOpenJobs, staleTime: 10 * 60_000 });
+
+  // Company holidays — days nobody owes a timesheet for. Read by everyone, set
+  // by admins and managers on the Holidays tab.
+  const holidaysQ = useQuery({ queryKey: ["holidays"], queryFn: listHolidays });
+  const holidayDates = useMemo(() => holidayDateSet(holidaysQ.data ?? []), [holidaysQ.data]);
+  const holidayNames = useMemo(
+    () => new Map((holidaysQ.data ?? []).map((h) => [h.date, h.name])),
+    [holidaysQ.data]
+  );
+
 
   // "Today" has to stay live. This was computed once when the tab mounted, so a
   // page left open across the rollover kept offering yesterday's date — which
@@ -113,6 +131,9 @@ export default function MyTimesheetTab() {
   }, [date, entriesQ.data, byDate]);
 
   const selected = byDate.get(date);
+  // A holiday is not a short day — nothing was owed — so the shortfall
+  // warning below must not fire on one.
+  const todayIsHoliday = holidayDates.has(date);
   const jobTotal = Math.round(jobs.reduce((s, j) => s + (Number(j.hours) || 0), 0) * 100) / 100;
   // Block saving a requirement row left at zero — it reads as "worked on, no time".
   const jobsIncomplete = jobs.length > 0 && jobs.some((j) => !(Number(j.hours) > 0));
@@ -154,8 +175,8 @@ export default function MyTimesheetTab() {
   const days = useMemo(() => {
     const hoursByDate = new Map<string, number>();
     for (const [d, e] of byDate) hoursByDate.set(d, Number(e.hours) || 0);
-    return dayBreakdown(from, to, todayIso(), hoursByDate, leaveDates);
-  }, [byDate, leaveDates, from, to]);
+    return dayBreakdown(from, to, todayIso(), hoursByDate, leaveDates, holidayDates);
+  }, [byDate, leaveDates, holidayDates, from, to]);
   const totals = useMemo(() => summariseDays(days), [days]);
   // Newest first, and weekends dropped — nothing is owed on them, so listing
   // them would pad the table with rows nobody has to act on.
@@ -212,6 +233,10 @@ export default function MyTimesheetTab() {
               <div className="lbl">Approved leave</div>
             </div>
             <div className="stat">
+              <div className="num">{totals.holiday}</div>
+              <div className="lbl">Company holidays</div>
+            </div>
+            <div className="stat">
               <div className="num">{totals.hours}</div>
               <div className="lbl">Hours logged</div>
             </div>
@@ -253,6 +278,12 @@ export default function MyTimesheetTab() {
           </div>
         )}
         {saved && !error && <div className="alert success">Saved {date}.</div>}
+        {todayIsHoliday && (
+          <div className="alert info" style={{ fontSize: "0.85rem" }}>
+            Today is <strong>{holidayNames.get(date)}</strong>, a company holiday — no timesheet is
+            expected. If you did work, log it here anyway and it will count.
+          </div>
+        )}
         <div className="row">
           <div className="field">
             <label>Date</label>
@@ -306,7 +337,7 @@ export default function MyTimesheetTab() {
         {/* A full day is 9h. Said plainly and left as a warning rather than a
             block — someone on a half day shouldn't have to invent hours to
             save, and a forced 9 would make the whole number worthless. */}
-        {jobTotal > 0 && jobTotal < EXPECTED_DAILY_HOURS && (
+        {jobTotal > 0 && jobTotal < EXPECTED_DAILY_HOURS && !todayIsHoliday && (
           <p className="alert warn" style={{ fontSize: "0.82rem", padding: "0.5rem 0.7rem" }}>
             That&#39;s {Math.round((EXPECTED_DAILY_HOURS - jobTotal) * 100) / 100}h short of a full{" "}
             {EXPECTED_DAILY_HOURS}h day. Add the missing time against a requirement if you worked it — you can
@@ -356,7 +387,7 @@ export default function MyTimesheetTab() {
                         <span className="muted">{DateTime.fromISO(d.date).toFormat("ccc")}</span>
                       </td>
                       <td>
-                        <StatusPill status={d.status} hours={d.hours} />
+                        <StatusPill status={d.status} hours={d.hours} holiday={holidayNames.get(d.date)} />
                       </td>
                       <td style={{ textAlign: "right" }}>
                         {e ? d.hours : <span className="muted">—</span>}

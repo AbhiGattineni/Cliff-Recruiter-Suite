@@ -3,8 +3,9 @@ import { useAuth } from "../context/AuthContext";
 import MyTimesheetTab from "../components/timesheets/MyTimesheetTab";
 import MyLeavesTab from "../components/timesheets/MyLeavesTab";
 import TeamDashboardTab from "../components/timesheets/TeamDashboardTab";
+import HolidaysTab from "../components/timesheets/HolidaysTab";
 
-type Tab = "mine" | "leaves" | "team";
+type Tab = "mine" | "leaves" | "team" | "holidays";
 
 export default function Timesheets() {
   const { profile, profileLoading } = useAuth();
@@ -42,11 +43,17 @@ export default function Timesheets() {
                 Team Dashboard
               </button>
             )}
+            {canSeeTeam && (
+              <button className={tab === "holidays" ? "active" : ""} onClick={() => setTab("holidays")}>
+                Holidays
+              </button>
+            )}
           </div>
 
           {tab === "mine" && <MyTimesheetTab />}
           {tab === "leaves" && <MyLeavesTab />}
           {tab === "team" && canSeeTeam && <TeamDashboardTab role={profile.role} />}
+          {tab === "holidays" && canSeeTeam && <HolidaysTab />}
         </>
       )}
     </div>

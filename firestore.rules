@@ -49,6 +49,28 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Company holidays. Every member of staff reads them — a recruiter's own
+    // timesheet has to know which days it must not chase them for — and only
+    // admins and managers set them.
+    //
+    // This is the one collection written straight from the browser rather than
+    // through a callable. The check is entirely "is this person a manager",
+    // which is exactly what these rules are for, and a whole Cloud Run service
+    // to restate it would cost CPU quota this project has run out of before.
+    // The date is the document ID, so a day cannot be marked twice.
+    match /holidays/{date} {
+      allow get, list: if isStaff();
+      // Split rather than one `write`: on a delete there is no
+      // request.resource to validate, so the shape check belongs only on the
+      // writes that carry a document.
+      allow create, update: if myRole() in ["admin", "manager"]
+        && request.resource.data.date == date
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 120;
+      allow delete: if myRole() in ["admin", "manager"];
+    }
+
     match /leaveRequests/{leaveId} {
       allow get, list: if isStaff() && (
         resource.data.uid == request.auth.uid ||
