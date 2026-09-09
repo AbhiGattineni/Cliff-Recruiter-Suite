@@ -36,6 +36,64 @@ const pctPill = (v: number) => (v >= 90 ? "green" : v >= 60 ? "amber" : "red");
 const fmtHours = (h: number | null) =>
   h == null ? "—" : h < 24 ? `${Math.round(h * 10) / 10}h` : `${Math.floor(h / 24)}d ${Math.round(h % 24)}h`;
 
+/**
+ * A number input that lets you finish typing.
+ *
+ * Clamping on every keystroke makes the field feel broken: clearing it to type
+ * a new value snaps it straight back to the old one, so backspace appears to do
+ * nothing. This keeps whatever is typed — including empty, and a lone "-" — and
+ * only forces it into range when the field is left or Enter is pressed. A value
+ * that is already valid commits as you type, so the numbers below still react
+ * immediately.
+ */
+function NumberField({
+  label,
+  title,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  title?: string;
+  value: number;
+  min: number;
+  max?: number;
+  onChange: (n: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+
+  const clamp = (n: number) => Math.min(max ?? Number.MAX_SAFE_INTEGER, Math.max(min, Math.round(n)));
+
+  return (
+    <div className="field" style={{ margin: 0, minWidth: 140 }}>
+      <label title={title}>{label}</label>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        value={draft}
+        onChange={(e) => {
+          const raw = e.target.value;
+          setDraft(raw);
+          const n = Number(raw);
+          if (raw !== "" && Number.isFinite(n) && n === clamp(n)) onChange(n);
+        }}
+        onBlur={() => {
+          const n = Number(draft);
+          const next = draft === "" || !Number.isFinite(n) ? value : clamp(n);
+          setDraft(String(next));
+          if (next !== value) onChange(next);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        }}
+      />
+    </div>
+  );
+}
+
 export default function Submissions() {
   const [events, setEvents] = useState<SubmissionEvent[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -192,25 +250,22 @@ export default function Submissions() {
             <label>to</label>
             <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
           </div>
-          <div className="field" style={{ margin: 0, minWidth: 130 }}>
-            <label title="How many profiles each requirement should get">Profiles / req</label>
-            <input
-              type="number"
-              min={1}
-              max={5}
-              value={target}
-              onChange={(e) => setTarget(Math.min(5, Math.max(1, Number(e.target.value) || 1)))}
-            />
-          </div>
-          <div className="field" style={{ margin: 0, minWidth: 130 }}>
-            <label title="Wall clock from when the requirement was created">Within (hours)</label>
-            <input
-              type="number"
-              min={1}
-              value={windowHours}
-              onChange={(e) => setWindowHours(Math.max(1, Number(e.target.value) || 24))}
-            />
-          </div>
+          <NumberField
+            label="Profiles / req"
+            title="How many profiles each requirement should get"
+            value={target}
+            min={1}
+            max={5}
+            onChange={setTarget}
+          />
+          <NumberField
+            label="Within (hours)"
+            title="Wall clock from when the requirement was created"
+            value={windowHours}
+            min={1}
+            max={720}
+            onChange={setWindowHours}
+          />
           <div style={{ flex: 1 }} />
           <button className="btn ghost" style={{ padding: "0.4rem 0.7rem" }} onClick={() => void load(true)}>
             Refresh from Ceipal
