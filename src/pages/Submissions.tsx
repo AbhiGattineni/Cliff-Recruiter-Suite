@@ -21,6 +21,7 @@ import {
   worstFirst,
   RequirementSla,
   SlaTotals,
+  RecruiterSla,
   SLA_BUCKETS,
   SLA_TARGET_SUBMISSIONS,
   SLA_WINDOW_HOURS,
@@ -296,7 +297,7 @@ export default function Submissions() {
         <>
           <BucketTable buckets={buckets} target={target} windowHours={windowHours} requirements={totals.requirements} />
           <GroupTable title="By account manager" groups={byOwner} label="Account manager" />
-          <RecruiterTable rows={recruiters} windowHours={windowHours} />
+          <RecruiterTable rows={recruiters} target={target} windowHours={windowHours} />
           <GroupTable title="By client" groups={byClient} label="Client" />
         </>
       ) : (
@@ -489,13 +490,23 @@ function GroupTable({
   );
 }
 
-function RecruiterTable({ rows, windowHours }: { rows: { name: string; submissions: number; inWindow: number; rate: number; requirements: number }[]; windowHours: number }) {
+function RecruiterTable({
+  rows,
+  target,
+  windowHours,
+}: {
+  rows: RecruiterSla[];
+  target: number;
+  windowHours: number;
+}) {
   return (
     <div className="card">
       <h2>By recruiter</h2>
       <p className="sub">
-        Counted per submission, and only the ones that could earn anything — a third profile on a
-        requirement that already has two is neither credited nor held against anyone.
+        Scored against what their requirements were owed — {target} profiles each — not against what
+        they happened to send. Only the first {target} profiles on a requirement can earn anything, so a
+        later one is neither credited nor held against anyone. A requirement two recruiters worked is
+        owed {target} by each of them here, so nobody&#39;s score depends on who else touched it.
       </p>
       <div className="table-wrap">
         <table className="data">
@@ -503,9 +514,10 @@ function RecruiterTable({ rows, windowHours }: { rows: { name: string; submissio
             <tr>
               <th>Recruiter</th>
               <th style={{ textAlign: "right" }}>Reqs worked</th>
+              <th style={{ textAlign: "right" }}>Expected</th>
               <th style={{ textAlign: "right" }}>Counted submissions</th>
               <th style={{ textAlign: "right" }}>Within {windowHours}h</th>
-              <th style={{ textAlign: "right" }}>On time</th>
+              <th style={{ textAlign: "right" }}>Attainment</th>
             </tr>
           </thead>
           <tbody>
@@ -513,16 +525,22 @@ function RecruiterTable({ rows, windowHours }: { rows: { name: string; submissio
               <tr key={r.name}>
                 <td style={{ fontWeight: 600, whiteSpace: "normal" }}>{r.name}</td>
                 <td style={{ textAlign: "right" }}>{r.requirements}</td>
+                <td style={{ textAlign: "right" }} className="muted">{r.expected}</td>
                 <td style={{ textAlign: "right" }}>{r.submissions}</td>
                 <td style={{ textAlign: "right" }}>{r.inWindow}</td>
                 <td style={{ textAlign: "right" }}>
-                  <span className={`pill ${pctPill(r.rate)}`}>{r.rate}%</span>
+                  <span
+                    className={`pill ${pctPill(r.attainment)}`}
+                    title={`${r.inWindow} of ${r.expected} expected across ${r.requirements} requirement${r.requirements === 1 ? "" : "s"}`}
+                  >
+                    {r.attainment}%
+                  </span>
                 </td>
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="muted" style={{ textAlign: "center", padding: "1rem" }}>
+                <td colSpan={6} className="muted" style={{ textAlign: "center", padding: "1rem" }}>
                   No submissions in this range.
                 </td>
               </tr>

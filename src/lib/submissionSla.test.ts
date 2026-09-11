@@ -189,17 +189,43 @@ describe("byRecruiter", () => {
     ev({ jobCode: "CS-2", submittedBy: "Guru Deepthi", applicantName: "C", h: 5 }),
   ]);
 
-  it("credits each recruiter for their own submissions", () => {
-    const r = byRecruiter(rows);
-    const guru = r.find((x) => x.name === "Guru Deepthi")!;
-    expect(guru.submissions).toBe(2);
-    expect(guru.inWindow).toBe(2);
-    expect(guru.rate).toBe(100);
-    expect(guru.requirements).toBe(2);
+  it("scores against the target, not against what the recruiter happened to send", () => {
+    // One profile, on time, on one requirement is half the job — not 100%.
+    const solo = byRecruiter(
+      buildRequirementSla([ev({ jobCode: "CS-7", submittedBy: "Chinki Gupta", applicantName: "A", h: 2 })])
+    );
+    expect(solo[0]).toMatchObject({
+      requirements: 1,
+      expected: 2,
+      submissions: 1,
+      inWindow: 1,
+      attainment: 50,
+    });
   });
 
-  it("counts a late submission against the recruiter who made it", () => {
-    expect(byRecruiter(rows).find((x) => x.name === "saurabh")!.rate).toBe(0);
+  it("gives full marks only when the requirement's whole target was covered on time", () => {
+    const both = byRecruiter(
+      buildRequirementSla([
+        ev({ jobCode: "CS-8", submittedBy: "Juhi Sinha", applicantName: "A", h: 1 }),
+        ev({ jobCode: "CS-8", submittedBy: "Juhi Sinha", applicantName: "B", h: 3 }),
+      ])
+    );
+    expect(both[0].attainment).toBe(100);
+  });
+
+  it("counts a late submission as work done but not as attainment", () => {
+    const s = byRecruiter(rows).find((x) => x.name === "saurabh")!;
+    expect(s.submissions).toBe(1);
+    expect(s.inWindow).toBe(0);
+    expect(s.attainment).toBe(0);
+  });
+
+  it("credits each recruiter for their own requirements", () => {
+    const guru = byRecruiter(rows).find((x) => x.name === "Guru Deepthi")!;
+    expect(guru.requirements).toBe(2);
+    expect(guru.expected).toBe(4);
+    expect(guru.inWindow).toBe(2);
+    expect(guru.attainment).toBe(50); // two requirements, one profile each
   });
 
   it("judges only the submissions that could have earned anything", () => {
@@ -210,7 +236,24 @@ describe("byRecruiter", () => {
       ev({ jobCode: "CS-9", submittedBy: "Juhi Sinha", applicantName: "C", h: 200 }),
     ]);
     expect(byRecruiter(many)[0].submissions).toBe(2);
-    expect(byRecruiter(many)[0].rate).toBe(100);
+    expect(byRecruiter(many)[0].attainment).toBe(100);
+  });
+
+  it("still counts a requirement someone only sent a late third profile to", () => {
+    // They worked it, so they owed it the full target.
+    const late = buildRequirementSla([
+      ev({ jobCode: "CS-10", submittedBy: "Juhi Sinha", applicantName: "A", h: 1 }),
+      ev({ jobCode: "CS-10", submittedBy: "Juhi Sinha", applicantName: "B", h: 2 }),
+      ev({ jobCode: "CS-10", submittedBy: "Mubal", applicantName: "C", h: 5 }),
+    ]);
+    const mubal = byRecruiter(late).find((x) => x.name === "Mubal")!;
+    expect(mubal.requirements).toBe(1);
+    expect(mubal.submissions).toBe(0); // outside the first two, so it earned nothing
+    expect(mubal.attainment).toBe(0);
+  });
+
+  it("puts the weakest recruiter first", () => {
+    expect(byRecruiter(rows)[0].name).toBe("saurabh");
   });
 });
 
@@ -275,7 +318,9 @@ describe("profiles stopped internally", () => {
   });
 
   it("keeps a rejected profile out of the recruiter's counted submissions too", () => {
-    const r = byRecruiter(risamsoft);
-    expect(r.find((x) => x.name === "Guru Deepthi")!.submissions).toBe(2);
+    // Two requirements worked, but only CS-486's two profiles count.
+    const guru = byRecruiter(risamsoft).find((x) => x.name === "Guru Deepthi")!;
+    expect(guru.submissions).toBe(2);
+    expect(guru.requirements).toBe(1); // CS-485's only profile never went out
   });
 });

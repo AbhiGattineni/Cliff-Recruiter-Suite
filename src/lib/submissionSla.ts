@@ -280,18 +280,29 @@ export function groupBy(
 }
 
 /**
- * Per recruiter, from the submissions themselves rather than the requirement.
+ * Per recruiter.
  *
- * A requirement has one owner but many recruiters, so this cannot come from
- * grouping requirements — it has to be counted a submission at a time.
+ * Scored the same way as everything else on this page: against the target the
+ * requirement was owed, not against what the recruiter happened to send. The
+ * old denominator was their own submission count, which meant one profile sent
+ * on time read as 100% — a perfect score for half the job.
+ *
+ * A requirement worked by two recruiters is owed two profiles by each of them
+ * here. That is deliberate: this table answers "did this person cover their
+ * requirements", and splitting the target between them would make a recruiter's
+ * score depend on who else happened to touch the same requirement.
  */
 export interface RecruiterSla {
   name: string;
+  /** Requirements they put at least one profile on. */
+  requirements: number;
+  /** What those requirements were owed: requirements × target. */
+  expected: number;
+  /** Their submissions among the ones that could earn — the requirement's first `target`. */
   submissions: number;
   inWindow: number;
-  /** Submissions inside the window as a share of that recruiter's own submissions. */
-  rate: number;
-  requirements: number;
+  /** inWindow / expected. Measured against the target, not against what they happened to send. */
+  attainment: number;
 }
 
 export function byRecruiter(
@@ -299,33 +310,50 @@ export function byRecruiter(
   target = SLA_TARGET_SUBMISSIONS,
   windowHours = SLA_WINDOW_HOURS
 ): RecruiterSla[] {
-  const map = new Map<string, { name: string; submissions: number; inWindow: number; reqs: Set<string> }>();
+  const map = new Map<
+    string,
+    { name: string; submissions: number; inWindow: number; reqs: Set<string> }
+  >();
+  const touch = (name: string) => {
+    const k = keyOf(name);
+    if (!k) return null;
+    let e = map.get(k);
+    if (!e) {
+      e = { name: norm(name), submissions: 0, inWindow: 0, reqs: new Set() };
+      map.set(k, e);
+    }
+    return e;
+  };
+
   for (const r of rows) {
-    // Only the first `target` submissions can earn anything, so only those are
-    // judged — a recruiter is not marked down for a third profile nobody asked
-    // for, and not credited for one either.
-    r.submissions.slice(0, target).forEach((s) => {
-      const k = keyOf(s.recruiter);
-      if (!k) return;
-      let e = map.get(k);
-      if (!e) {
-        e = { name: s.recruiter, submissions: 0, inWindow: 0, reqs: new Set() };
-        map.set(k, e);
-      }
+    // Worked = put a profile on it at all. A recruiter whose only profile was
+    // the third on a requirement still worked it, and still owed it two.
+    for (const s of r.submissions) touch(s.recruiter)?.reqs.add(r.jobCode);
+
+    // Credited = among the first `target`, which are the only ones that can
+    // earn anything. A fourth profile is neither credited nor held against
+    // whoever sent it.
+    for (const s of r.submissions.slice(0, target)) {
+      const e = touch(s.recruiter);
+      if (!e) continue;
       e.submissions += 1;
-      e.reqs.add(r.jobCode);
       if (s.hours != null && s.hours <= windowHours) e.inWindow += 1;
-    });
+    }
   }
+
   return [...map.values()]
-    .map((e) => ({
-      name: e.name,
-      submissions: e.submissions,
-      inWindow: e.inWindow,
-      rate: e.submissions > 0 ? Math.round((e.inWindow / e.submissions) * 100) : 0,
-      requirements: e.reqs.size,
-    }))
-    .sort((a, b) => b.inWindow - a.inWindow || a.name.localeCompare(b.name));
+    .map((e) => {
+      const expected = e.reqs.size * target;
+      return {
+        name: e.name,
+        requirements: e.reqs.size,
+        expected,
+        submissions: e.submissions,
+        inWindow: e.inWindow,
+        attainment: expected > 0 ? Math.round((e.inWindow / expected) * 100) : 0,
+      };
+    })
+    .sort((a, b) => a.attainment - b.attainment || b.expected - a.expected || a.name.localeCompare(b.name));
 }
 
 /** Every distinct account manager present, for the owner filter. */
