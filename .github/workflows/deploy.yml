@@ -141,19 +141,33 @@ jobs:
       # if the listing fails it simply falls back to a single ordinary deploy.
       - name: Deploy Cloud Functions
         run: |
-          set -euo pipefail
-          in_source=$(grep -oP '^export const \K\w+(?= = onCall)' functions/src/index.ts | sort -u)
+          # No `set -e`: discovering what is already deployed is an optimisation,
+          # and a failure in it must not stop the deploy. It did once — the
+          # listing exited non-zero, pipefail propagated it, and the step died in
+          # two seconds having printed nothing at all, with the fallback this
+          # comment promises never reached. Pass 2 below is the command whose
+          # exit status the step is judged on, because it is the one that has to
+          # work.
+          set -uo pipefail
+          in_source=$(grep -oP '^export const \K\w+(?= = onCall)' functions/src/index.ts | sort -u || true)
+          echo "In source: $(echo "$in_source" | tr '\n' ' ')"
+
           deployed=$(npx firebase-tools@13 functions:list --project cliff-services --json 2>/dev/null \
             | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{for(const f of JSON.parse(s).result||[])if(f.id)console.log(f.id)}catch{}})' \
-            | sort -u)
-          only=$(comm -12 <(echo "$in_source") <(echo "$deployed") | sed 's/^/functions:/' | paste -sd, -)
+            | sort -u || true)
+          if [ -z "$deployed" ]; then
+            echo "Could not list deployed functions — skipping pass 1 and deploying everything in one go."
+          fi
+
+          only=$(comm -12 <(echo "$in_source") <(echo "$deployed") | sed 's/^/functions:/' | paste -sd, - || true)
           if [ -n "$only" ]; then
             # Not fatal: pass 1 exists only to free quota, and it is expected to
             # report a failure for anything already wedged by the shortage it is
-            # there to clear. Pass 2 below is the one that has to pass.
+            # there to clear.
             echo "Pass 1 — already deployed: $only"
             npx firebase-tools@13 deploy --only "$only" --project cliff-services --non-interactive --force || true
           fi
+
           echo "Pass 2 — all functions"
           npx firebase-tools@13 deploy --only functions --project cliff-services --non-interactive --force
 
