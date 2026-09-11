@@ -177,6 +177,7 @@ export default function Submissions() {
       { key: "created", label: "Created" },
       { key: "ageDays", label: "Age (days)" },
       { key: "subs", label: "Submissions" },
+      { key: "rejectedInternally", label: "Rejected internally" },
       ...Array.from({ length: target }, (_, i) => ({
         key: `t${i}`,
         label: `Hours to ${ORDINALS[i] ?? `${i + 1}th`}`,
@@ -192,6 +193,7 @@ export default function Submissions() {
       created: r.jobCreatedOn?.toFormat("yyyy-MM-dd") ?? "",
       ageDays: r.ageDays ?? "",
       subs: r.submissions.length,
+      rejectedInternally: r.rejectedInternally,
       ...Object.fromEntries(
         Array.from({ length: target }, (_, i) => [`t${i}`, r.hoursToNth[i] == null ? "" : Math.round(r.hoursToNth[i]! * 10) / 10])
       ),
@@ -347,12 +349,19 @@ function Headline({
           <div className="num">{totals.totalSubmissions}</div>
           <div className="lbl">Submissions in total</div>
         </div>
+        <div className="stat">
+          <div className="num" style={totals.rejectedInternally ? { color: "#a9700a" } : undefined}>
+            {totals.rejectedInternally}
+          </div>
+          <div className="lbl">Rejected internally — not counted</div>
+        </div>
       </div>
       <p className="muted" style={{ margin: "0.9rem 0 0", fontSize: "0.85rem" }}>
         Attainment counts only the first {target} profiles per requirement, measured from when the
         requirement was created. Sending twenty profiles to one requirement cannot make up for sending
         none to another — which is why the total submissions figure sits beside it rather than instead of
-        it.
+        it. A profile <strong>rejected internally</strong> is not a submission: it never reached the
+        client, so it is counted separately rather than credited.
       </p>
     </div>
   );
@@ -555,6 +564,9 @@ function CoverageTable({
               <th>Account manager</th>
               <th style={{ textAlign: "right" }}>Age</th>
               <th style={{ textAlign: "right" }}>Subs</th>
+              <th style={{ textAlign: "right" }} title="Profiles stopped internally — not counted as submissions">
+                Rej. int.
+              </th>
               {Array.from({ length: target }, (_, i) => (
                 <th key={i} style={{ textAlign: "right" }}>{ORDINALS[i] ?? `${i + 1}th`}</th>
               ))}
@@ -574,6 +586,9 @@ function CoverageTable({
                   {r.ageDays == null ? "—" : `${r.ageDays}d`}
                 </td>
                 <td style={{ textAlign: "right", fontWeight: 600 }}>{r.submissions.length}</td>
+                <td style={{ textAlign: "right" }} className={r.rejectedInternally ? "" : "muted"}>
+                  {r.rejectedInternally || "—"}
+                </td>
                 {Array.from({ length: target }, (_, i) => {
                   const h = r.hoursToNth[i];
                   const late = h != null && h > windowHours;
@@ -595,7 +610,7 @@ function CoverageTable({
             ))}
             {ordered.length === 0 && (
               <tr>
-                <td colSpan={7 + target} className="muted" style={{ textAlign: "center", padding: "1rem" }}>
+                <td colSpan={8 + target} className="muted" style={{ textAlign: "center", padding: "1rem" }}>
                   No requirements in this range.
                 </td>
               </tr>

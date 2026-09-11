@@ -20,9 +20,16 @@
 //     whole point of measuring per requirement rather than in total.
 //   - Only the FIRST `target` submissions count towards attainment. A ninth
 //     profile arriving inside the window is not a save.
+//   - A profile REJECTED INTERNALLY is not a submission. It never left the
+//     building, so counting it would credit the team for work the client never
+//     saw — and that is exactly the distinction the review turned on: "if I
+//     reject, then why do we waste the time on submitting on Ceipal… so
+//     submission is not considered". They are counted separately instead, so
+//     the reason a requirement is short stays visible.
 
 import { DateTime } from "luxon";
 import { SubmissionEvent } from "./report/types";
+import { normalizeStatus } from "./report/columns";
 
 export const SLA_TARGET_SUBMISSIONS = 2;
 export const SLA_WINDOW_HOURS = 24;
@@ -52,6 +59,18 @@ export interface SlaSubmission {
   hours: number | null;
 }
 
+/**
+ * Did this profile actually go out?
+ *
+ * `normalizeStatus` reserves REJECTED for "Rejected Internally" specifically —
+ * a client-side rejection lands in OTHER — so this is exactly the profiles we
+ * stopped ourselves. One that was rejected internally but reached the
+ * client/vendor anyway still counts; the rejection came after it went out.
+ */
+function wentOut(statuses: Set<string>): boolean {
+  return !statuses.has("REJECTED") || statuses.has("CLIENT_VENDOR");
+}
+
 export interface RequirementSla {
   jobCode: string;
   jobTitle: string;
@@ -67,6 +86,8 @@ export interface RequirementSla {
   /** Requirement age in days, for the coverage board. */
   ageDays: number | null;
   met: boolean;
+  /** Profiles stopped internally — not submissions, but the reason a count is short. */
+  rejectedInternally: number;
 }
 
 const norm = (s: string) => String(s ?? "").trim();
@@ -102,6 +123,7 @@ export function buildRequirementSla(
     owner: string;
     jobCreatedOn: DateTime | null;
     byCandidate: Map<string, SlaSubmission>;
+    statusesByCandidate: Map<string, Set<string>>;
   }
   const jobs = new Map<string, Acc>();
 
@@ -117,6 +139,7 @@ export function buildRequirementSla(
         owner: norm(ev.accountManager),
         jobCreatedOn: ev.jobCreatedOn ?? null,
         byCandidate: new Map(),
+        statusesByCandidate: new Map(),
       };
       jobs.set(code, job);
     }
@@ -127,7 +150,17 @@ export function buildRequirementSla(
     if (!job.jobCreatedOn) job.jobCreatedOn = ev.jobCreatedOn ?? null;
 
     const cand = keyOf(ev.applicantName);
-    if (!cand || !ev.submittedOn) continue;
+    if (!cand) continue;
+    // Every status this candidate has been through, so the furthest one they
+    // reached decides whether they count — not whichever event came last.
+    let seen = job.statusesByCandidate.get(cand);
+    if (!seen) {
+      seen = new Set();
+      job.statusesByCandidate.set(cand, seen);
+    }
+    seen.add(normalizeStatus(ev.submissionStatus));
+
+    if (!ev.submittedOn) continue;
     const existing = job.byCandidate.get(cand);
     if (!existing || ev.submittedOn < existing.submittedOn) {
       job.byCandidate.set(cand, {
@@ -140,7 +173,13 @@ export function buildRequirementSla(
   }
 
   return [...jobs.values()].map((job) => {
-    const submissions = [...job.byCandidate.values()]
+    const counted = [...job.byCandidate.entries()].filter(([cand]) =>
+      wentOut(job.statusesByCandidate.get(cand) ?? new Set())
+    );
+    const rejectedInternally = job.byCandidate.size - counted.length;
+
+    const submissions = counted
+      .map(([, sub]) => sub)
       .sort((a, b) => a.submittedOn.toMillis() - b.submittedOn.toMillis())
       .map((s) => ({
         ...s,
@@ -163,6 +202,7 @@ export function buildRequirementSla(
       inWindow,
       ageDays: job.jobCreatedOn ? Math.floor(now.diff(job.jobCreatedOn, "days").days) : null,
       met: inWindow >= target,
+      rejectedInternally,
     };
   });
 }
@@ -183,6 +223,8 @@ export interface SlaTotals {
   under: number;
   /** Every submission, in or out of window. Context for the attainment figure. */
   totalSubmissions: number;
+  /** Profiles stopped internally, which are not submissions and never were. */
+  rejectedInternally: number;
 }
 
 export function slaTotals(rows: RequirementSla[], target = SLA_TARGET_SUBMISSIONS): SlaTotals {
@@ -197,6 +239,7 @@ export function slaTotals(rows: RequirementSla[], target = SLA_TARGET_SUBMISSION
     untouched: rows.filter((r) => r.submissions.length === 0).length,
     under: rows.filter((r) => r.submissions.length > 0 && r.submissions.length < target).length,
     totalSubmissions: rows.reduce((n, r) => n + r.submissions.length, 0),
+    rejectedInternally: rows.reduce((n, r) => n + r.rejectedInternally, 0),
   };
 }
 

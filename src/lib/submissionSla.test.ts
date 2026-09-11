@@ -231,3 +231,51 @@ describe("ownersIn / worstFirst", () => {
     expect(worstFirst(rows)[0].jobCode).toBe("CS-2");
   });
 });
+
+describe("profiles stopped internally", () => {
+  // The Risamsoft case from the 11 September review: one requirement with three
+  // profiles sent to the client, another with a single profile rejected
+  // internally. That is two submissions against a target of four, not three.
+  const risamsoft = buildRequirementSla([
+    ev({ jobCode: "CS-486", applicantName: "Bala", h: 1, submissionStatus: "Submitted To Client" }),
+    ev({ jobCode: "CS-486", applicantName: "Prudhvi", h: 2, submissionStatus: "Submitted To Client" }),
+    ev({ jobCode: "CS-486", applicantName: "Nitin", h: 3, submissionStatus: "Submitted To Client" }),
+    ev({ jobCode: "CS-485", applicantName: "Venugopal", h: 1, submissionStatus: "Rejected Internally" }),
+  ]);
+
+  it("does not count a profile that never left the building", () => {
+    const cs485 = risamsoft.find((r) => r.jobCode === "CS-485")!;
+    expect(cs485.submissions).toHaveLength(0);
+    expect(cs485.rejectedInternally).toBe(1);
+    expect(cs485.inWindow).toBe(0);
+  });
+
+  it("still caps the requirement that was over-served", () => {
+    const cs486 = risamsoft.find((r) => r.jobCode === "CS-486")!;
+    expect(cs486.submissions).toHaveLength(3);
+    expect(cs486.inWindow).toBe(2);
+  });
+
+  it("scores the client at 50%, not 75%", () => {
+    const t = slaTotals(risamsoft);
+    expect(t.expected).toBe(4);
+    expect(t.achieved).toBe(2);
+    expect(t.attainment).toBe(50);
+    expect(t.rejectedInternally).toBe(1);
+  });
+
+  it("counts a profile rejected internally only after it went out", () => {
+    // Submitted to the client first, rejected later — the client did see it.
+    const rows = buildRequirementSla([
+      ev({ jobCode: "CS-9", applicantName: "A", h: 1, submissionStatus: "Submitted To Client" }),
+      ev({ jobCode: "CS-9", applicantName: "A", h: 30, submissionStatus: "Rejected Internally" }),
+    ]);
+    expect(rows[0].submissions).toHaveLength(1);
+    expect(rows[0].rejectedInternally).toBe(0);
+  });
+
+  it("keeps a rejected profile out of the recruiter's counted submissions too", () => {
+    const r = byRecruiter(risamsoft);
+    expect(r.find((x) => x.name === "Guru Deepthi")!.submissions).toBe(2);
+  });
+});
