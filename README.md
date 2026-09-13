@@ -1,6 +1,19 @@
-# Cliff Recruiter Suite
+# Cliff Services — Portal
 
 [![CI](https://github.com/AbhiGattineni/Cliff-Recruiter-Suite/actions/workflows/ci.yml/badge.svg)](https://github.com/AbhiGattineni/Cliff-Recruiter-Suite/actions/workflows/ci.yml)
+
+Live at **https://portal.cliffservices.com** — the signed-in half of
+[www.cliffservices.com](https://www.cliffservices.com), which is a separate repo on separate
+hosting. One address serves everyone; the **role on the account** decides what is behind it:
+
+| Role | Sees |
+|------|------|
+| `admin` / `manager` / `employee` | The recruiter suite (below), by role |
+| `consultant` | `/portal` only — their own timesheet, filed against their assignment |
+
+That split is enforced in `firestore.rules`, not just in the UI. See **[docs/PORTAL.md](docs/PORTAL.md)**
+for why it is one hostname rather than `recruiters.` and `consultants.`, who gets an account and
+how, and the four manual DNS/auth steps the custom domain needs.
 
 Internal web app for **Cliff Services Inc.** with two tools:
 
@@ -197,6 +210,7 @@ Detailed docs live in [`docs/`](docs/):
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Setup, secrets, build, and Firebase deploy commands |
 | [CHANGELOG.md](docs/CHANGELOG.md) | Chronological record of notable changes |
 | [FUTURE-FEATURES.md](docs/FUTURE-FEATURES.md) | Scoped-but-not-built ideas (e.g. candidate online-profile web-search check) |
+| [PORTAL.md](docs/PORTAL.md) | The portal hostname, role-based access, and keeping the look in step with the public site |
 
 ## Secrets & git safety
 

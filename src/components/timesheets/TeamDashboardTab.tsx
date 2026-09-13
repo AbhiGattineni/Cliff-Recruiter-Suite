@@ -151,7 +151,7 @@ export default function TeamDashboardTab({ role }: { role: Role }) {
                       {open && (
                         <tr>
                           <td></td>
-                          <td colSpan={5} style={{ background: "#f8fafc", padding: "0.6rem 0.75rem" }}>
+                          <td colSpan={5} style={{ background: "var(--row-alt)", padding: "0.6rem 0.75rem" }}>
                             <TeamMemberDetail
                           entries={r.entries}
                           missing={r.missing}

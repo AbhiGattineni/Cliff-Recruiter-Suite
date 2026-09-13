@@ -188,18 +188,22 @@ const FUNNEL_RANK: Record<Funnel, number> = {
   unknown: 11,
 };
 
+// Chart colours are mixed for the dark ground the app runs on: they keep the
+// old ramp's meaning (deep green = furthest through the funnel, red = out) but
+// at the lightness a dark background needs. The previous set was mixed for
+// white — #07521f on #0a0a14 is an unreadable smudge.
 const FUNNEL_COLOR: Record<Funnel, string> = {
-  offerAccepted: "#07521f",
-  clientSelected: "#0b6e2e",
-  clientInterview: "#1e7e34",
-  clientSubmitted: "#12b886",
-  vendorInterview: "#3fb9a0",
-  vendorSubmitted: "#5cc9a7",
-  selected: "#8bc34a",
-  interview: "#e0a800",
-  waiting: "#4c8bf5",
-  submitted: "#8aa4c8",
-  rejected: "#c92a2a",
+  offerAccepted: "#047857",
+  clientSelected: "#059669",
+  clientInterview: "#10b981",
+  clientSubmitted: "#34d399",
+  vendorInterview: "#5eead4",
+  vendorSubmitted: "#99f6e4",
+  selected: "#a3e635",
+  interview: "#fbbf24",
+  waiting: "#60a5fa",
+  submitted: "#94a3b8",
+  rejected: "#f87171",
   unknown: "", // filled from PALETTE
 };
 
@@ -216,7 +220,7 @@ function reachedClient(f: Funnel): boolean {
 }
 
 // Distinct colours for statuses that don't match a known funnel stage.
-const PALETTE = ["#7048e8", "#e8590c", "#0ca678", "#f06595", "#495057", "#a61e4d", "#1098ad", "#d9480f"];
+const PALETTE = ["#a78bfa", "#fb923c", "#2dd4bf", "#f472b6", "#94a3b8", "#fb7185", "#38bdf8", "#facc15"];
 
 /** Map a raw status to an internal funnel stage (scoring/ordering only). */
 export function funnelOf(raw: string): Funnel {

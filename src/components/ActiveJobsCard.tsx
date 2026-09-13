@@ -53,8 +53,8 @@ export default function ActiveJobsCard({ subsByJob }: { subsByJob: Map<string, J
       ) : (
         <>
           <p className="muted" style={{ marginTop: 0, fontSize: "0.82rem" }}>
-            Click a job to see its submissions. <span style={{ background: "#ffc7ce", color: "#9c0006", padding: "0 4px", borderRadius: 3 }}>Red</span> = no submissions,{" "}
-            <span style={{ background: "#ffe8b3", color: "#7a5600", padding: "0 4px", borderRadius: 3 }}>amber</span> = has submissions but none sent to client/vendor.
+            Click a job to see its submissions. <span style={{ background: "var(--danger-bg)", color: "var(--danger)", padding: "0 4px", borderRadius: 3 }}>Red</span> = no submissions,{" "}
+            <span style={{ background: "var(--internal)", color: "var(--internal-ink)", padding: "0 4px", borderRadius: 3 }}>amber</span> = has submissions but none sent to client/vendor.
           </p>
           <div className="table-wrap" style={{ maxHeight: "48vh" }}>
             <table className="data">
@@ -104,7 +104,7 @@ export default function ActiveJobsCard({ subsByJob }: { subsByJob: Map<string, J
                       {open && (
                         <tr>
                           <td></td>
-                          <td colSpan={8} style={{ background: "#f8fafc", padding: "0.5rem 0.75rem" }}>
+                          <td colSpan={8} style={{ background: "var(--row-alt)", padding: "0.5rem 0.75rem" }}>
                             {details.length > 0 ? (
                               <table className="data" style={{ margin: 0 }}>
                                 <thead>

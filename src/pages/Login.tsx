@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { ensureConfigured, friendlyError } from "../lib/errors";
 import { requestPasswordReset } from "../lib/auth";
 import { isPlaceholderConfig } from "../firebase";
+import AuthShell from "../components/AuthShell";
 
 export default function Login() {
   const { signIn, user } = useAuth();
@@ -54,11 +55,8 @@ export default function Login() {
   };
 
   return (
-    <div className="login-wrap">
-      <form className="login-card" onSubmit={onSubmit}>
-        <div className="logo">Cliff Recruiter Suite</div>
-        <div className="tagline">Cliff Services Inc. — internal tools</div>
-
+    <AuthShell title="Sign in to your account">
+      <form onSubmit={onSubmit}>
         {isPlaceholderConfig && (
           <div className="alert warn">
             Firebase isn&#39;t connected yet. Add your config to <span className="mono">.env</span> and
@@ -99,18 +97,19 @@ export default function Login() {
             className="btn ghost"
             onClick={onForgot}
             disabled={resetting}
-            style={{ padding: "0.25rem 0.5rem", fontSize: "0.82rem" }}
+            style={{ padding: "0.25rem 0.7rem", fontSize: "0.82rem" }}
           >
             {resetting ? <span className="spinner dark" /> : null} Forgot password?
           </button>
         </p>
-        <p className="muted" style={{ fontSize: "0.82rem", marginTop: "1.25rem", marginBottom: 0, textAlign: "center" }}>
-          New here? <Link to="/signup">Create an account</Link>
+        <p className="login-foot">
+          Cliff staff without an account yet? <Link to="/signup">Create one</Link>.
         </p>
-        <p className="muted" style={{ fontSize: "0.75rem", marginTop: "0.5rem", marginBottom: 0, textAlign: "center" }}>
-          Registration is limited to @cliff-services.com email addresses.
+        <p className="login-foot">
+          Working an assignment through Cliff? Your account is created for you — ask your
+          recruiter if the invite hasn&#39;t arrived.
         </p>
       </form>
-    </div>
+    </AuthShell>
   );
 }

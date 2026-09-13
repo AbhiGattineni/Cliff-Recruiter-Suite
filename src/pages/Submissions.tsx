@@ -351,7 +351,7 @@ function Headline({
           <div className="lbl">Submissions in total</div>
         </div>
         <div className="stat">
-          <div className="num" style={totals.rejectedInternally ? { color: "#a9700a" } : undefined}>
+          <div className="num" style={totals.rejectedInternally ? { color: "var(--warn)" } : undefined}>
             {totals.rejectedInternally}
           </div>
           <div className="lbl">Rejected internally — not counted</div>

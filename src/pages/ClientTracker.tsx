@@ -42,16 +42,16 @@ const SORTS: { key: ClientSortKey; label: string }[] = [
 ];
 
 const VERDICT: Record<Verdict, { label: string; pill: string; hint: string; color: string }> = {
-  prioritize: { label: "🟢 Prioritize", pill: "green", hint: "Responsive — moving our profiles and/or selecting.", color: "#12b886" },
-  watch: { label: "🟡 Watch", pill: "amber", hint: "Some movement, but no selections yet.", color: "#e0a800" },
-  reconsider: { label: "🔴 Reconsider", pill: "red", hint: "No profile has ever moved past submission — silent.", color: "#c92a2a" },
+  prioritize: { label: "🟢 Prioritize", pill: "green", hint: "Responsive — moving our profiles and/or selecting.", color: "#34d399" },
+  watch: { label: "🟡 Watch", pill: "amber", hint: "Some movement, but no selections yet.", color: "#fbbf24" },
+  reconsider: { label: "🔴 Reconsider", pill: "red", hint: "No profile has ever moved past submission — silent.", color: "#f87171" },
 };
 
 const TREND: Record<Trend, { icon: string; color: string; title: string }> = {
-  up: { icon: "↗", color: "#12b886", title: "Response rate rising vs the prior period" },
-  down: { icon: "↘", color: "#c92a2a", title: "Response rate falling vs the prior period" },
-  flat: { icon: "→", color: "#8aa4c8", title: "Response rate steady vs the prior period" },
-  na: { icon: "·", color: "#adb5bd", title: "Not enough recent data to compare" },
+  up: { icon: "↗", color: "#34d399", title: "Response rate rising vs the prior period" },
+  down: { icon: "↘", color: "#f87171", title: "Response rate falling vs the prior period" },
+  flat: { icon: "→", color: "#94a3b8", title: "Response rate steady vs the prior period" },
+  na: { icon: "·", color: "#6b7280", title: "Not enough recent data to compare" },
 };
 
 // ---- Per-column header filters ----
@@ -93,7 +93,7 @@ function rowFacets(row: TrackerRow): Record<FilterCol, string[]> {
 function StageMeter({ s }: { s: ClientScore }) {
   const segs = STAGE_META.map((m) => ({ ...m, n: (s as unknown as Record<string, number>)[m.key] })).filter((x) => x.n > 0);
   return (
-    <div title={segs.map((x) => `${x.n} ${x.label}`).join(" · ")} style={{ display: "flex", height: 16, borderRadius: 4, overflow: "hidden", background: "#eef1f5", minWidth: 140 }}>
+    <div title={segs.map((x) => `${x.n} ${x.label}`).join(" · ")} style={{ display: "flex", height: 16, borderRadius: 4, overflow: "hidden", background: "var(--track)", minWidth: 140 }}>
       {segs.map((x) => (
         <div key={x.key} style={{ width: `${(x.n / s.total) * 100}%`, background: x.color, display: "flex", alignItems: "center", justifyContent: "center" }}>
           {x.n / s.total > 0.12 && <span style={{ color: "#fff", fontSize: "0.66rem", fontWeight: 700 }}>{x.n}</span>}
@@ -111,7 +111,7 @@ function FunnelStep({ label, value, base, color }: { label: string; value: numbe
         <span className="muted">{label}</span>
         <strong>{value}</strong>
       </div>
-      <div style={{ height: 10, borderRadius: 3, background: "#eef1f5", overflow: "hidden" }}>
+      <div style={{ height: 10, borderRadius: 3, background: "var(--track)", overflow: "hidden" }}>
         <div style={{ width: `${base ? (value / base) * 100 : 0}%`, height: "100%", background: color }} />
       </div>
       <div className="muted" style={{ fontSize: "0.72rem", marginTop: 2 }}>{base ? pct(value / base) : "—"} of submitted</div>
@@ -422,10 +422,10 @@ export default function ClientTracker() {
                   <div style={{ flex: 1, minWidth: 320 }}>
                     <h3 style={{ margin: "0 0 0.75rem" }}>Conversion funnel (all client/vendor submissions)</h3>
                     <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
-                      <FunnelStep label="Submitted" value={pf.totalSubs} base={pf.totalSubs} color="#8aa4c8" />
-                      <FunnelStep label="Got a response" value={pf.responded} base={pf.totalSubs} color="#4c8bf5" />
-                      <FunnelStep label="Reached interview" value={pf.interviewed} base={pf.totalSubs} color="#e0a800" />
-                      <FunnelStep label="Selected / offer" value={pf.selected} base={pf.totalSubs} color="#12b886" />
+                      <FunnelStep label="Submitted" value={pf.totalSubs} base={pf.totalSubs} color="#94a3b8" />
+                      <FunnelStep label="Got a response" value={pf.responded} base={pf.totalSubs} color="#60a5fa" />
+                      <FunnelStep label="Reached interview" value={pf.interviewed} base={pf.totalSubs} color="#fbbf24" />
+                      <FunnelStep label="Selected / offer" value={pf.selected} base={pf.totalSubs} color="#34d399" />
                     </div>
                     <p className="muted" style={{ fontSize: "0.82rem", marginTop: "0.75rem", marginBottom: 0 }}>
                       Interview → selection: <strong>{pf.interviewToSelection != null ? pct(pf.interviewToSelection) : "—"}</strong>
@@ -565,7 +565,7 @@ export default function ClientTracker() {
                             {open && (
                               <tr>
                                 <td></td>
-                                <td colSpan={14} style={{ background: "#f8fafc", padding: "0.6rem 0.75rem" }}>
+                                <td colSpan={14} style={{ background: "var(--row-alt)", padding: "0.6rem 0.75rem" }}>
                                   {(req?.total || allTime?.total) && (
                                     <div style={{ marginBottom: "0.8rem" }}>
                                       <div style={{ fontWeight: 700, fontSize: "0.85rem", marginBottom: "0.35rem" }}>
@@ -634,7 +634,7 @@ export default function ClientTracker() {
                                           <td style={{ textAlign: "right" }} className="muted">{r.timeToResponseDays != null ? days(r.timeToResponseDays) : "—"}</td>
                                           <td style={{ textAlign: "right" }} className="muted">
                                             {r.stage === "submitted" && r.daysWaiting != null ? (
-                                              <span style={{ color: r.daysWaiting > STALE_DAYS ? "#c92a2a" : undefined, fontWeight: r.daysWaiting > STALE_DAYS ? 700 : undefined }}>{r.daysWaiting}d</span>
+                                              <span style={{ color: r.daysWaiting > STALE_DAYS ? "var(--danger)" : undefined, fontWeight: r.daysWaiting > STALE_DAYS ? 700 : undefined }}>{r.daysWaiting}d</span>
                                             ) : "—"}
                                           </td>
                                         </tr>
@@ -787,7 +787,7 @@ function HeaderFilter({ options, selected, onChange }: {
             ...(pos.top != null ? { top: pos.top } : {}),
             ...(pos.bottom != null ? { bottom: pos.bottom } : {}),
             zIndex: 1000, width: 230,
-            background: "#fff", color: "#1f2937",
+            background: "var(--card-raised)", color: "var(--ink)",
             border: "1px solid var(--line)", borderRadius: 8,
             boxShadow: "0 8px 24px rgba(16,24,40,0.14)", padding: "0.5rem",
             maxHeight: pos.maxH, display: "flex", flexDirection: "column",

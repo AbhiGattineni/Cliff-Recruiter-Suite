@@ -113,9 +113,12 @@ export default function ConsultantPortal() {
   return (
     <div className="portal">
       <header className="portal-bar">
-        <div>
-          <strong>Cliff Services</strong>
-          <span className="muted"> · Timesheets</span>
+        <div className="portal-brand">
+          <img src="/logo.jpg" alt="" />
+          <div>
+            <strong>Cliff Services</strong>
+            <span className="muted"> · Timesheets</span>
+          </div>
         </div>
         <div className="portal-who">
           <span className="muted">{profile?.displayName || user?.email}</span>
@@ -215,7 +218,7 @@ export default function ConsultantPortal() {
                       const weekend = dt.weekday >= 6;
                       const future = d > today;
                       return (
-                        <tr key={d} style={weekend ? { background: "#fafbfc" } : undefined}>
+                        <tr key={d} style={weekend ? { background: "var(--row-alt)" } : undefined}>
                           <td style={{ fontWeight: weekend ? 400 : 600 }}>{dt.toFormat("cccc")}</td>
                           <td className="muted" style={{ whiteSpace: "nowrap" }}>{dt.toFormat("d LLL")}</td>
                           <td style={{ textAlign: "right" }}>

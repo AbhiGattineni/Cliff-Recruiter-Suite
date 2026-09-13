@@ -217,7 +217,7 @@ export default function MyTimesheetTab() {
               <div className="lbl">Full days ({EXPECTED_DAILY_HOURS}h or more)</div>
             </div>
             <div className="stat">
-              <div className="num" style={totals.short ? { color: "#a9700a" } : undefined}>
+              <div className="num" style={totals.short ? { color: "var(--warn)" } : undefined}>
                 {totals.short}
               </div>
               <div className="lbl">Short days</div>

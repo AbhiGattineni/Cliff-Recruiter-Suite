@@ -2,9 +2,17 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- Same mark as www.cliffservices.com: one brand, two hostnames. -->
+    <link rel="icon" type="image/jpeg" href="/logo.jpg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Cliff Recruiter Suite</title>
+    <!-- The chrome around the page (address bar, pull-to-refresh overscroll)
+         is painted from this, so a dark app in a light browser doesn't sit in
+         a white frame. -->
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0a0a14" />
+    <!-- Sign-in only: nothing here should ever surface in a search result. -->
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Cliff Services · Portal</title>
   </head>
   <body>
     <div id="root"></div>

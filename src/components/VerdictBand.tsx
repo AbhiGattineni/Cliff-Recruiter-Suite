@@ -11,10 +11,10 @@ export interface Verdict {
 }
 
 const TONE: Record<Verdict["tone"], { bar: string; text: string }> = {
-  green: { bar: "#1e7e34", text: "#1e7e34" },
-  amber: { bar: "#a9700a", text: "#a9700a" },
-  red: { bar: "#9c0006", text: "#9c0006" },
-  grey: { bar: "#94a3b8", text: "#6b7280" },
+  green: { bar: "var(--ok)", text: "var(--ok)" },
+  amber: { bar: "var(--warn)", text: "var(--warn)" },
+  red: { bar: "var(--danger)", text: "var(--danger)" },
+  grey: { bar: "var(--track)", text: "var(--muted)" },
 };
 
 /** Map a 0-100 score to a tone using the app's usual thresholds. */
