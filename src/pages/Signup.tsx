@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { ALLOWED_DOMAIN, isAllowedEmail } from "../lib/auth";
 import { friendlyError } from "../lib/errors";
 import { isPlaceholderConfig } from "../firebase";
+import AuthShell from "../components/AuthShell";
 
 export default function Signup() {
   const { signUp, user } = useAuth();
@@ -52,11 +53,8 @@ export default function Signup() {
   };
 
   return (
-    <div className="login-wrap">
-      <form className="login-card" onSubmit={onSubmit}>
-        <div className="logo">Cliff Recruiter Suite</div>
-        <div className="tagline">Create your account</div>
-
+    <AuthShell title="Create your Cliff account">
+      <form onSubmit={onSubmit}>
         {isPlaceholderConfig && (
           <div className="alert warn">
             Firebase isn&#39;t connected yet, so signup won&#39;t work. Add your Firebase
@@ -81,7 +79,7 @@ export default function Signup() {
             required
           />
           {email.length > 0 && !emailOk && (
-            <div className="muted" style={{ fontSize: "0.78rem", marginTop: 4, color: "#9c0006" }}>
+            <div className="muted" style={{ fontSize: "0.78rem", marginTop: 4, color: "var(--danger)" }}>
               Only @{ALLOWED_DOMAIN} addresses are allowed.
             </div>
           )}
@@ -117,13 +115,14 @@ export default function Signup() {
           {busy ? <span className="spinner" /> : "Create account"}
         </button>
 
-        <p className="muted" style={{ fontSize: "0.82rem", marginTop: "0.75rem", marginBottom: 0, textAlign: "center" }}>
-          Registration is limited to @{ALLOWED_DOMAIN} email addresses.
+        <p className="login-foot">
+          Self-registration is for @{ALLOWED_DOMAIN} addresses only. Consultants on assignment
+          are invited by their recruiter and don&#39;t sign up here.
         </p>
-        <p className="muted" style={{ fontSize: "0.82rem", marginTop: "0.5rem", marginBottom: 0, textAlign: "center" }}>
+        <p className="login-foot">
           Already have an account? <Link to="/login">Sign in</Link>
         </p>
       </form>
-    </div>
+    </AuthShell>
   );
 }

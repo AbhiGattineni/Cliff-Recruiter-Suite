@@ -166,17 +166,17 @@ export default function AssessmentDetail({ a, startIndex = 0 }: { a: ResumeAsses
 
 export function ScoreDial({ score }: { score: number }) {
   const clamped = Math.max(0, Math.min(100, Math.round(score)));
-  const color = clamped >= 70 ? "#1e7e34" : clamped >= 45 ? "#a9700a" : "#9c0006";
+  const color = clamped >= 70 ? "var(--ok)" : clamped >= 45 ? "var(--warn)" : "var(--danger)";
   const deg = clamped * 3.6;
   return (
     <div
       style={{
         width: 120, height: 120, borderRadius: "50%",
-        background: `conic-gradient(${color} ${deg}deg, #e6ebf1 ${deg}deg)`,
+        background: `conic-gradient(${color} ${deg}deg, var(--track) ${deg}deg)`,
         display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
       }}
     >
-      <div style={{ width: 92, height: 92, borderRadius: "50%", background: "#fff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ width: 92, height: 92, borderRadius: "50%", background: "var(--card)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
         <div style={{ fontSize: "1.7rem", fontWeight: 700, color }}>{clamped}</div>
         <div className="muted" style={{ fontSize: "0.72rem" }}>fit score</div>
       </div>

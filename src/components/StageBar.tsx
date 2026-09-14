@@ -12,7 +12,7 @@ export default function StageBar({
 }) {
   const total = statuses.reduce((s, st) => s + (counts[st.label] ?? 0), 0);
   if (total === 0) {
-    return <div style={{ height, background: "#eef1f5", borderRadius: 4 }} />;
+    return <div style={{ height, background: "var(--track)", borderRadius: 4 }} />;
   }
   return (
     <div
@@ -22,7 +22,7 @@ export default function StageBar({
         borderRadius: 4,
         overflow: "hidden",
         minWidth: 140,
-        background: "#eef1f5",
+        background: "var(--track)",
       }}
     >
       {statuses.map((st) => {

@@ -98,7 +98,7 @@ const partPoints = (s: RecruiterStat, key: BucketKey) => {
 // Same thresholds as the Index pill, applied to how much of the metric's own
 // ceiling was reached — so a weak area reads red even when its weight is small.
 const partColor = (achieved: number) =>
-  achieved >= 0.6 ? "#1e7e34" : achieved >= 0.35 ? "#a9700a" : "var(--danger)";
+  achieved >= 0.6 ? "var(--ok)" : achieved >= 0.35 ? "var(--warn)" : "var(--danger)";
 
 const targetBasis = (s: RecruiterStat) =>
   s.targetBasis === "assigned"
@@ -197,7 +197,7 @@ function Pct({ d }: { d: Delta }) {
   const flat = d.pct === 0;
   return (
     <span
-      style={{ color: flat ? "var(--muted)" : good ? "#1e7e34" : "var(--danger)", fontWeight: 600 }}
+      style={{ color: flat ? "var(--muted)" : good ? "var(--ok)" : "var(--danger)", fontWeight: 600 }}
       title={`${d.currentRate} vs ${d.baselineRate} per working day`}
     >
       {d.pct > 0 ? "+" : ""}
@@ -1115,7 +1115,7 @@ function RecruiterModal({
                 <Fragment key={key}>
                   <tr
                     onClick={() => !j.assignedOnly && toggle(key)}
-                    style={{ cursor: j.assignedOnly ? "default" : "pointer", background: j.assignedOnly ? "#fff8f0" : undefined }}
+                    style={{ cursor: j.assignedOnly ? "default" : "pointer", background: j.assignedOnly ? "var(--warn-bg)" : undefined }}
                   >
                     <td style={{ color: "var(--muted)" }}>{j.assignedOnly ? "" : open ? "▾" : "▸"}</td>
                     <td>{j.jobCode || "—"}</td>
@@ -1139,7 +1139,7 @@ function RecruiterModal({
                   {open && (
                     <tr>
                       <td></td>
-                      <td colSpan={7} style={{ background: "#f8fafc", padding: "0.5rem 0.75rem" }}>
+                      <td colSpan={7} style={{ background: "var(--row-alt)", padding: "0.5rem 0.75rem" }}>
                         <table className="data" style={{ margin: 0 }}>
                           <thead>
                             <tr>
@@ -1155,7 +1155,7 @@ function RecruiterModal({
                                 <td style={{ fontWeight: 600, whiteSpace: "normal" }}>{r.consultant || "—"}</td>
                                 <td style={{ whiteSpace: "normal" }}>
                                   <span style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}>
-                                    <span style={{ width: 10, height: 10, borderRadius: 2, background: colorByStatus.get(r.status) ?? "#adb5bd", display: "inline-block" }} />
+                                    <span style={{ width: 10, height: 10, borderRadius: 2, background: colorByStatus.get(r.status) ?? "var(--muted)", display: "inline-block" }} />
                                     {r.status}
                                   </span>
                                 </td>

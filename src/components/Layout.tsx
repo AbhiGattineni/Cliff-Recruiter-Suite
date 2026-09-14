@@ -47,8 +47,8 @@ export default function Layout() {
         <div className="brand">
           {showFull ? (
             <span className="brand-full">
-              Cliff Recruiter Suite
-              <small>Cliff Services Inc.</small>
+              Cliff Services
+              <small>Recruiter Suite</small>
             </span>
           ) : (
             <span className="brand-mark">C</span>
@@ -79,13 +79,13 @@ export default function Layout() {
             {user ? (
               <>
                 <div>Signed in as</div>
-                <div style={{ fontWeight: 600, color: "#fff", wordBreak: "break-all" }}>{user.email}</div>
+                <div style={{ fontWeight: 600, color: "var(--ink-strong)", wordBreak: "break-all" }}>{user.email}</div>
                 <button onClick={() => signOut()}>Sign out</button>
               </>
             ) : (
               <>
                 <div style={{ opacity: 0.85 }}>Authentication is off</div>
-                <Link to="/login" style={{ color: "#fff", fontSize: "0.8rem", textDecoration: "underline" }}>
+                <Link to="/login" style={{ color: "var(--ink-strong)", fontSize: "0.8rem", textDecoration: "underline" }}>
                   Sign in (optional)
                 </Link>
               </>
@@ -99,7 +99,7 @@ export default function Layout() {
           <button className="collapse-btn" onClick={toggle} title="Toggle menu" aria-label="Toggle menu">
             ☰
           </button>
-          <span>Recruiter Tools</span>
+          <span>Recruiter Suite</span>
           {/* The sidebar has a sign-out too, but only once the rail is expanded
               — and the rail starts collapsed on every load, so on a fresh page
               there was no way out of the app without first finding the menu. */}

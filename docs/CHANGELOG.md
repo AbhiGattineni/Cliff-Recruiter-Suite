@@ -2,6 +2,31 @@
 
 Chronological record of notable changes. Newest first.
 
+## One brand: the portal now matches www.cliffservices.com
+- **The whole app moved onto the public site's dark theme** — the ink ground, the
+  violet→indigo gradient, Inter and Space Grotesk, the hero glow — so signing in no longer
+  feels like leaving the company website. `src/index.css` is that Tailwind theme restated as
+  plain CSS custom properties (this app has no Tailwind and doesn't need one); every component
+  reads from those tokens, and the inline hex colours that were scattered through a dozen
+  `.tsx` files are gone. A colour written inline is a colour that is wrong the next time the
+  palette moves.
+- **Chart palettes were remixed for ink rather than paper.** The funnel ramp keeps its meaning
+  — deep green furthest through, red out — at the lightness a dark background needs; `#07521f`
+  on `#0a0a14` was an unreadable smudge. The Excel workbook and the PDF are untouched: those
+  are printed on white and always were.
+- **One login screen for both audiences.** Login and signup now share `AuthShell`, the
+  marketing site's split hero. It says "Cliff Services", not "Recruiter Suite" — a consultant
+  filing hours for a client does not work at a recruiting firm, and the front door is not the
+  place to tell them what the people on the other side of it are using. What each role gets is
+  worded inside the card instead.
+- **The app is addressed as `portal.cliffservices.com`.** One hostname for everybody, with the
+  role on the account deciding what is behind it, rather than `recruiters.` and `consultants.`
+  — which would have added no security boundary on top of `firestore.rules` and one more thing
+  to get wrong, including a URL change for every consultant we later hire. The reasoning, and
+  the four manual DNS/auth steps a deploy cannot do, are in [PORTAL.md](PORTAL.md).
+- The page is `noindex`, carries the Cliff mark as its favicon, and sets `theme-color` so the
+  browser's own chrome stops framing a dark app in white.
+
 ## Ask Anything: plain-English questions over the app's own data
 - New **Ask Anything** page (`/ask`, 🔎, admin/manager only) and a matching ask box on the
   dashboard that hands the question over via `?q=`. Ask something in English, get a summary,

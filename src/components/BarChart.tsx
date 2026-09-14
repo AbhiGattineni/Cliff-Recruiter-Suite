@@ -28,7 +28,7 @@ export default function BarChart({ title, data }: { title: string; data: BarSlic
               >
                 {d.label}
               </span>
-              <div style={{ flex: 1, background: "#eef1f5", borderRadius: 4, height: 16, overflow: "hidden" }}>
+              <div style={{ flex: 1, background: "var(--track)", borderRadius: 4, height: 16, overflow: "hidden" }}>
                 <div
                   style={{
                     width: `${(d.value / max) * 100}%`, height: "100%",

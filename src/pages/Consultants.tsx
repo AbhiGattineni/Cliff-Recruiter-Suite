@@ -299,7 +299,7 @@ function Assignments({
                     </td>
                     <td style={{ textAlign: "right" }}>{r ? money(r.billRate, r.currency) : "—"}</td>
                     <td style={{ textAlign: "right" }}>{r ? money(r.payRate, r.currency) : "—"}</td>
-                    <td style={{ textAlign: "right", fontWeight: 600, color: margin > 0 ? "#1e7e34" : "var(--danger)" }}>
+                    <td style={{ textAlign: "right", fontWeight: 600, color: margin > 0 ? "var(--ok)" : "var(--danger)" }}>
                       {r ? money(margin, r.currency) : "—"}
                     </td>
                     <td><span className={`pill ${a.status === "active" ? "green" : "grey"}`}>{a.status}</span></td>
@@ -745,7 +745,7 @@ function AssignmentModal({
         </div>
       </div>
       <p className="muted" style={{ fontSize: "0.85rem" }}>
-        Margin <strong style={{ color: margin > 0 ? "#1e7e34" : "var(--danger)" }}>{money(margin)}</strong>/hr.
+        Margin <strong style={{ color: margin > 0 ? "var(--ok)" : "var(--danger)" }}>{money(margin)}</strong>/hr.
         Rates are never visible to the consultant — they&#39;re stored separately and denied by the
         security rules, not just hidden in the UI.
       </p>

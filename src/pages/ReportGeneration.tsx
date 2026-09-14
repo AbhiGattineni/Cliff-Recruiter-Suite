@@ -44,12 +44,12 @@ const TIME_SLOTS = [
 const TIME_SLOT_TITLES = ["1st Submission", "2nd Submission", "3rd Submission"];
 // Coarse ranges for the pie-chart view.
 const TIME_BUCKETS = [
-  { key: "< 4h", max: 4, color: "#1e7e34" },
-  { key: "4–8h", max: 8, color: "#4a9e5c" },
-  { key: "8–16h", max: 16, color: "#e0a800" },
-  { key: "16–24h", max: 24, color: "#e8590c" },
-  { key: "24–48h", max: 48, color: "#c92a2a" },
-  { key: "48h+", max: Infinity, color: "#6b7280" },
+  { key: "< 4h", max: 4, color: "#34d399" },
+  { key: "4–8h", max: 8, color: "#a3e635" },
+  { key: "8–16h", max: 16, color: "#fbbf24" },
+  { key: "16–24h", max: 24, color: "#fb923c" },
+  { key: "24–48h", max: 48, color: "#f87171" },
+  { key: "48h+", max: Infinity, color: "#94a3b8" },
 ];
 
 // Per-hour bucket color, green (fast) → red (slow) across n buckets.
@@ -211,7 +211,7 @@ export default function ReportGeneration() {
       color: hourColor(i, nHours),
     }));
     if (perSlot.some((arr) => arr.some((h) => h >= nHours))) {
-      buckets.push({ key: `${nHours}h+`, max: Infinity, color: "#6b7280" });
+      buckets.push({ key: `${nHours}h+`, max: Infinity, color: "#94a3b8" });
     }
     const counts = perSlot.map((arr) => {
       const c = buckets.map(() => 0);
@@ -586,7 +586,7 @@ export default function ReportGeneration() {
             <p className="sub">
               {viewRows.length} rows{anyFilter || colFilterCount ? " (filtered)" : ""} ·{" "}
               {visibleCols.length} of {COLUMNS.length} columns. Red = overdue 0-submission job,
-              <span style={{ background: "#ffe8b3", padding: "0 4px", borderRadius: 3 }}> amber</span> = has
+              <span style={{ background: "var(--internal)", color: "var(--internal-ink)", padding: "0 4px", borderRadius: 3 }}> amber</span> = has
               submissions but none sent to client/vendor (still in our field), peach = NA row. Download
               exports <strong>all</strong> {viewRows.length} rows (the whole set, not just this page).
             </p>

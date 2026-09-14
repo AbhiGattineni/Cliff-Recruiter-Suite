@@ -54,7 +54,7 @@ export default function PieChart({
             {slices.length === 1 ? (
               <circle cx={cx} cy={cy} r={r} fill={slices[0].color} />
             ) : (
-              slices.map((s, i) => <path key={i} d={arc(s.start, s.end)} fill={s.color} stroke="#fff" strokeWidth={1} />)
+              slices.map((s, i) => <path key={i} d={arc(s.start, s.end)} fill={s.color} stroke="var(--card)" strokeWidth={1} />)
             )}
           </svg>
           {showLegend && (

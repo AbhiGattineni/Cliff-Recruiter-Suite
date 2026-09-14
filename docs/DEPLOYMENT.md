@@ -61,8 +61,18 @@ playing up: get the site out, then retry functions.
 ## Hosting config
 `firebase.json` serves `dist/` and rewrites all routes to `/index.html` (SPA). After a hosting
 deploy the app is live at:
+- `https://portal.cliffservices.com` — the address to give people
 - `https://cliff-services.web.app`
 - `https://cliff-services.firebaseapp.com`
+
+The `.web.app` and `.firebaseapp.com` names keep working; they are Firebase's, not ours, and are
+fine as a fallback if DNS is ever in doubt.
+
+## Custom domain: portal.cliffservices.com
+One hostname for everybody. Which tool you get is decided by the **role on your account**, not by
+which URL you typed — see [PORTAL.md](PORTAL.md) for why, and for the four manual steps
+(DNS, domain verification, Firebase Auth authorised domains, and the auth action-link domain)
+that a `firebase deploy` cannot do for you.
 
 ## Local development
 ```bash
@@ -75,3 +85,8 @@ firebase emulators:start
 - [ ] Enable the **Email/Password** provider in the Firebase console (before re-enabling auth).
 - [ ] Confirm the four secrets are set (`firebase functions:secrets:access <NAME>`).
 - [ ] Smoke-test `parseResume` and `ceipalReport` from the deployed app.
+- [ ] `portal.cliffservices.com` resolves and serves the app over HTTPS.
+- [ ] It is listed under **Authentication → Settings → Authorised domains**. Until it is,
+      sign-in on that hostname fails with `auth/unauthorized-domain` while the `.web.app`
+      address keeps working — which reads as "the new domain is broken" and is really just
+      this checkbox.
