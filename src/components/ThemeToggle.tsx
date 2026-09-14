@@ -1,11 +1,7 @@
 // The light/dark switch.
 //
-// Two states on screen, not three. The stored preference has a "system" value,
-// but there is no button for it: someone who opens this menu has an opinion,
-// and offering "follow my OS" as a third click mostly produces people who
-// cannot tell which of three states they are in. System remains the default
-// until the first click, and Preferences could expose a way back to it later
-// if anyone ever asks.
+// Two states, no third. Light is the default until someone clicks; after that
+// their choice is stored per browser and is the only thing consulted.
 
 import { useTheme } from "../context/ThemeContext";
 
