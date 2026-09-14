@@ -9,6 +9,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DateTime } from "luxon";
 import { useAuth } from "../context/AuthContext";
+import ThemeToggle from "../components/ThemeToggle";
 import { friendlyError } from "../lib/errors";
 import {
   listAssignments,
@@ -121,6 +122,7 @@ export default function ConsultantPortal() {
           </div>
         </div>
         <div className="portal-who">
+          <ThemeToggle />
           <span className="muted">{profile?.displayName || user?.email}</span>
           <button className="btn ghost" onClick={() => signOut()}>Sign out</button>
         </div>

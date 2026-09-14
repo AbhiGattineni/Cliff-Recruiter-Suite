@@ -44,12 +44,12 @@ const TIME_SLOTS = [
 const TIME_SLOT_TITLES = ["1st Submission", "2nd Submission", "3rd Submission"];
 // Coarse ranges for the pie-chart view.
 const TIME_BUCKETS = [
-  { key: "< 4h", max: 4, color: "#34d399" },
-  { key: "4–8h", max: 8, color: "#a3e635" },
-  { key: "8–16h", max: 16, color: "#fbbf24" },
-  { key: "16–24h", max: 24, color: "#fb923c" },
-  { key: "24–48h", max: 48, color: "#f87171" },
-  { key: "48h+", max: Infinity, color: "#94a3b8" },
+  { key: "< 4h", max: 4, color: "var(--c-emerald)" },
+  { key: "4–8h", max: 8, color: "var(--c-lime)" },
+  { key: "8–16h", max: 16, color: "var(--c-amber)" },
+  { key: "16–24h", max: 24, color: "var(--c-orange)" },
+  { key: "24–48h", max: 48, color: "var(--c-red)" },
+  { key: "48h+", max: Infinity, color: "var(--c-slate)" },
 ];
 
 // Per-hour bucket color, green (fast) → red (slow) across n buckets.
@@ -211,7 +211,7 @@ export default function ReportGeneration() {
       color: hourColor(i, nHours),
     }));
     if (perSlot.some((arr) => arr.some((h) => h >= nHours))) {
-      buckets.push({ key: `${nHours}h+`, max: Infinity, color: "#94a3b8" });
+      buckets.push({ key: `${nHours}h+`, max: Infinity, color: "var(--c-slate)" });
     }
     const counts = perSlot.map((arr) => {
       const c = buckets.map(() => 0);
