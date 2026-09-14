@@ -9,7 +9,16 @@ import MultiSelect from "../MultiSelect";
 import Pagination, { usePagination } from "../Pagination";
 import Modal from "../Modal";
 
-const CHART_COLORS = ["#a78bfa", "#34d399", "#fbbf24", "#f87171", "#60a5fa", "#2dd4bf", "#f472b6", "#94a3b8"];
+const CHART_COLORS = [
+  "var(--c-violet)",
+  "var(--c-emerald)",
+  "var(--c-amber)",
+  "var(--c-red)",
+  "var(--c-blue)",
+  "var(--c-teal)",
+  "var(--c-pink)",
+  "var(--c-slate)",
+];
 
 /** One result card in the Ask Anything feed: question, editable plan chips, summary, table, chart. */
 export default function AskCard({

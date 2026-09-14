@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { isPlaceholderConfig } from "../firebase";
 import LanguageSwitcher from "./LanguageSwitcher";
 import DebugLogPanel from "./DebugLogPanel";
+import ThemeToggle from "./ThemeToggle";
 
 const NAV = [
   { to: "/", end: true, icon: "🏠", label: "Dashboard" },
@@ -104,6 +105,7 @@ export default function Layout() {
               — and the rail starts collapsed on every load, so on a fresh page
               there was no way out of the app without first finding the menu. */}
           <div className="topbar-user">
+            <ThemeToggle />
             {user ? (
               <>
                 <span className="topbar-email" title={user.email ?? undefined}>{user.email}</span>

@@ -5,14 +5,35 @@
     <!-- Same mark as www.cliffservices.com: one brand, two hostnames. -->
     <link rel="icon" type="image/jpeg" href="/logo.jpg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- The chrome around the page (address bar, pull-to-refresh overscroll)
-         is painted from this, so a dark app in a light browser doesn't sit in
-         a white frame. -->
-    <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#0a0a14" />
     <!-- Sign-in only: nothing here should ever surface in a search result. -->
     <meta name="robots" content="noindex, nofollow" />
     <title>Cliff Services · Portal</title>
+    <script>
+      // Resolve the theme before the first paint, so a viewer who prefers light
+      // never sees a dark page flash past while the bundle loads. Deliberately
+      // inline and blocking: a deferred script runs too late to prevent that.
+      //
+      // This duplicates the rule in src/context/ThemeContext.tsx, which owns it
+      // from the first render onward. The two must agree — same storage key,
+      // same precedence of an explicit choice over the OS setting. Kept as
+      // hand-written JS rather than imported because anything bundled is, by
+      // definition, too late to run here.
+      (function () {
+        var theme = "dark";
+        try {
+          var saved = localStorage.getItem("cliff.theme");
+          if (saved === "light" || saved === "dark") {
+            theme = saved;
+          } else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) {
+            theme = "light";
+          }
+        } catch (e) {
+          // Storage blocked (private window, embedded webview). Dark it is.
+        }
+        document.documentElement.setAttribute("data-theme", theme);
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

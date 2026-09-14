@@ -42,16 +42,16 @@ const SORTS: { key: ClientSortKey; label: string }[] = [
 ];
 
 const VERDICT: Record<Verdict, { label: string; pill: string; hint: string; color: string }> = {
-  prioritize: { label: "🟢 Prioritize", pill: "green", hint: "Responsive — moving our profiles and/or selecting.", color: "#34d399" },
-  watch: { label: "🟡 Watch", pill: "amber", hint: "Some movement, but no selections yet.", color: "#fbbf24" },
-  reconsider: { label: "🔴 Reconsider", pill: "red", hint: "No profile has ever moved past submission — silent.", color: "#f87171" },
+  prioritize: { label: "🟢 Prioritize", pill: "green", hint: "Responsive — moving our profiles and/or selecting.", color: "var(--c-emerald)" },
+  watch: { label: "🟡 Watch", pill: "amber", hint: "Some movement, but no selections yet.", color: "var(--c-amber)" },
+  reconsider: { label: "🔴 Reconsider", pill: "red", hint: "No profile has ever moved past submission — silent.", color: "var(--c-red)" },
 };
 
 const TREND: Record<Trend, { icon: string; color: string; title: string }> = {
-  up: { icon: "↗", color: "#34d399", title: "Response rate rising vs the prior period" },
-  down: { icon: "↘", color: "#f87171", title: "Response rate falling vs the prior period" },
-  flat: { icon: "→", color: "#94a3b8", title: "Response rate steady vs the prior period" },
-  na: { icon: "·", color: "#6b7280", title: "Not enough recent data to compare" },
+  up: { icon: "↗", color: "var(--c-emerald)", title: "Response rate rising vs the prior period" },
+  down: { icon: "↘", color: "var(--c-red)", title: "Response rate falling vs the prior period" },
+  flat: { icon: "→", color: "var(--c-slate)", title: "Response rate steady vs the prior period" },
+  na: { icon: "·", color: "var(--c-grey)", title: "Not enough recent data to compare" },
 };
 
 // ---- Per-column header filters ----
@@ -422,10 +422,10 @@ export default function ClientTracker() {
                   <div style={{ flex: 1, minWidth: 320 }}>
                     <h3 style={{ margin: "0 0 0.75rem" }}>Conversion funnel (all client/vendor submissions)</h3>
                     <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
-                      <FunnelStep label="Submitted" value={pf.totalSubs} base={pf.totalSubs} color="#94a3b8" />
-                      <FunnelStep label="Got a response" value={pf.responded} base={pf.totalSubs} color="#60a5fa" />
-                      <FunnelStep label="Reached interview" value={pf.interviewed} base={pf.totalSubs} color="#fbbf24" />
-                      <FunnelStep label="Selected / offer" value={pf.selected} base={pf.totalSubs} color="#34d399" />
+                      <FunnelStep label="Submitted" value={pf.totalSubs} base={pf.totalSubs} color="var(--c-slate)" />
+                      <FunnelStep label="Got a response" value={pf.responded} base={pf.totalSubs} color="var(--c-blue)" />
+                      <FunnelStep label="Reached interview" value={pf.interviewed} base={pf.totalSubs} color="var(--c-amber)" />
+                      <FunnelStep label="Selected / offer" value={pf.selected} base={pf.totalSubs} color="var(--c-emerald)" />
                     </div>
                     <p className="muted" style={{ fontSize: "0.82rem", marginTop: "0.75rem", marginBottom: 0 }}>
                       Interview → selection: <strong>{pf.interviewToSelection != null ? pct(pf.interviewToSelection) : "—"}</strong>

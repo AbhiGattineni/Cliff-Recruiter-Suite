@@ -17,11 +17,11 @@ import { isClientVendorStatus, normHeader } from "./report/columns";
 export type ClientStage = "submitted" | "interview" | "selected" | "rejected" | "hold";
 
 export const STAGE_META: { key: ClientStage; label: string; color: string }[] = [
-  { key: "submitted", label: "Submitted (awaiting response)", color: "#94a3b8" },
-  { key: "interview", label: "Interview (L1/L2/client round)", color: "#fbbf24" },
-  { key: "selected", label: "Selected / Offer", color: "#34d399" },
-  { key: "hold", label: "On hold", color: "#a78bfa" },
-  { key: "rejected", label: "Rejected", color: "#f87171" },
+  { key: "submitted", label: "Submitted (awaiting response)", color: "var(--c-slate)" },
+  { key: "interview", label: "Interview (L1/L2/client round)", color: "var(--c-amber)" },
+  { key: "selected", label: "Selected / Offer", color: "var(--c-emerald)" },
+  { key: "hold", label: "On hold", color: "var(--c-violet)" },
+  { key: "rejected", label: "Rejected", color: "var(--c-red)" },
 ];
 
 export const STAGE_COLOR: Record<ClientStage, string> = STAGE_META.reduce(

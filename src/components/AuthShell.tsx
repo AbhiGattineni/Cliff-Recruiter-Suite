@@ -10,6 +10,7 @@
 // www.cliffservices.com should not feel they have left it.
 
 import { ReactNode } from "react";
+import ThemeToggle from "./ThemeToggle";
 
 const POINTS = [
   "Timesheets, hours and approvals",
@@ -56,6 +57,10 @@ export default function AuthShell({
               <div className="logo">Cliff Services</div>
               <div className="tagline">{title}</div>
             </div>
+            {/* Signed out is where a first-time visitor lands, so the switch
+                has to be reachable before there is an account to attach it to.
+                The choice is stored per browser, not per user. */}
+            <ThemeToggle className="login-theme" />
           </div>
           {children}
         </div>

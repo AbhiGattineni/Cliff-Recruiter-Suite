@@ -188,22 +188,26 @@ const FUNNEL_RANK: Record<Funnel, number> = {
   unknown: 11,
 };
 
-// Chart colours are mixed for the dark ground the app runs on: they keep the
-// old ramp's meaning (deep green = furthest through the funnel, red = out) but
-// at the lightness a dark background needs. The previous set was mixed for
-// white — #07521f on #0a0a14 is an unreadable smudge.
+// Chart colours are CSS custom properties, not hex, so one palette serves both
+// themes: the browser resolves them per theme wherever they land, which is only
+// ever an SVG `fill` or a CSS `background`. The ramp keeps its meaning in both —
+// deep green furthest through the funnel, red out.
+//
+// Safe because nothing here is ever parsed or handed to a non-CSS consumer. The
+// Excel workbook and the résumé PDF carry their own ARGB/RGB palettes and never
+// read these; if that ever changes, these have to go back to hex.
 const FUNNEL_COLOR: Record<Funnel, string> = {
-  offerAccepted: "#047857",
-  clientSelected: "#059669",
-  clientInterview: "#10b981",
-  clientSubmitted: "#34d399",
-  vendorInterview: "#5eead4",
-  vendorSubmitted: "#99f6e4",
-  selected: "#a3e635",
-  interview: "#fbbf24",
-  waiting: "#60a5fa",
-  submitted: "#94a3b8",
-  rejected: "#f87171",
+  offerAccepted: "var(--fn-1)",
+  clientSelected: "var(--fn-2)",
+  clientInterview: "var(--fn-3)",
+  clientSubmitted: "var(--fn-4)",
+  vendorInterview: "var(--fn-5)",
+  vendorSubmitted: "var(--fn-6)",
+  selected: "var(--c-lime)",
+  interview: "var(--c-amber)",
+  waiting: "var(--c-blue)",
+  submitted: "var(--c-slate)",
+  rejected: "var(--c-red)",
   unknown: "", // filled from PALETTE
 };
 
@@ -220,7 +224,16 @@ function reachedClient(f: Funnel): boolean {
 }
 
 // Distinct colours for statuses that don't match a known funnel stage.
-const PALETTE = ["#a78bfa", "#fb923c", "#2dd4bf", "#f472b6", "#94a3b8", "#fb7185", "#38bdf8", "#facc15"];
+const PALETTE = [
+  "var(--c-violet)",
+  "var(--c-orange)",
+  "var(--c-teal)",
+  "var(--c-pink)",
+  "var(--c-slate)",
+  "var(--c-rose)",
+  "var(--c-sky)",
+  "var(--c-yellow)",
+];
 
 /** Map a raw status to an internal funnel stage (scoring/ordering only). */
 export function funnelOf(raw: string): Funnel {
