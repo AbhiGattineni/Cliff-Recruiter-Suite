@@ -17,6 +17,7 @@ function activity(rows: Record<string, unknown>[], active: string[] = []): Activ
     stats: buildStats(rows, active.map((c) => ({ JobCode: c })), DAY),
     source: "live",
     fetchedAt: Date.UTC(2026, 8, 18, 22, 30),
+    activeOk: true,
   };
 }
 
@@ -60,7 +61,7 @@ describe("renderActivityHtml", () => {
 
   it("says so plainly when Ceipal could not be read, instead of showing zeroes", () => {
     const html = renderActivityHtml(
-      { stats: buildStats([], [], DAY), source: "none", fetchedAt: 0, problem: "Ceipal auth failed (401)" },
+      { stats: buildStats([], [], DAY), source: "none", fetchedAt: 0, activeOk: false, problem: "Ceipal auth failed (401)" },
       "Thursday"
     );
     expect(html).toContain("Ceipal auth failed (401)");
@@ -130,5 +131,62 @@ describe("section order", () => {
     const c = render("Thursday", meetings as any, brief as any, 0, "m", "America/New_York", a);
     expect(c.text).toContain("\n\nRecruiter activity");
     expect(c.text).toContain("\n\nWhat was discussed");
+  });
+});
+
+describe("open requirements", () => {
+  const rows = [sub("A", "Ann Lee", "Ravi", "09/18/2026 08:00:00", "09/18/2026 09:00:00")];
+
+  // A count nobody managed to read must not render as a confident "0" — that
+  // is indistinguishable from "there genuinely are none".
+  it("shows a dash, not zero, when the count could not be read", () => {
+    const html = renderActivityHtml(
+      { stats: buildStats(rows, [], DAY), source: "cache", fetchedAt: 1, activeOk: false, problem: "fetch failed (401)" },
+      "Thursday"
+    );
+    expect(html).toContain("could not be read");
+    expect(html).toContain("fetch failed (401)");
+    expect(html).toContain("&mdash;");
+    // The headline card must not be carrying a 0 anywhere near that label.
+    const card = html.slice(html.indexOf("Open requirements") - 400, html.indexOf("Open requirements"));
+    expect(card).not.toMatch(/>0</);
+  });
+
+  it("shows the number when it was read", () => {
+    const html = renderActivityHtml(
+      { stats: buildStats(rows, [{ JobCode: "A" }, { JobCode: "B" }], DAY), source: "live", fetchedAt: 1, activeOk: true },
+      "Thursday"
+    );
+    expect(html).not.toContain("could not be read");
+    expect(html).toContain(">2<");
+  });
+});
+
+describe("the roster", () => {
+  // The whole point of the table: a recruiter who sent nothing is the finding,
+  // so they have to appear rather than silently drop out.
+  it("lists a recruiter who submitted recently but not on the day", () => {
+    const html = renderActivityHtml(
+      activity([
+        sub("A", "Ann Lee", "Busy One", "09/18/2026 08:00:00", "09/18/2026 09:00:00"),
+        sub("B", "Bob Ray", "Quiet One", "09/10/2026 08:00:00", "09/10/2026 09:00:00"),
+      ]),
+      "Thursday"
+    );
+    expect(html).toContain("Busy One");
+    expect(html).toContain("Quiet One");
+    expect(html).toContain("nothing submitted");
+  });
+
+  it("drops someone whose last submission predates the roster window", () => {
+    const html = renderActivityHtml(
+      activity([
+        sub("A", "Ann Lee", "Busy One", "09/18/2026 08:00:00", "09/18/2026 09:00:00"),
+        sub("B", "Bob Ray", "Long Gone", "01/10/2026 08:00:00", "01/10/2026 09:00:00"),
+      ]),
+      "Thursday"
+    );
+    expect(html).toContain("Busy One");
+    expect(html).not.toContain("Long Gone");
   });
 });

@@ -19,6 +19,7 @@ import {
   RecruiterRow,
   Band,
   SPEED_WINDOWS,
+  ROSTER_DAYS,
   BAND_GOOD,
   BAND_OK,
 } from "./recruiterStats.js";
@@ -90,6 +91,15 @@ export interface Activity {
   fetchedAt: number;
   /** Why there are no numbers, when there are none. */
   problem?: string;
+  /**
+   * Whether the open-requirements report was actually read.
+   *
+   * Separate from `source` because it fails separately: the submissions have a
+   * Firestore cache to fall back on and this did not, so a Ceipal hiccup used
+   * to leave the rest of the table intact and this one card reading a
+   * confident "0". A count nobody read must not render as a number.
+   */
+  activeOk: boolean;
 }
 
 /**
@@ -162,28 +172,53 @@ export async function loadActivity(ceipalPassword: string, dayISO: string): Prom
     }
   }
 
-  // Open requirements are a small report and there is no cache for them, so
-  // this is always a live read — and a failed one only costs that one number.
+  // Open requirements: a small report, read live and then cached the same way
+  // the submissions are. The cache is what keeps one bad Ceipal call from
+  // turning this card into a "0" — it falls back to the last good answer and
+  // says how old it is, and only when there has never been one does the card
+  // admit it has no number.
   let activeRows: Record<string, unknown>[] = [];
+  let activeOk = false;
   if (configured) {
     try {
-      const data = (await fetchReport("active_jobs", ceipalPassword, 0)) as { result?: unknown[] };
+      const data = (await fetchReport("active_jobs", ceipalPassword, 0)) as {
+        result?: unknown[];
+        total_available?: number;
+      };
       activeRows = (Array.isArray(data.result) ? data.result : []) as Record<string, unknown>[];
+      activeOk = true;
+      await writeCache("active_jobs", activeRows, Number(data.total_available) || activeRows.length);
     } catch (e) {
       if (!problem) problem = e instanceof Error ? e.message : String(e);
     }
+  } else if (!problem) {
+    problem = "Ceipal isn't configured for this function.";
   }
 
-  if (submissionRows.length === 0 && activeRows.length === 0) {
+  if (!activeOk) {
+    try {
+      const cached = await readCache("active_jobs");
+      if (cached && cached.rows.length > 0) {
+        activeRows = cached.rows as Record<string, unknown>[];
+        activeOk = true;
+        problem = `${problem ?? "Ceipal did not answer."} Showing the last cached count instead.`;
+      }
+    } catch {
+      /* no cache either; the card will say so */
+    }
+  }
+
+  if (submissionRows.length === 0 && !activeOk) {
     return {
       stats: buildStats([], [], dayISO),
       source: "none",
       fetchedAt: 0,
+      activeOk: false,
       problem: problem ?? (configured ? "Ceipal returned nothing." : "Ceipal isn't configured."),
     };
   }
 
-  return { stats: buildStats(submissionRows, activeRows, dayISO), source, fetchedAt, problem };
+  return { stats: buildStats(submissionRows, activeRows, dayISO), source, fetchedAt, problem, activeOk };
 }
 
 // ---- Colours ---------------------------------------------------------------
@@ -256,32 +291,55 @@ export function renderActivityHtml(a: Activity, dayLabel: string): string {
 
   const latePct = pct(s.answeredLater, measurable);
 
+  // Everyone on the roster gets a row, including the people who sent nothing —
+  // that is the line this table exists to show. Idle rows are greyed and carry
+  // a dash rather than a run of zeroes, so the eye skips to them as a group
+  // instead of reading them as scores.
   const rows = s.recruiters
     .map((r: RecruiterRow) => {
-      const band = bandOf(r.speed);
+      if (r.idle) {
+        return `<tr>
+        <td ${TD} style="padding:6px 8px;font-size:13px;color:#5b6577;border-bottom:1px solid #eef1f5">${esc(r.name)}</td>
+        <td ${TD} align="right" colspan="4" style="padding:6px 8px;font-size:13px;color:#5b6577;border-bottom:1px solid #eef1f5">nothing submitted</td>
+        <td ${TD} align="right">${pill("—", "bad")}</td>
+      </tr>`;
+      }
       return `<tr>
         <td ${TD}><strong>${esc(r.name)}</strong></td>
         <td ${TD} align="right">${r.submissions}</td>
         <td ${TD} align="right">${r.requirements}</td>
         <td ${TD} align="right">${r.onActive}</td>
         <td ${TD} align="right">${r.within[0]} / ${r.within[1]} / ${r.within[2]}</td>
-        <td ${TD} align="right">${pill(r.speed == null ? "n/a" : `${r.speed}%`, band)}</td>
+        <td ${TD} align="right">${pill(r.speed == null ? "n/a" : `${r.speed}%`, bandOf(r.speed))}</td>
       </tr>`;
     })
     .join("");
+
+  const idle = s.recruiters.filter((r) => r.idle).length;
 
   const when =
     a.fetchedAt > 0
       ? `Ceipal data pulled ${a.source === "live" ? "just now" : `at ${new Date(a.fetchedAt).toISOString().replace("T", " ").slice(0, 16)} UTC`}`
       : "Ceipal data of unknown age";
 
-  return `<h3 style="margin:0 0 8px;font-size:15px;color:#0b1220">Recruiter activity</h3>
+  const warn = !a.activeOk
+    ? `<p style="margin:0 0 10px;font-size:13px;color:#8a6100;background:#fdf3da;border:1px solid #f0dcb4;border-radius:6px;padding:8px 10px">
+        The open-requirements count could not be read, so it shows as &mdash; rather than as a number.
+        ${esc(a.problem ?? "Ceipal did not answer.")}
+      </p>`
+    : "";
 
+  return `<h3 style="margin:0 0 8px;font-size:15px;color:#0b1220">Recruiter activity</h3>
+  ${warn}
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;margin:0 0 6px">
     <tr>
-      ${statCard("Open requirements", String(s.activeRequirements))}
+      ${statCard("Open requirements", a.activeOk ? String(s.activeRequirements) : "—")}
       ${statCard("Submissions today", String(s.submissions))}
-      ${statCard("On open requirements", String(s.submissionsOnActive), s.submissions > 0 ? bandOf(pct(s.submissionsOnActive, s.submissions)) : "none")}
+      ${statCard(
+        a.activeOk ? "On open requirements" : "On open — unknown",
+        a.activeOk ? String(s.submissionsOnActive) : "—",
+        a.activeOk && s.submissions > 0 ? bandOf(pct(s.submissionsOnActive, s.submissions)) : "none"
+      )}
     </tr>
   </table>
 
@@ -324,6 +382,7 @@ export function renderActivityHtml(a: Activity, dayLabel: string): string {
   <p style="margin:10px 0 0;font-size:11px;color:#5b6577">
     Green from ${BAND_GOOD}%, amber from ${BAND_OK}%, red below — a starting position, not an agreed target.
     &ldquo;Speed&rdquo; is the share of a person&rsquo;s requirements answered within ${widest} hours of posting.
+    Everyone who submitted a profile in the last ${ROSTER_DAYS} days gets a row${idle > 0 ? `, which is why ${idle} of them show &ldquo;nothing submitted&rdquo;` : ""}.
     ${esc(when)}.${a.problem ? ` Note: ${esc(a.problem)}` : ""}
   </p>`;
 }
@@ -336,8 +395,8 @@ export function renderActivityText(a: Activity, dayLabel: string): string {
   const measurable = s.requirementsAnswered - s.answeredUnknown;
   const lines = [
     `Recruiter activity — ${dayLabel}`,
-    `- Open requirements: ${s.activeRequirements}`,
-    `- Submissions today: ${s.submissions} (${s.submissionsOnActive} on open requirements)`,
+    `- Open requirements: ${a.activeOk ? s.activeRequirements : "unknown (could not be read)"}`,
+    `- Submissions today: ${s.submissions}${a.activeOk ? ` (${s.submissionsOnActive} on open requirements)` : ""}`,
     `- Requirements first answered today: ${s.requirementsAnswered}`,
     ...SPEED_WINDOWS.map((w, i) => {
       const p = pct(s.answeredWithin[i], measurable);
@@ -350,7 +409,9 @@ export function renderActivityText(a: Activity, dayLabel: string): string {
   if (s.recruiters.length === 0) lines.push("  (nobody submitted a profile)");
   for (const r of s.recruiters) {
     lines.push(
-      `  ${r.name}: ${r.submissions} / ${r.requirements} / ${r.onActive} / ${r.within.join(",")} / ${r.speed == null ? "n/a" : `${r.speed}%`}`
+      r.idle
+        ? `  ${r.name}: nothing submitted`
+        : `  ${r.name}: ${r.submissions} / ${r.requirements} / ${r.onActive} / ${r.within.join(",")} / ${r.speed == null ? "n/a" : `${r.speed}%`}`
     );
   }
   if (s.rejectedInternally > 0) {
