@@ -83,34 +83,52 @@ firebase emulators:start
 
 ## Regional CPU quota
 
-This project's Cloud Run **total allowable CPU per project per region** in
-`us-central1` is roughly **139** — far below the default most projects get, and
-the single most common cause of a failed deploy here.
+The constraint that shapes this project's backend. Cloud Run's **Total CPU
+allocation, in milli vCPU, per project per region** in `us-central1` is
+**20,000** (= 20 vCPU), and Google will not raise it: the console answers a
+request with *"Based on your service usage history, you are not eligible for a
+quota increase at this time."*
 
-Cloud Run reserves `cpu x maxInstances` for every service whether or not a
-request ever arrives, so the cost of a function is its **ceiling, not its
-traffic**. Twenty-odd callables at the platform default of 100 instances
-reserve thousands of CPUs between them; `commonOpts.maxInstances` exists
-entirely to stop that.
+Cloud Run reserves `cpu x maxInstances` for a service whether or not a request
+ever arrives, so the cost of a function is its **ceiling, not its traffic**.
+Current *usage* sits at 0% — nothing is running — while the *allocation* is
+full. Those are different numbers against the same limit, which is why the
+quota page looks idle while a deploy is being refused.
 
-It has been cut twice under pressure — 10 failed at the 23rd function, and 6
-was still refused when a 24th service asked for one more CPU. It now sits at
-**3**, which puts the whole suite under 70 reserved and leaves room to grow.
-
-A deploy that fails this way says:
+A deploy that hits it says:
 
 ```
 Could not create or update Cloud Run service <name>, Container Healthcheck failed.
 Quota exceeded for total allowable CPU per project per region.
 ```
 
-**The durable fix is a quota increase, not a smaller ceiling.** Cloud Run CPU
-quota is free and usually granted quickly:
+Three things follow, learned the hard way:
 
-console.cloud.google.com/iam-admin/quotas -> filter on "Cloud Run Admin API" ->
-**Total CPU allocation, us-central1** -> Edit Quotas.
+1. **`commonOpts.maxInstances` is a quota setting, not a performance one.** It
+   went from the platform default of 100 to 10, and to 6 when the 23rd function
+   would not fit. A v2 callable serves 80 concurrent requests per instance, so
+   6 is ~480 in flight on any one callable — far more than a few dozen people
+   can use.
 
-Until that lands, adding a function means finding the CPUs somewhere.
+2. **You cannot shrink your way out of a full region.** Lowering the ceiling
+   means *updating* every service, each update briefly runs a new revision
+   beside the old one, and a full region has no headroom for the overlap. An
+   attempt to cut 6 -> 3 failed on all twenty-two functions for exactly that
+   reason, and Firebase then reported "no changes detected" on the next pass
+   because its change detection hashes the source, not the runtime config —
+   which makes the failure easy to miss.
+
+3. **The quota is per region, so another region is a clean way out.** Cloud Run
+   allows this project 3 regions and only `us-central1` was in use.
+   `meetingDigestSchedule` runs in `us-east1` for that reason and no other. It
+   is a timer that talks to Firestore, Fireflies, the LLM and SMTP, all of which
+   are reached identically from anywhere, and nobody is waiting on it.
+
+   Anything user-facing should stay in `us-central1` beside the rest; a
+   cross-region hop is free for a cron job and not for a person clicking a
+   button. If `us-central1` fills again, the honest options are deleting unused
+   functions, moving more background work out of the region, or asking Google
+   again once usage history supports it.
 
 ## Secrets and new functions
 

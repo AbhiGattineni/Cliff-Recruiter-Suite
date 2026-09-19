@@ -96,21 +96,19 @@ const commonOpts = {
   // exceeded for total allowable CPU per project per region", and took every
   // other function's update down with it.
   //
-  // Three. A v2 callable serves 80 concurrent requests per instance, so this is
-  // ~240 in flight on any single callable, for a few dozen people on the whole
-  // suite. It is not a performance setting at this size; it is a quota one.
+  // Six. A v2 callable serves 80 concurrent requests per instance, so this is
+  // ~480 in flight on any single callable, for a few dozen people on the whole
+  // suite — far more than this app can use, and small enough that the twenty-
+  // odd services here fit the region's CPU allocation.
   //
-  // It has been cut twice. Ten failed at the twenty-third function (230
-  // requested). Six was then measured rather than guessed: twenty-three
-  // functions reserved 138, every one reported "no changes detected" on the
-  // next deploy, and adding a single further service at maxInstances 1 was
-  // still refused — which puts this project's regional CPU quota at about 139,
-  // far lower than the default most projects get.
-  //
-  // At three the whole suite reserves under 70, which leaves room to add
-  // functions again. The durable fix is a quota increase, not a smaller
-  // ceiling; see docs/DEPLOYMENT.md.
-  maxInstances: 3,
+  // It was ten until the twenty-third function was refused with "Quota
+  // exceeded for total allowable CPU per project per region". Cutting to six
+  // made room for that one. A further cut to three was then attempted and
+  // failed for an instructive reason: lowering a ceiling means *updating* every
+  // service, each update briefly runs a new revision beside the old one, and
+  // there was no headroom for the overlap. You cannot shrink your way out of a
+  // full region. See docs/DEPLOYMENT.md.
+  maxInstances: 6,
   // These non-secret values come from environment (.env for emulator, or set on deploy).
 };
 
@@ -1436,6 +1434,19 @@ export const firefliesMeetings = onCall(
 export const meetingDigestSchedule = onSchedule(
   {
     ...commonOpts,
+    // Deliberately NOT us-central1, where every other function lives.
+    //
+    // Cloud Run's CPU allocation quota is per project *per region*, and
+    // us-central1 is full: the quota there is 20,000 milli vCPU, Google will
+    // not raise it for this project ("not eligible for a quota increase at
+    // this time"), and the twenty-two services already there consume it. A
+    // second region comes with its own allocation, untouched.
+    //
+    // Nothing about this job wants a particular region. It runs on a timer and
+    // talks to Firestore, Fireflies, the LLM and SMTP — all of which are
+    // reached the same way from anywhere. There is no user waiting on it, so
+    // the extra milliseconds of cross-region Firestore latency are irrelevant.
+    region: "us-east1",
     schedule: "0,30 9,22 * * *",
     timeZone: DIGEST_ZONE,
     secrets: [FIREFLIES_API_KEY, LLM_API_KEY, OPENAI_API_KEY, SMTP_PASS],
