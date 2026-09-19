@@ -226,11 +226,20 @@ export async function listMeetings(apiKey: string, limit: number): Promise<Meeti
     .sort((a, b) => (b.date ?? 0) - (a.date ?? 0));
 }
 
-/** One meeting with its full transcript. */
+/**
+ * One meeting with its full transcript.
+ *
+ * `includeRaw` returns Fireflies' own object alongside the parsed one. It is
+ * how a field that arrives under an unexpected name gets diagnosed without
+ * redeploying: the page shows it to admins behind a toggle, and the real key
+ * names are then visible. Off unless asked for — the raw object is large and
+ * contains the same private speech as the transcript.
+ */
 export async function getMeeting(
   apiKey: string,
-  id: string
-): Promise<{ meeting: Meeting; sentences: Sentence[] }> {
+  id: string,
+  includeRaw = false
+): Promise<{ meeting: Meeting; sentences: Sentence[]; raw?: unknown }> {
   const data = await graphql<{ transcript?: unknown }>(DETAIL_QUERY, { id }, apiKey);
   const t = obj(data.transcript);
   if (!pick(t, "id")) throw new Error("That meeting no longer exists in Fireflies.");
@@ -246,5 +255,12 @@ export async function getMeeting(
     };
   });
 
-  return { meeting: toMeeting(t), sentences: sentences.filter((s) => s.text) };
+  return {
+    meeting: toMeeting(t),
+    sentences: sentences.filter((s) => s.text),
+    // The sentence list is the bulk of the payload and is already parsed above,
+    // so the raw copy drops it — what matters here is the shape of the header
+    // fields, not a second copy of every line.
+    ...(includeRaw ? { raw: { ...t, sentences: `[${rawSentences.length} sentences omitted]` } } : {}),
+  };
 }

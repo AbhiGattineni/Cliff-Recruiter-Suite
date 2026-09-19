@@ -46,14 +46,24 @@ export async function listMeetings(limit = 25): Promise<Meeting[]> {
   return res.data.meetings ?? [];
 }
 
-export async function getMeeting(id: string): Promise<{ meeting: Meeting; sentences: Sentence[] }> {
+/**
+ * One meeting and its transcript.
+ *
+ * `raw` asks the function to return Fireflies' own object too. The server
+ * honours it for admins only and ignores it otherwise, so passing it is never
+ * an escalation — it just comes back absent.
+ */
+export async function getMeeting(
+  id: string,
+  raw = false
+): Promise<{ meeting: Meeting; sentences: Sentence[]; raw?: unknown }> {
   ensureConfigured();
   const callable = httpsCallable<
-    { action: string; id: string },
-    { ok: boolean; meeting: Meeting; sentences: Sentence[] }
+    { action: string; id: string; raw: boolean },
+    { ok: boolean; meeting: Meeting; sentences: Sentence[]; raw?: unknown }
   >(functions, "firefliesMeetings");
-  const res = await callable({ action: "get", id });
-  return { meeting: res.data.meeting, sentences: res.data.sentences ?? [] };
+  const res = await callable({ action: "get", id, raw });
+  return { meeting: res.data.meeting, sentences: res.data.sentences ?? [], raw: res.data.raw };
 }
 
 /** "1h 05m", "45m", or an em dash when Fireflies didn't say. */

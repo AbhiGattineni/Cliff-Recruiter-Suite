@@ -12,7 +12,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { DateTime } from "luxon";
 import { useAuth } from "../context/AuthContext";
-import { friendlyError } from "../lib/errors";
+import { errorDetail } from "../lib/errors";
 import {
   listMeetings,
   getMeeting,
@@ -24,6 +24,32 @@ import Modal from "../components/Modal";
 import Pagination, { usePagination } from "../components/Pagination";
 
 const PAGE_LIMIT = 50;
+
+/**
+ * A failure, said twice: once for whoever hit it, and once for whoever has to
+ * fix it. The second half stays collapsed — a recruiter does not need a
+ * GraphQL message, and the person debugging the integration needs exactly that
+ * and should not have to open a console to get it.
+ */
+function ErrorPanel({ err }: { err: unknown }) {
+  const d = errorDetail(err);
+  return (
+    <div className="alert error">
+      <div>{d.message}</div>
+      {(d.code || d.raw) && (
+        <details className="err-detail">
+          <summary>Technical details</summary>
+          {d.code && (
+            <div>
+              <span className="mono">{d.code}</span>
+            </div>
+          )}
+          {d.raw && <pre className="mono">{d.raw}</pre>}
+        </details>
+      )}
+    </div>
+  );
+}
 
 function when(ms: number | null): string {
   if (!ms) return "—";
@@ -44,10 +70,18 @@ function attendees(m: Meeting): string[] {
   return out;
 }
 
-function MeetingDetail({ id, onClose }: { id: string; onClose: () => void }) {
+function MeetingDetail({
+  id,
+  isAdmin,
+  onClose,
+}: {
+  id: string;
+  isAdmin: boolean;
+  onClose: () => void;
+}) {
   const q = useQuery({
-    queryKey: ["meeting", id],
-    queryFn: () => getMeeting(id),
+    queryKey: ["meeting", id, isAdmin],
+    queryFn: () => getMeeting(id, isAdmin),
     // The transcript of a finished meeting never changes, so once it is here
     // it can stay for the session.
     staleTime: Infinity,
@@ -60,7 +94,7 @@ function MeetingDetail({ id, onClose }: { id: string; onClose: () => void }) {
           <div className="spinner dark" />
         </div>
       ) : q.isError ? (
-        <div className="alert error">{friendlyError(q.error)}</div>
+        <ErrorPanel err={q.error} />
       ) : !q.data ? null : (
         <>
           <div className="kv" style={{ marginBottom: "1rem" }}>
@@ -114,6 +148,17 @@ function MeetingDetail({ id, onClose }: { id: string; onClose: () => void }) {
               ))}
             </div>
           )}
+
+          {q.data.raw != null && (
+            <details className="err-detail" style={{ marginTop: "1.25rem" }}>
+              <summary>Raw Fireflies response (admin)</summary>
+              <p className="muted" style={{ fontSize: "0.8rem", margin: "0.4rem 0" }}>
+                What the API actually returned, before this app renamed anything. If a field above
+                is blank, its real name is in here.
+              </p>
+              <pre className="mono">{JSON.stringify(q.data.raw, null, 2)}</pre>
+            </details>
+          )}
         </>
       )}
     </Modal>
@@ -123,6 +168,7 @@ function MeetingDetail({ id, onClose }: { id: string; onClose: () => void }) {
 export default function Meetings() {
   const { profile, profileLoading } = useAuth();
   const canSee = profile?.role === "admin" || profile?.role === "manager";
+  const isAdmin = profile?.role === "admin";
   const [openId, setOpenId] = useState<string | null>(null);
 
   const q = useQuery({
@@ -170,7 +216,7 @@ export default function Meetings() {
             <div className="spinner dark" />
           </div>
         ) : q.isError ? (
-          <div className="alert error">{friendlyError(q.error)}</div>
+          <ErrorPanel err={q.error} />
         ) : rows.length === 0 ? (
           <div className="alert info">
             No meetings came back from Fireflies. Nothing recorded yet, or the API key doesn&#39;t
@@ -234,7 +280,9 @@ export default function Meetings() {
         )}
       </div>
 
-      {openId && <MeetingDetail id={openId} onClose={() => setOpenId(null)} />}
+      {openId && (
+        <MeetingDetail id={openId} isAdmin={!!isAdmin} onClose={() => setOpenId(null)} />
+      )}
     </div>
   );
 }

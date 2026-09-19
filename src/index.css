@@ -860,6 +860,22 @@ table.data th.colf-th { padding-right: 0.35rem; }
   .login-card { padding: 1.5rem 1.25rem; }
 }
 
+/* ---------- Collapsed diagnostics ---------- */
+/* Attached to an .alert, so it inherits that alert's colour rather than
+   introducing a second one for the same problem. */
+.err-detail { margin-top: 0.5rem; }
+.err-detail > summary {
+  cursor: pointer; font-size: 0.8rem; font-weight: 600; opacity: 0.85;
+  user-select: none;
+}
+.err-detail > summary:hover { opacity: 1; }
+.err-detail pre {
+  margin: 0.45rem 0 0; padding: 0.55rem 0.7rem; max-height: 320px; overflow: auto;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  font-size: 0.76rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
+  color: var(--ink);
+}
+
 /* ---------- Meeting transcript ---------- */
 /* A long transcript is read, not scanned: speaker and timecode sit in a narrow
    fixed gutter so the text keeps one left edge down the whole conversation,

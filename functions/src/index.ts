@@ -1246,7 +1246,11 @@ export const firefliesMeetings = onCall(
       if (action === "get") {
         const id = String(request.data?.id ?? "").trim();
         if (!id) throw new HttpsError("invalid-argument", "A meeting id is required.");
-        return { ok: true, ...(await getMeeting(apiKey, id)) };
+        // Admins only, even though managers can read the meeting itself: the
+        // raw object is a diagnostic for whoever maintains the integration, not
+        // part of the feature.
+        const includeRaw = request.data?.raw === true && profile.role === "admin";
+        return { ok: true, ...(await getMeeting(apiKey, id, includeRaw)) };
       }
       throw new HttpsError("invalid-argument", `Unknown action "${action}".`);
     } catch (e) {
