@@ -30,10 +30,10 @@ export async function logReportRun(source: string, rowCount: number, jobCount: n
   try {
     ensureConfigured();
     const callable = httpsCallable<
-      { source: string; rowCount: number; jobCount: number; by: Actor },
+      { action: string; source: string; rowCount: number; jobCount: number; by: Actor },
       unknown
-    >(functions, "logReportRun");
-    await callable({ source, rowCount, jobCount, by: currentActor() });
+    >(functions, "reportConfigs");
+    await callable({ action: "logRun", source, rowCount, jobCount, by: currentActor() });
   } catch {
     /* best-effort — never block the UI on logging */
   }

@@ -257,6 +257,7 @@ export async function saveResumeReport(
   ensureConfigured();
   const callable = httpsCallable<
     {
+      action: string;
       assessment: ResumeAssessment;
       provider: ProviderId;
       model: string;
@@ -265,8 +266,17 @@ export async function saveResumeReport(
       by: Actor;
     } & ReportExtras,
     { ok: boolean; reportId?: string }
-  >(functions, "saveResumeReport");
-  const res = await callable({ assessment, provider, model, jobDescription, usage, by: currentActor(), ...extras });
+  >(functions, "resumeReports");
+  const res = await callable({
+    action: "save",
+    assessment,
+    provider,
+    model,
+    jobDescription,
+    usage,
+    by: currentActor(),
+    ...extras,
+  });
   return res.data?.reportId ?? "";
 }
 

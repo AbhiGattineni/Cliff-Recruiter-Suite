@@ -21,12 +21,12 @@ export interface PoolCandidate {
 
 export async function getCandidatePool(): Promise<PoolCandidate[]> {
   ensureConfigured();
-  const callable = httpsCallable<Record<string, never>, { ok: boolean; candidates: PoolCandidate[] }>(
+  const callable = httpsCallable<{ action: string }, { ok: boolean; candidates: PoolCandidate[] }>(
     functions,
-    "candidatePool",
+    "ceipalData",
     { timeout: 300_000 }
   );
-  const res = await callable({});
+  const res = await callable({ action: "candidatePool" });
   return res.data?.candidates ?? [];
 }
 

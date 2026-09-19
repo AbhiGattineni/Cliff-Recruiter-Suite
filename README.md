@@ -34,8 +34,8 @@ Secrets (Ceipal password, LLM token) live only in Cloud Functions — never in t
 Browser (React)
    │  Firebase Auth (email/password)
    │  httpsCallable ─────────────► Cloud Functions (secrets held here)
-   │                                   ├─ ceipalReport → Ceipal Custom Reports API
-   │                                   └─ parseResume  → LLM (Ollama, OpenAI-compatible API)
+   │                                   ├─ ceipalData → Ceipal Custom Reports API
+   │                                   └─ ai         → LLM (Ollama, OpenAI-compatible API)
    │
    └─ Report transform + Excel build run in the browser (ExcelJS), from either
       the API JSON or an uploaded .xlsx.
@@ -43,6 +43,11 @@ Browser (React)
 
 Why Cloud Functions: Ceipal and the LLM require secret credentials and Ceipal blocks direct
 browser calls (CORS). The functions are a thin, secure proxy.
+
+There are eleven callables, and most dispatch on an `action` rather than being a
+service each: Cloud Run reserves CPU per *service*, regardless of traffic, and
+that reservation is this project's binding constraint. See
+[ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 

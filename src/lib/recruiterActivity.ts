@@ -25,13 +25,16 @@ export const activityNameKey = (s: string) => String(s ?? "").toLowerCase().repl
 
 export async function getRecruiterActivity(from: string, to: string): Promise<RecruiterActivity> {
   ensureConfigured();
-  const callable = httpsCallable<{ from: string; to: string }, { ok: boolean } & RecruiterActivity>(
+  const callable = httpsCallable<
+    { action: string; from: string; to: string },
+    { ok: boolean } & RecruiterActivity
+  >(
     functions,
-    "recruiterActivity",
+    "ceipalData",
     // Pulls large reports live (mail merge ~19k rows) — allow plenty of time.
     { timeout: 540_000 }
   );
-  const res = await callable({ from, to });
+  const res = await callable({ action: "recruiterActivity", from, to });
   const d = res.data;
   return {
     from: d?.from ?? null,
