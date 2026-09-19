@@ -105,7 +105,7 @@ export default function EmailJsSettings() {
       {error != null && <ErrorBlock err={error} />}
       {notice && <div className="alert success">{notice}</div>}
 
-      <div className="row" style={{ alignItems: "center", marginBottom: "0.9rem" }}>
+      <div className="btn-row" style={{ marginBottom: "0.9rem" }}>
         <span className={`chip ${connected ? "matched" : ""}`}>
           {connected ? "Connected" : "Not connected"}
         </span>
@@ -136,7 +136,7 @@ export default function EmailJsSettings() {
         </div>
       ))}
 
-      <label className="row" style={{ alignItems: "center", gap: "0.4rem", marginBottom: "0.9rem" }}>
+      <label className="btn-row" style={{ gap: "0.4rem", marginBottom: "0.9rem", cursor: "pointer" }}>
         <input type="checkbox" checked={reveal} onChange={() => setReveal((v) => !v)} />
         <span className="muted" style={{ fontSize: "0.85rem" }}>
           Show the private key
