@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderActivityHtml, renderActivityText, Activity } from "../src/digest";
+import { renderActivityHtml, renderActivityText, render, Activity } from "../src/digest";
 import { buildStats } from "../src/recruiterStats";
 
 const DAY = "2026-09-18";
@@ -93,5 +93,42 @@ describe("renderActivityText", () => {
     expect(text).toContain("Submissions today: 2 (1 on open requirements)");
     expect(text).toContain("within 3h of posting: 1");
     expect(text).toContain("Ravi: 2 / 2 / 1 / 1,1,1 / 50%");
+  });
+});
+
+describe("section order", () => {
+  const brief = {
+    overview: "An overview.",
+    themes: ["A theme"],
+    decisions: [],
+    actionItems: [],
+    risks: [],
+  };
+  const meetings = [
+    { title: "Acme sync", date: "2026-09-18T14:00:00Z", organizer: "Ravi", participants: ["Ann"] },
+  ];
+
+  // The numbers come first because that is the half people act on before
+  // breakfast; the brief is the read-when-you-have-a-minute half.
+  it("puts recruiter activity above the meeting brief", () => {
+    const a = activity([sub("A", "Ann Lee", "Ravi", "09/18/2026 08:00:00", "09/18/2026 09:00:00")]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const c = render("Thursday", meetings as any, brief as any, 0, "m", "America/New_York", a);
+
+    expect(c.html.indexOf("Recruiter activity")).toBeGreaterThan(-1);
+    expect(c.html.indexOf("Recruiter activity")).toBeLessThan(c.html.indexOf("What was discussed"));
+    expect(c.html.indexOf("What was discussed")).toBeLessThan(c.html.indexOf("Meetings covered"));
+
+    expect(c.text.indexOf("Recruiter activity")).toBeLessThan(c.text.indexOf("What was discussed"));
+  });
+
+  // The blank-line separators in the text body have to ride on a non-empty
+  // entry, because the builder filters "" out. A bare spacer silently vanishes.
+  it("keeps blank lines between the text sections", () => {
+    const a = activity([sub("A", "Ann Lee", "Ravi", "09/18/2026 08:00:00", "09/18/2026 09:00:00")]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const c = render("Thursday", meetings as any, brief as any, 0, "m", "America/New_York", a);
+    expect(c.text).toContain("\n\nRecruiter activity");
+    expect(c.text).toContain("\n\nWhat was discussed");
   });
 });
