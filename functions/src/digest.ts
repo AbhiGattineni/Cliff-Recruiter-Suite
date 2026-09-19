@@ -222,7 +222,7 @@ export function renderActivityHtml(a: Activity, dayLabel: string): string {
   const s = a.stats;
 
   if (a.source === "none") {
-    return `<h3 style="margin:26px 0 6px;font-size:15px;color:#0b1220">Recruiter activity</h3>
+    return `<h3 style="margin:0 0 6px;font-size:15px;color:#0b1220">Recruiter activity</h3>
       <p style="font-size:13px;color:#8a6100;background:#fdf3da;border:1px solid #f0dcb4;border-radius:6px;padding:8px 10px">
         No figures this time — ${esc(a.problem ?? "the Ceipal report could not be read.")}
       </p>`;
@@ -275,7 +275,7 @@ export function renderActivityHtml(a: Activity, dayLabel: string): string {
       ? `Ceipal data pulled ${a.source === "live" ? "just now" : `at ${new Date(a.fetchedAt).toISOString().replace("T", " ").slice(0, 16)} UTC`}`
       : "Ceipal data of unknown age";
 
-  return `<h3 style="margin:26px 0 8px;font-size:15px;color:#0b1220">Recruiter activity &middot; ${esc(dayLabel)}</h3>
+  return `<h3 style="margin:0 0 8px;font-size:15px;color:#0b1220">Recruiter activity</h3>
 
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;margin:0 0 6px">
     <tr>
@@ -378,16 +378,17 @@ function emptyDigest(dayLabel: string, activity: Activity): DigestContent {
   return {
     subject: `Meeting digest — ${dayLabel} — no meetings`,
     meetingCount: 0,
-    text: `${line}\n\nThis note is sent daily so that silence means "nothing was recorded", not "the digest is broken".\n\n${renderActivityText(activity, dayLabel)}`,
+    text: `${renderActivityText(activity, dayLabel)}\n\n${line}\n\nThis note is sent daily so that silence means "nothing was recorded", not "the digest is broken".`,
     html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:640px;color:#1f2933">
-      <p style="font-size:15px">${esc(line)}</p>
-      <p style="font-size:12px;color:#5b6577">This note is sent daily so that silence means &ldquo;nothing was recorded&rdquo;, not &ldquo;the digest is broken&rdquo;.</p>
       ${renderActivityHtml(activity, dayLabel)}
+      <hr style="border:none;border-top:1px solid #dfe3ea;margin:26px 0 0">
+      <p style="font-size:15px;margin-top:22px">${esc(line)}</p>
+      <p style="font-size:12px;color:#5b6577">This note is sent daily so that silence means &ldquo;nothing was recorded&rdquo;, not &ldquo;the digest is broken&rdquo;.</p>
     </div>`,
   };
 }
 
-function render(
+export function render(
   dayLabel: string,
   meetings: Meeting[],
   brief: MeetingBrief,
@@ -419,6 +420,9 @@ function render(
   const html = `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:640px;color:#1f2933">
     <h2 style="margin:0 0 4px;font-size:18px;color:#0b1220">Meeting digest</h2>
     <p style="margin:0 0 16px;color:#5b6577;font-size:13px">${esc(dayLabel)} &middot; ${meetings.length} meeting${meetings.length === 1 ? "" : "s"}</p>
+    ${renderActivityHtml(activity, dayLabel)}
+    <hr style="border:none;border-top:1px solid #dfe3ea;margin:26px 0 0">
+    <h3 style="margin:22px 0 6px;font-size:15px;color:#0b1220">What was discussed</h3>
     ${truncated > 0 ? `<p style="background:#fdf1dc;border:1px solid #f0dcb4;border-radius:6px;padding:8px 10px;font-size:13px;color:#8a6100">${truncated} transcript${truncated === 1 ? " was" : "s were"} too long to include in full; the brief covers what fitted.</p>` : ""}
     ${brief.overview ? `<p style="font-size:15px;line-height:1.55">${esc(brief.overview)}</p>` : ""}
     ${section("Themes", brief.themes)}
@@ -427,14 +431,14 @@ function render(
     ${section("Risks and blockers", brief.risks)}
     <h3 style="margin:22px 0 6px;font-size:15px;color:#0b1220">Meetings covered</h3>
     <ul style="margin:0;padding-left:20px">${rows}</ul>
-    ${renderActivityHtml(activity, dayLabel)}
     <p style="margin-top:22px;font-size:12px;color:#5b6577">Written by ${esc(model || "the model")} from the transcripts. It can misread a conversation — check anything you are about to act on against the transcript itself.</p>
   </div>`;
 
   const text = [
     `Meeting digest — ${dayLabel} — ${meetings.length} meeting(s)`,
+    `\n${renderActivityText(activity, dayLabel)}`,
+    "\nWhat was discussed\n",
     truncated > 0 ? `(${truncated} transcript(s) were truncated to fit.)` : "",
-    "",
     brief.overview,
     "",
     brief.themes.length ? `Themes:\n${brief.themes.map((x) => `- ${x}`).join("\n")}` : "",
@@ -444,7 +448,6 @@ function render(
       : "",
     brief.risks.length ? `\nRisks and blockers:\n${brief.risks.map((x) => `- ${x}`).join("\n")}` : "",
     `\nMeetings covered:\n${meetings.map((m) => `- ${m.title}`).join("\n")}`,
-    `\n${renderActivityText(activity, dayLabel)}`,
     `\nWritten by ${model || "the model"} from the transcripts; check anything you act on against the transcript.`,
   ]
     .filter((x) => x !== "")
