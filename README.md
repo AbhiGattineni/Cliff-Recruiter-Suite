@@ -145,6 +145,29 @@ Everything you must fill in is marked `PLACEHOLDER_...`:
 | SMTP password | secret `SMTP_PASS` |
 | Allowed signup domain | `functions/.env` → `ALLOWED_EMAIL_DOMAIN` (default `cliff-services.com`) |
 | Fireflies API key | secret `FIREFLIES_API_KEY` (Meetings tab + daily digest) |
+| EmailJS service / template / public / private key | Firestore `appSettings/emailjs`, edited in the portal under **Preferences → Email sending (EmailJS)** |
+
+### How the meeting digest sends
+
+Two providers, and the digest uses whichever is configured, preferring EmailJS:
+
+- **EmailJS** — the one to use. Its four values live in Firestore, not in
+  `functions/.env` and not in Secret Manager, so an admin sets and rotates them
+  from Preferences with no deploy in the loop. That matters here: the GitHub
+  Actions deploy never writes a `functions/.env`, so anything put there only
+  exists on a developer's laptop. Two things are easy to miss in the EmailJS
+  dashboard and both fail silently until a send is attempted — the **private**
+  key is required (a Cloud Function is not a browser), and *Account → Security →
+  Allow EmailJS API for non-browser applications* must be on. The template needs
+  `To Email` = `{{to_email}}`, `Subject` = `{{subject}}`, and `{{{message_html}}}`
+  in the body — three braces, or EmailJS escapes the HTML and the mail arrives
+  full of visible tags.
+- **SMTP** — the fallback, unchanged: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`,
+  `SMTP_FROM` in `functions/.env` plus the `SMTP_PASS` secret.
+
+EmailJS bills per request and the digest sends one request per recipient, twice a
+day: about 60 a month for one recipient, 120 for two. Check that against the plan
+before adding a long recipient list.
 
 ---
 

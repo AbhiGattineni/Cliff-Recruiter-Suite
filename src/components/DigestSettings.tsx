@@ -75,9 +75,10 @@ export default function DigestSettings() {
       // Yesterday, and only to the person who pressed it — trying this out
       // should never mail the whole list.
       const r = await sendDigestNow(1);
+      const via = r.provider === "emailjs" ? " via EmailJS" : r.provider === "smtp" ? " via SMTP" : "";
       setNotice(
         r.sent
-          ? `Sent to you — ${r.meetingCount} meeting${r.meetingCount === 1 ? "" : "s"} from yesterday.`
+          ? `Sent to you${via} — ${r.meetingCount} meeting${r.meetingCount === 1 ? "" : "s"} from yesterday.`
           : `Not sent: ${r.reason ?? "no reason given"}.`
       );
     } catch (e) {
