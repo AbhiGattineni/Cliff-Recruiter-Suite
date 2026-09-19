@@ -62,11 +62,18 @@ const commonOpts = {
   // exceeded for total allowable CPU per project per region", and took every
   // other function's update down with it.
   //
-  // Ten is far more than this app can use (a v2 callable serves 80 concurrent
-  // requests per instance, and there are a few dozen people on the whole
-  // suite), and it keeps the reservation small enough that adding a function is
-  // no longer an event.
-  maxInstances: 10,
+  // Six is far more than this app can use (a v2 callable serves 80 concurrent
+  // requests per instance, so six is ~480 in flight on a single callable, for a
+  // few dozen people on the whole suite) and it keeps the reservation small
+  // enough that adding a function is not an event.
+  //
+  // It was ten until the twenty-third function — adding one more at that
+  // ceiling asked for 230 reserved CPUs and Cloud Run refused the new service
+  // with the same "Quota exceeded for total allowable CPU per project per
+  // region" as before. The arithmetic is the point: the cost of a function is
+  // its ceiling, not its traffic, so headroom is bought by lowering ceilings
+  // and nothing else. At six, twenty-three functions reserve 138.
+  maxInstances: 6,
   // These non-secret values come from environment (.env for emulator, or set on deploy).
 };
 
@@ -1221,7 +1228,16 @@ export const consultantOps = onCall(
 // proxied on demand, so there is no second copy of a private conversation to
 // secure, retain or forget, and revoking the Fireflies key revokes this too.
 export const firefliesMeetings = onCall(
-  { ...commonOpts, secrets: [FIREFLIES_API_KEY], timeoutSeconds: 60 },
+  {
+    ...commonOpts,
+    secrets: [FIREFLIES_API_KEY],
+    timeoutSeconds: 60,
+    // Smaller than the shared ceiling on purpose: this is an admin/manager
+    // read that a handful of people open a few times a day, and two instances
+    // is already ~160 concurrent requests.
+    maxInstances: 2,
+    memory: "256MiB" as const,
+  },
   async (request) => {
     // Unlike the Ceipal reports, this one is NOT open: a meeting recording can
     // carry pay, performance and client-commercial talk. The role is read from
