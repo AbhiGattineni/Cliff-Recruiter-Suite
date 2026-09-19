@@ -439,6 +439,16 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--b
 .field { margin-bottom: 1rem; }
 .row { display: flex; gap: 1rem; flex-wrap: wrap; }
 .row > * { flex: 1; min-width: 220px; }
+/* A group of buttons — NOT .row.
+   .row stretches every child to fill the line, which is what you want for two
+   inputs side by side and wrong for buttons: a pill the width of the card
+   reads as a banner rather than as something to press. Buttons keep their
+   natural width here and sit left. */
+.btn-row { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+.btn-row > * { flex: 0 0 auto; min-width: 0; }
+/* Leading icon inside a button: matches the cap height of the label and takes
+   its colour, so it works on both .btn and .btn.secondary without a second rule. */
+.btn-icon { width: 1em; height: 1em; flex: 0 0 auto; }
 .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; margin-top: 0.9rem; }
 
 /* ---------- Multi-select ---------- */

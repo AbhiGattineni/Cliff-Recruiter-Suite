@@ -19,6 +19,32 @@ import {
   DigestPreview,
 } from "../lib/digestSettings";
 
+/**
+ * An eye, drawn rather than typed.
+ *
+ * The emoji version renders as an empty box on machines without an emoji font —
+ * which includes at least one of ours, judging by the card headings — so the
+ * icon that labels this button is inline SVG and cannot fail to appear.
+ */
+function EyeIcon() {
+  return (
+    <svg
+      className="btn-icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M1.5 12S5.5 5 12 5s10.5 7 10.5 7-4 7-10.5 7S1.5 12 1.5 12Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
 export default function DigestSettings() {
   const { profile } = useAuth();
   const q = useQuery({ queryKey: ["digestSettings"], queryFn: getDigestSettings });
@@ -192,17 +218,17 @@ export default function DigestSettings() {
         can open the Meetings tab. Add addresses accordingly.
       </p>
 
-      <div className="row" style={{ gap: "0.6rem", flexWrap: "wrap" }}>
+      <div className="btn-row" style={{ marginTop: "0.9rem" }}>
         <button
-          className="btn secondary"
+          className="btn"
           onClick={look}
           disabled={busy}
           title="Render yesterday's digest without sending it"
         >
-          {busy ? <span className="spinner dark" /> : null} 👁 Preview
+          {busy ? <span className="spinner" /> : <EyeIcon />} Preview
         </button>
         <button className="btn secondary" onClick={test} disabled={busy}>
-          {busy ? <span className="spinner dark" /> : null} Send me yesterday&#39;s digest now
+          {busy ? <span className="spinner dark" /> : null} Send me yesterday&#39;s digest
         </button>
       </div>
 
@@ -246,7 +272,7 @@ function PreviewModal({ preview, onClose }: { preview: DigestPreview; onClose: (
         </div>
 
         <div className="modal-body" style={{ padding: 0 }}>
-          <div className="row" style={{ gap: "0.4rem", padding: "0.75rem 1.25rem 0" }}>
+          <div className="btn-row" style={{ padding: "0.75rem 1.25rem 0" }}>
             <button
               className={`btn ${tab === "html" ? "" : "secondary"}`}
               onClick={() => setTab("html")}
