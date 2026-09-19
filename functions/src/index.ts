@@ -96,18 +96,21 @@ const commonOpts = {
   // exceeded for total allowable CPU per project per region", and took every
   // other function's update down with it.
   //
-  // Six is far more than this app can use (a v2 callable serves 80 concurrent
-  // requests per instance, so six is ~480 in flight on a single callable, for a
-  // few dozen people on the whole suite) and it keeps the reservation small
-  // enough that adding a function is not an event.
+  // Three. A v2 callable serves 80 concurrent requests per instance, so this is
+  // ~240 in flight on any single callable, for a few dozen people on the whole
+  // suite. It is not a performance setting at this size; it is a quota one.
   //
-  // It was ten until the twenty-third function — adding one more at that
-  // ceiling asked for 230 reserved CPUs and Cloud Run refused the new service
-  // with the same "Quota exceeded for total allowable CPU per project per
-  // region" as before. The arithmetic is the point: the cost of a function is
-  // its ceiling, not its traffic, so headroom is bought by lowering ceilings
-  // and nothing else. At six, twenty-three functions reserve 138.
-  maxInstances: 6,
+  // It has been cut twice. Ten failed at the twenty-third function (230
+  // requested). Six was then measured rather than guessed: twenty-three
+  // functions reserved 138, every one reported "no changes detected" on the
+  // next deploy, and adding a single further service at maxInstances 1 was
+  // still refused — which puts this project's regional CPU quota at about 139,
+  // far lower than the default most projects get.
+  //
+  // At three the whole suite reserves under 70, which leaves room to add
+  // functions again. The durable fix is a quota increase, not a smaller
+  // ceiling; see docs/DEPLOYMENT.md.
+  maxInstances: 3,
   // These non-secret values come from environment (.env for emulator, or set on deploy).
 };
 

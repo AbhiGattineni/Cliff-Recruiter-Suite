@@ -81,6 +81,53 @@ npm run dev            # Vite dev server (this repo runs on port 5180)
 firebase emulators:start
 ```
 
+## Regional CPU quota
+
+This project's Cloud Run **total allowable CPU per project per region** in
+`us-central1` is roughly **139** — far below the default most projects get, and
+the single most common cause of a failed deploy here.
+
+Cloud Run reserves `cpu x maxInstances` for every service whether or not a
+request ever arrives, so the cost of a function is its **ceiling, not its
+traffic**. Twenty-odd callables at the platform default of 100 instances
+reserve thousands of CPUs between them; `commonOpts.maxInstances` exists
+entirely to stop that.
+
+It has been cut twice under pressure — 10 failed at the 23rd function, and 6
+was still refused when a 24th service asked for one more CPU. It now sits at
+**3**, which puts the whole suite under 70 reserved and leaves room to grow.
+
+A deploy that fails this way says:
+
+```
+Could not create or update Cloud Run service <name>, Container Healthcheck failed.
+Quota exceeded for total allowable CPU per project per region.
+```
+
+**The durable fix is a quota increase, not a smaller ceiling.** Cloud Run CPU
+quota is free and usually granted quickly:
+
+console.cloud.google.com/iam-admin/quotas -> filter on "Cloud Run Admin API" ->
+**Total CPU allocation, us-central1** -> Edit Quotas.
+
+Until that lands, adding a function means finding the CPUs somewhere.
+
+## Secrets and new functions
+
+Deploying a function that declares a **new** secret makes Firebase grant the
+runtime service account read access to it. If the deploy account lacks
+`secretmanager.secrets.setIamPolicy` the deploy fails with a 403 naming the
+secret. Either grant the binding once by hand:
+
+```bash
+gcloud secrets add-iam-policy-binding <SECRET_NAME> \
+  --member="serviceAccount:<project-number>-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor" --project cliff-services
+```
+
+or give the deploy service account `roles/secretmanager.admin` once, so future
+secrets need no manual step.
+
 ## Post-deploy checklist
 - [ ] Enable the **Email/Password** provider in the Firebase console (before re-enabling auth).
 - [ ] Confirm the four secrets are set (`firebase functions:secrets:access <NAME>`).
