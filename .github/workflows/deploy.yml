@@ -233,11 +233,18 @@ jobs:
             echo "== $region"
             for fn in $(grep -oP '^export const \K\w+(?= = onCall)' functions/src/index.ts | sort -u); do
               svc=$(echo "$fn" | tr '[:upper:]' '[:lower:]')
+              # Existence is asked separately. get-iam-policy on a service that
+              # is not there still writes something to stdout, so the emptiness
+              # check this used to rely on never fired and every migrated-away
+              # service was reported as a permissions failure.
+              if ! gcloud run services describe "$svc" --region "$region" --project cliff-services \
+                     --format='value(name)' >/dev/null 2>&1; then
+                echo "gone     $fn"
+                continue
+              fi
               policy=$(gcloud run services get-iam-policy "$svc" --region "$region" --project cliff-services \
                          --format=json 2>/dev/null || true)
-              if [ -z "$policy" ]; then
-                echo "gone     $fn"
-              elif echo "$policy" | grep -q '"allUsers"'; then
+              if echo "$policy" | grep -q '"allUsers"'; then
                 echo "ok       $fn"
               else
                 echo "MISSING  $fn — granting run.invoker to allUsers"
