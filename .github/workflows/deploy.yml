@@ -190,11 +190,26 @@ jobs:
 
           # The scheduled functions are not onCall, so they are not in
           # `in_source`; this catches them and anything else the grep missed.
+          # It is also the only pass that deploys the digest schedule, so its
+          # failure matters more than the name "<final-pass>" suggests.
           echo "--- deploying anything left (schedules, triggers)"
-          npx firebase-tools@13 deploy --only functions --project cliff-services --non-interactive --force || failed="$failed <final-pass>"
+          if ! npx firebase-tools@13 deploy --only functions --project cliff-services \
+                 --non-interactive --force 2>&1 | tee /tmp/final-pass.log; then
+            failed="$failed <final-pass>"
+          fi
+          # `tee` means the pipeline's status is tee's, so check the log itself.
+          if grep -qE "^Error:|HTTP Error:" /tmp/final-pass.log; then
+            case "$failed" in *"<final-pass>"*) ;; *) failed="$failed <final-pass>";; esac
+          fi
 
           if [ -n "$failed" ]; then
             echo "::error::Functions that did not deploy:$failed"
+            # Put the reason in the annotation too. Hunting it down in the middle
+            # of an 800-line log, past a second step that echoes its own script,
+            # cost more time today than any of the failures it described.
+            reason=$(grep -E "^Error:|HTTP Error:|Quota exceeded|lacks IAM permission" /tmp/final-pass.log \
+                       | head -5 | cut -c1-300 || true)
+            [ -n "$reason" ] && echo "::error::Final pass said: $reason"
             exit 1
           fi
 
