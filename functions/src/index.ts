@@ -5,6 +5,7 @@
 
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
+import { listMeetings, getMeeting } from "./fireflies.js";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
@@ -46,6 +47,9 @@ const GITHUB_TOKEN = defineSecret("GITHUB_TOKEN");
 // Optional commercial LinkedIn profile-data provider (LinkedIn itself has no
 // public API for third-party profiles). Unset = recruiter enters signals by hand.
 const LINKEDIN_API_KEY = defineSecret("LINKEDIN_API_KEY");
+// Fireflies.ai. A workspace-wide key: it reads every meeting anyone here has
+// recorded, which is why the callable below is admin/manager only.
+const FIREFLIES_API_KEY = defineSecret("FIREFLIES_API_KEY");
 
 const commonOpts = {
   region: "us-central1",
@@ -1204,6 +1208,52 @@ export const consultantOps = onCall(
     } catch (e) {
       if (e instanceof HttpsError) throw e;
       throw new HttpsError("failed-precondition", e instanceof Error ? e.message : String(e));
+    }
+  }
+);
+
+// ---- Fireflies meeting transcripts ----------------------------------------
+// One callable, two actions, mirroring `consultantOps`: a second Cloud Run
+// service for a read that shares a credential and a permission check would
+// spend regional CPU quota this project has already run out of once.
+//
+// Nothing is written to Firestore. Transcripts stay in Fireflies and are
+// proxied on demand, so there is no second copy of a private conversation to
+// secure, retain or forget, and revoking the Fireflies key revokes this too.
+export const firefliesMeetings = onCall(
+  { ...commonOpts, secrets: [FIREFLIES_API_KEY], timeoutSeconds: 60 },
+  async (request) => {
+    // Unlike the Ceipal reports, this one is NOT open: a meeting recording can
+    // carry pay, performance and client-commercial talk. The role is read from
+    // Firestore, never from anything the client sends.
+    const profile = await requireProfile(request.auth);
+    requireRole(profile, ["admin", "manager"]);
+
+    const apiKey = FIREFLIES_API_KEY.value();
+    if (!apiKey) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Fireflies isn't connected yet. Set the FIREFLIES_API_KEY secret and redeploy."
+      );
+    }
+
+    const action = String(request.data?.action ?? "list");
+    try {
+      if (action === "list") {
+        const limit = Number(request.data?.limit) || 25;
+        return { ok: true, meetings: await listMeetings(apiKey, limit) };
+      }
+      if (action === "get") {
+        const id = String(request.data?.id ?? "").trim();
+        if (!id) throw new HttpsError("invalid-argument", "A meeting id is required.");
+        return { ok: true, ...(await getMeeting(apiKey, id)) };
+      }
+      throw new HttpsError("invalid-argument", `Unknown action "${action}".`);
+    } catch (e) {
+      if (e instanceof HttpsError) throw e;
+      // Surface Fireflies' own wording — "invalid api key", "rate limited" — so
+      // the page can say what is actually wrong instead of "internal".
+      throw new HttpsError("unavailable", e instanceof Error ? e.message : "Fireflies request failed.");
     }
   }
 );

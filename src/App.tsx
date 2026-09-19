@@ -16,6 +16,7 @@ import CandidatePool from "./pages/CandidatePool";
 import Preferences from "./pages/Preferences";
 import Timesheets from "./pages/Timesheets";
 import Consultants from "./pages/Consultants";
+import Meetings from "./pages/Meetings";
 import ConsultantPortal from "./pages/ConsultantPortal";
 import DesignPreview from "./pages/DesignPreview";
 
@@ -76,6 +77,7 @@ export default function App() {
         <Route path="/candidate-pool" element={<CandidatePool />} />
         <Route path="/timesheets" element={<Timesheets />} />
         <Route path="/consultants" element={<Consultants />} />
+        <Route path="/meetings" element={<Meetings />} />
         <Route path="/preferences" element={<Preferences />} />
       </Route>
       <Route path="*" element={<Navigate to={isConsultant ? "/portal" : "/"} replace />} />
