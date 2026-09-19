@@ -152,6 +152,23 @@ function wentOut(statuses: Set<string>): boolean {
 /** Cumulative: a requirement answered in 2h is inside all three windows. */
 export const SPEED_WINDOWS = [3, 6, 9] as const;
 
+/**
+ * How far back to look when deciding who counts as a working recruiter.
+ *
+ * The table used to list only people who submitted on the day, which meant a
+ * recruiter who sent nothing simply vanished from it — and "nobody submitted
+ * anything against these requirements" is the single most useful thing this
+ * mail can tell you. Everyone who has submitted a profile in this window gets
+ * a row, whether or not they sent one on the day.
+ *
+ * Taking the roster from the submissions report rather than from the portal's
+ * user list is deliberate: Ceipal's spelling of a name is the only spelling
+ * that appears in these rows, so there is no pair of names to reconcile. The
+ * cost is that someone who has left keeps a row until the window passes them,
+ * which is visible and self-correcting.
+ */
+export const ROSTER_DAYS = 30;
+
 export interface RecruiterRow {
   name: string;
   /** Profiles that went out, one per candidate per requirement. */
@@ -166,6 +183,8 @@ export interface RecruiterRow {
   unknownPosting: number;
   /** within[9h] / requirements with a known posting time, 0-100, or null. */
   speed: number | null;
+  /** On the roster but sent nothing on the day. Rendered differently. */
+  idle: boolean;
 }
 
 export interface DigestStats {
@@ -316,6 +335,17 @@ export function buildStats(
     return a;
   };
 
+  // Seed a row for everyone who has submitted recently, so the people who sent
+  // nothing today are present as zeroes instead of being absent.
+  const rosterFrom = DateTime.fromFormat(dayISO, "yyyy-MM-dd", { zone: EST_ZONE }).minus({
+    days: ROSTER_DAYS,
+  });
+  for (const job of jobs.values()) {
+    for (const c of job.cands.values()) {
+      if (c.submittedOn && c.submittedOn >= rosterFrom) touch(c.recruiter);
+    }
+  }
+
   for (const job of jobs.values()) {
     const onActive = activeCodes.has(job.code);
 
@@ -397,7 +427,10 @@ export function buildStats(
       within: a.within,
       unknownPosting: a.unknownPosting,
       speed: pct(a.within[SPEED_WINDOWS.length - 1], a.measurable.size),
+      idle: a.submissions === 0,
     }))
+    // Busiest first; everyone who sent nothing falls to the bottom together,
+    // which is where you want to read that list as a list.
     .sort((x, y) => y.submissions - x.submissions || x.name.localeCompare(y.name));
 
   return stats;
