@@ -12,7 +12,7 @@ import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
 import { fetchReport, probeTotal } from "./ceipal.js";
 import { readCache, readCacheMeta, writeCache, cacheEnvelope } from "./ceipalCache.js";
-import { assessResume, matchRolesToJd, assessPortfolio, planAskQuery, narrateAskResult } from "./llm.js";
+import { assessResume, matchRolesToJd, assessPortfolio, planAskQuery, narrateAskResult, briefMeetings, BriefSource } from "./llm.js";
 import { searchUsers, buildPortfolio, parseGithubUsername } from "./github.js";
 import { fetchLinkedinSignals, providerConfigured, EMPTY_SIGNALS } from "./linkedin.js";
 import {
@@ -50,6 +50,16 @@ const LINKEDIN_API_KEY = defineSecret("LINKEDIN_API_KEY");
 // Fireflies.ai. A workspace-wide key: it reads every meeting anyone here has
 // recorded, which is why the callable below is admin/manager only.
 const FIREFLIES_API_KEY = defineSecret("FIREFLIES_API_KEY");
+
+/**
+ * How many meetings one brief may cover.
+ *
+ * Not a context limit — llm.ts shares a character budget across whatever it is
+ * given. It is a cost and latency limit: each meeting is a separate round trip
+ * to Fireflies before the model sees anything, and a brief spanning twenty
+ * calls is a report, not a briefing.
+ */
+const MAX_BRIEF_MEETINGS = 10;
 
 const commonOpts = {
   region: "us-central1",
@@ -559,18 +569,90 @@ type AiAction =
   | "askDelete"
   | "askDebugWrite"
   | "askDebugList"
-  | "askDebugClear";
+  | "askDebugClear"
+  | "briefMeetings";
 
 export const ai = onCall(
   {
     ...commonOpts,
-    secrets: [GITHUB_TOKEN, LLM_API_KEY, OPENAI_API_KEY],
+    // FIREFLIES_API_KEY is here because "brief these meetings" fetches the
+    // transcripts server-side. The alternative — the browser sending the text
+    // it already has — would mean trusting the client's copy of what was said.
+    secrets: [GITHUB_TOKEN, LLM_API_KEY, OPENAI_API_KEY, FIREFLIES_API_KEY],
     timeoutSeconds: 300,
     memory: "512MiB",
   },
   async (request) => {
     const action = String(request.data?.action ?? "") as AiAction;
     switch (action) {
+      case "briefMeetings": {
+        // Same gate as the Meetings tab, restated rather than inherited: this
+        // case reaches the same transcripts by a different door, and the rest
+        // of this callable deliberately runs in open mode.
+        const profile = await requireProfile(request.auth);
+        requireRole(profile, ["admin", "manager"]);
+
+        const ids = Array.isArray(request.data?.ids)
+          ? (request.data.ids as unknown[]).map((x) => String(x ?? "").trim()).filter(Boolean)
+          : [];
+        if (ids.length === 0) {
+          throw new HttpsError("invalid-argument", "Select at least one meeting to brief.");
+        }
+        if (ids.length > MAX_BRIEF_MEETINGS) {
+          throw new HttpsError(
+            "invalid-argument",
+            `Up to ${MAX_BRIEF_MEETINGS} meetings can be briefed at once — ${ids.length} were selected.`
+          );
+        }
+
+        const fireflies = FIREFLIES_API_KEY.value();
+        if (!fireflies) {
+          throw new HttpsError(
+            "failed-precondition",
+            "Fireflies isn't connected yet. Set the FIREFLIES_API_KEY secret and redeploy."
+          );
+        }
+
+        const provider: ProviderId = request.data?.provider === "openai" ? "openai" : "ollama";
+        const config = resolveLlm(provider, String(request.data?.model ?? ""));
+
+        // Sequential, not Promise.all: a handful of transcripts is not worth
+        // opening five concurrent connections to an API that rate-limits, and
+        // one failure here should name the meeting it belongs to.
+        const sources: BriefSource[] = [];
+        for (const id of ids) {
+          let fetched;
+          try {
+            fetched = await getMeeting(fireflies, id);
+          } catch (e) {
+            const why = e instanceof Error ? e.message : String(e);
+            throw new HttpsError("unavailable", `Couldn't load one of the selected meetings: ${why}`);
+          }
+          const { meeting, sentences } = fetched;
+          sources.push({
+            title: meeting.title,
+            date: meeting.date ? new Date(meeting.date).toISOString().slice(0, 10) : "",
+            participants: [meeting.organizer, ...meeting.participants].filter(Boolean).join(", "),
+            summary: meeting.summary.overview,
+            transcript: sentences.map((x) => `${x.speaker}: ${x.text}`).join("\n"),
+          });
+        }
+
+        try {
+          const { brief, usage, truncated } = await briefMeetings(sources, config);
+          return {
+            ok: true,
+            brief,
+            usage,
+            truncated,
+            meetingCount: sources.length,
+            provider,
+            model: config.model,
+          };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      }
       case "parseResume": {
         // AUTH ON HOLD: the app runs in open mode, so callers aren't signed in.
         // Re-enable requireAuth(request.auth) once authentication is turned back on.
