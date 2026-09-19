@@ -78,3 +78,29 @@ export async function sendDigestNow(daysAgo: number, to?: string[]): Promise<Sen
   const res = await callable({ action: "sendDigest", daysAgo, to });
   return res.data;
 }
+
+export interface DigestPreview {
+  subject: string;
+  html: string;
+  text: string;
+  meetingCount: number;
+}
+
+/**
+ * Render the digest without sending it.
+ *
+ * Runs `buildDigest` server-side — the same function the 10:30pm job uses — so
+ * what comes back is the mail, not a mock-up of it.
+ */
+export async function previewDigest(daysAgo: number): Promise<DigestPreview> {
+  ensureConfigured();
+  const callable = httpsCallable<{ action: string; daysAgo: number }, DigestPreview & { ok: boolean }>(
+    functions,
+    "firefliesMeetings",
+    // The brief runs an LLM over every transcript of the day, same as a real
+    // send; the default callable timeout is far too short for that.
+    { timeout: 300_000 }
+  );
+  const res = await callable({ action: "previewDigest", daysAgo });
+  return res.data;
+}

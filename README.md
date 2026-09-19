@@ -147,6 +147,33 @@ Everything you must fill in is marked `PLACEHOLDER_...`:
 | Fireflies API key | secret `FIREFLIES_API_KEY` (Meetings tab + daily digest) |
 | EmailJS service / template / public / private key | Firestore `appSettings/emailjs`, edited in the portal under **Preferences → Email sending (EmailJS)** |
 
+### What the digest contains
+
+Two halves, and the second does not depend on the first:
+
+1. **The meeting brief** — an LLM summary of every Fireflies transcript recorded
+   that day: overview, themes, decisions, action items, risks.
+2. **Recruiter activity** — open requirements, submissions made that day and how
+   many were on a still-open requirement, and the speed ladder: how many
+   requirements got their first profile within 3, 6 and 9 hours of being posted,
+   broken down per recruiter.
+
+The activity half reads the same Ceipal `submissions` and `active_jobs` reports
+the dashboard uses, through the same Firestore cache, so it costs a cheap
+record-count probe rather than a full pull on most runs. A Ceipal outage costs
+that section, not the email.
+
+Two counting rules match the rest of the app and are worth knowing before acting
+on a number: a profile **rejected internally** is not a submission (it never
+reached a client), and only a requirement's **first** profile counts towards the
+3/6/9-hour ladder — a profile sent on day four is not a nine-hour response.
+Requirements with no posting time in Ceipal are excluded from the percentages
+rather than counted as slow, and the mail says how many.
+
+Colour bands (`BAND_GOOD` / `BAND_OK` in `functions/src/recruiterStats.ts`) are
+green from 70%, amber from 40%, red below. They are a starting position, not an
+agreed service level — change the two constants once the team sets one.
+
 ### How the meeting digest sends
 
 Two providers, and the digest uses whichever is configured, preferring EmailJS:

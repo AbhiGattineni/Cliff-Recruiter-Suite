@@ -12,9 +12,11 @@ import {
   getDigestSettings,
   saveDigestSettings,
   sendDigestNow,
+  previewDigest,
   looksLikeEmail,
   MAX_RECIPIENTS,
   EMPTY_SETTINGS,
+  DigestPreview,
 } from "../lib/digestSettings";
 
 export default function DigestSettings() {
@@ -27,6 +29,7 @@ export default function DigestSettings() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [preview, setPreview] = useState<DigestPreview | null>(null);
 
   // Seed the form once the stored value lands, and not on every render after.
   useEffect(() => {
@@ -67,6 +70,19 @@ export default function DigestSettings() {
   const remove = (email: string) =>
     void persist({ enabled, recipients: recipients.filter((r) => r !== email) });
 
+  const look = async () => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      setPreview(await previewDigest(1));
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const test = async () => {
     setBusy(true);
     setError(null);
@@ -94,10 +110,12 @@ export default function DigestSettings() {
     <div className="card">
       <h2>📧 Daily meeting digest</h2>
       <div className="sub">
-        A brief of the day&#39;s recorded meetings, emailed at 10:30pm and again at 9am the next
-        morning with the same content, for anyone who missed the late one. A day with no meetings
-        gets a short note, so silence always means &ldquo;nothing was recorded&rdquo; rather than
-        &ldquo;the job is broken&rdquo;.
+        A brief of the day&#39;s recorded meetings, plus the desk&#39;s numbers — open requirements,
+        what each recruiter submitted, and how much of that landed within 3, 6 and 9 hours of a
+        requirement being posted. Emailed at 10:30pm and again at 9am the next morning with the same
+        content, for anyone who missed the late one. A day with no meetings still gets the activity
+        table, so silence always means &ldquo;nothing was recorded&rdquo; rather than &ldquo;the job
+        is broken&rdquo;.
       </div>
 
       {error != null && <ErrorBlock err={error} />}
@@ -174,9 +192,115 @@ export default function DigestSettings() {
         can open the Meetings tab. Add addresses accordingly.
       </p>
 
-      <button className="btn secondary" onClick={test} disabled={busy}>
-        {busy ? <span className="spinner dark" /> : null} Send me yesterday&#39;s digest now
-      </button>
+      <div className="row" style={{ gap: "0.6rem", flexWrap: "wrap" }}>
+        <button
+          className="btn secondary"
+          onClick={look}
+          disabled={busy}
+          title="Render yesterday's digest without sending it"
+        >
+          {busy ? <span className="spinner dark" /> : null} 👁 Preview
+        </button>
+        <button className="btn secondary" onClick={test} disabled={busy}>
+          {busy ? <span className="spinner dark" /> : null} Send me yesterday&#39;s digest now
+        </button>
+      </div>
+
+      {preview && <PreviewModal preview={preview} onClose={() => setPreview(null)} />}
+    </div>
+  );
+}
+
+/**
+ * The rendered email, shown as it will arrive.
+ *
+ * In an iframe with `srcDoc`, not injected into the page: the digest is a
+ * standalone HTML document written for email clients, with its own absolute
+ * colours and table layout. Dropped into the app it would inherit the portal's
+ * styles and show you something the recipient will never see — which is the one
+ * thing a preview must not do. The iframe is sandboxed with no permissions, so
+ * the document cannot run anything either.
+ */
+function PreviewModal({ preview, onClose }: { preview: DigestPreview; onClose: () => void }) {
+  const [tab, setTab] = useState<"html" | "text">("html");
+
+  return (
+    <div className="modal-overlay" onClick={onClose} role="presentation">
+      <div
+        className="modal-card wide"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Digest preview"
+      >
+        <div className="modal-head">
+          <div>
+            <div className="modal-title">Digest preview</div>
+            <div className="muted" style={{ fontSize: "0.82rem", marginTop: "0.15rem" }}>
+              Subject: {preview.subject}
+            </div>
+          </div>
+          <button className="modal-close" onClick={onClose} aria-label="Close preview">
+            ✕
+          </button>
+        </div>
+
+        <div className="modal-body" style={{ padding: 0 }}>
+          <div className="row" style={{ gap: "0.4rem", padding: "0.75rem 1.25rem 0" }}>
+            <button
+              className={`btn ${tab === "html" ? "" : "secondary"}`}
+              onClick={() => setTab("html")}
+            >
+              Formatted
+            </button>
+            <button
+              className={`btn ${tab === "text" ? "" : "secondary"}`}
+              onClick={() => setTab("text")}
+            >
+              Plain text
+            </button>
+          </div>
+
+          {tab === "html" ? (
+            <iframe
+              title="Digest preview"
+              sandbox=""
+              srcDoc={`<!doctype html><meta charset="utf-8"><body style="margin:0;padding:16px;background:#ffffff">${preview.html}</body>`}
+              style={{
+                width: "100%",
+                height: "62vh",
+                border: "none",
+                // White, because that is the canvas nearly every mail client
+                // puts behind the message.
+                background: "#ffffff",
+              }}
+            />
+          ) : (
+            <pre
+              className="mono"
+              style={{
+                whiteSpace: "pre-wrap",
+                padding: "1.25rem",
+                margin: 0,
+                fontSize: "0.82rem",
+                maxHeight: "62vh",
+                overflowY: "auto",
+              }}
+            >
+              {preview.text}
+            </pre>
+          )}
+        </div>
+
+        <div className="modal-foot">
+          <span className="muted" style={{ marginRight: "auto", fontSize: "0.82rem" }}>
+            Yesterday&#39;s digest, built by the same code that sends it.
+          </span>
+          <button className="btn secondary" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
