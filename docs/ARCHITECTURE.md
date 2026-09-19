@@ -9,7 +9,7 @@ Browser (React + Vite + TS)
   │
   │  Firebase Auth (email/password — currently OPEN/optional)
   │  Firestore (reads: reports, configs)
-  │  httpsCallable ──────────────► Cloud Functions (us-central1)  [secrets held here]
+  │  httpsCallable ──────────────► Cloud Functions (us-east1)    [secrets held here]
   │                                    ├─ parseResume        → LLM (Ollama / OpenAI)
   │                                    ├─ ceipalReport       → Ceipal Custom Reports API
   │                                    ├─ saveResumeReport / listResumeReports

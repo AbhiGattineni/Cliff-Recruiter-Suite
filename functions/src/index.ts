@@ -86,7 +86,27 @@ function dayLabel(date: Date, zone: string): string {
 }
 
 const commonOpts = {
-  region: "us-central1",
+  // us-east1, not us-central1.
+  //
+  // us-central1's Cloud Run CPU allocation is full: the quota there is 20,000
+  // milli vCPU, Google declined to raise it ("not eligible for a quota increase
+  // at this time"), and the services already in it consume essentially all of
+  // it. That was survivable while nothing needed to change, but a deploy runs
+  // each new revision beside the old one until traffic moves, and there was no
+  // longer room for that overlap: one run had nineteen of twenty-two services
+  // refused, and then reported them as "Skipped (No changes detected)" because
+  // firebase-tools records the uploaded source as current even when the
+  // revision never became ready. Deploys stopped shipping code and said so only
+  // in the middle of the log.
+  //
+  // A second region comes with its own allocation and, more to the point, with
+  // no stale revisions still holding reservations from failed attempts.
+  //
+  // It is the same 20,000 there, though — this buys a clean region, not a
+  // bigger one. Twenty-odd services at maxInstances 6 will fill us-east1 the
+  // same way in time, and the fix at that point is the ceiling below, not a
+  // third region.
+  region: "us-east1",
   cors: true,
   // Cloud Run charges the regional CPU quota by what a service is *allowed* to
   // scale to — cpu × maxInstances — not by what it actually uses. Left at the
@@ -1464,19 +1484,9 @@ export const firefliesMeetings = onCall(
 export const meetingDigestSchedule = onSchedule(
   {
     ...commonOpts,
-    // Deliberately NOT us-central1, where every other function lives.
-    //
-    // Cloud Run's CPU allocation quota is per project *per region*, and
-    // us-central1 is full: the quota there is 20,000 milli vCPU, Google will
-    // not raise it for this project ("not eligible for a quota increase at
-    // this time"), and the twenty-two services already there consume it. A
-    // second region comes with its own allocation, untouched.
-    //
-    // Nothing about this job wants a particular region. It runs on a timer and
-    // talks to Firestore, Fireflies, the LLM and SMTP — all of which are
-    // reached the same way from anywhere. There is no user waiting on it, so
-    // the extra milliseconds of cross-region Firestore latency are irrelevant.
-    region: "us-east1",
+    // Region comes from commonOpts now. This used to name us-east1 explicitly,
+    // back when it was the only thing here escaping a full us-central1; the
+    // rest of the codebase has since followed it.
     schedule: "0,30 9,22 * * *",
     timeZone: DIGEST_ZONE,
     secrets: [FIREFLIES_API_KEY, LLM_API_KEY, OPENAI_API_KEY, SMTP_PASS, CEIPAL_PASSWORD],

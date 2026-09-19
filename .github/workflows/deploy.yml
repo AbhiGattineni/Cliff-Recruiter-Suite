@@ -94,7 +94,7 @@ jobs:
       - name: Build web app
         run: npx vite build
         env:
-          VITE_FUNCTIONS_REGION: us-central1
+          VITE_FUNCTIONS_REGION: us-east1
 
       - name: Install functions deps
         working-directory: functions
@@ -213,19 +213,38 @@ jobs:
       # request.auth itself and refuses anonymous callers, and this is already
       # the binding every other function in the project has. Adding it is
       # idempotent, so this just keeps them all in the same state.
+      # `always()`, and not for tidiness.
+      #
+      # This step was skipped on every run where the deploy step went red, which
+      # is every run for days — and it is the step that makes a NEWLY CREATED
+      # callable reachable at all. Moving regions creates every function fresh,
+      # so a skip here would leave the whole app 403ing with the deploy looking
+      # like it had only failed on the scheduler. It has to run whenever
+      # functions may have been created, which means whether or not the deploy
+      # step was happy with itself.
       - name: Ensure callables are publicly invokable
+        if: always()
         run: |
           set -uo pipefail
-          for fn in $(grep -oP '^export const \K\w+(?= = onCall)' functions/src/index.ts | sort -u); do
-            svc=$(echo "$fn" | tr '[:upper:]' '[:lower:]')
-            if gcloud run services get-iam-policy "$svc" --region us-central1 --project cliff-services \
-                 --format=json 2>/dev/null | grep -q '"allUsers"'; then
-              echo "ok       $fn"
-            else
-              echo "MISSING  $fn — granting run.invoker to allUsers"
-              gcloud run services add-iam-policy-binding "$svc" \
-                --region us-central1 --project cliff-services \
-                --member allUsers --role roles/run.invoker --quiet \
-                && echo "fixed    $fn" || echo "FAILED   $fn (needs run.setIamPolicy on the deploy account)"
-            fi
+          # Both regions: us-east1 is where they live now, us-central1 is where
+          # they used to, and a half-finished move leaves some in each. Checking
+          # a region that has none of them just prints "gone" and costs nothing.
+          for region in us-east1 us-central1; do
+            echo "== $region"
+            for fn in $(grep -oP '^export const \K\w+(?= = onCall)' functions/src/index.ts | sort -u); do
+              svc=$(echo "$fn" | tr '[:upper:]' '[:lower:]')
+              policy=$(gcloud run services get-iam-policy "$svc" --region "$region" --project cliff-services \
+                         --format=json 2>/dev/null || true)
+              if [ -z "$policy" ]; then
+                echo "gone     $fn"
+              elif echo "$policy" | grep -q '"allUsers"'; then
+                echo "ok       $fn"
+              else
+                echo "MISSING  $fn — granting run.invoker to allUsers"
+                gcloud run services add-iam-policy-binding "$svc" \
+                  --region "$region" --project cliff-services \
+                  --member allUsers --role roles/run.invoker --quiet \
+                  && echo "fixed    $fn" || echo "FAILED   $fn (needs run.setIamPolicy on the deploy account)"
+              fi
+            done
           done

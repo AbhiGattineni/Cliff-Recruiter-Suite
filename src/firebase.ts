@@ -19,7 +19,7 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || undefined,
 };
 
-const region = import.meta.env.VITE_FUNCTIONS_REGION ?? "us-central1";
+const region = import.meta.env.VITE_FUNCTIONS_REGION ?? "us-east1";
 
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);

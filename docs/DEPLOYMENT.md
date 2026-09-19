@@ -84,10 +84,22 @@ firebase emulators:start
 ## Regional CPU quota
 
 The constraint that shapes this project's backend. Cloud Run's **Total CPU
-allocation, in milli vCPU, per project per region** in `us-central1` is
-**20,000** (= 20 vCPU), and Google will not raise it: the console answers a
-request with *"Based on your service usage history, you are not eligible for a
-quota increase at this time."*
+allocation, in milli vCPU, per project per region** is **20,000** (= 20 vCPU),
+and Google will not raise it: the console answers a request with *"Based on your
+service usage history, you are not eligible for a quota increase at this time."*
+
+**The functions live in `us-east1`.** `us-central1` filled up and stayed full,
+and a deploy needs headroom for each new revision to run beside the old one
+until traffic moves — so deploys stopped landing. Worse, they stopped landing
+*quietly*: a refused revision leaves firebase-tools recording the uploaded
+source as current, so the next pass reports "Skipped (No changes detected)" and
+a build that shipped nothing looks like a build that shipped everything.
+
+Note what the move did and did not buy. `us-east1` has the **same 20,000**, so
+this is a clean region, not a bigger one — it has no stale revisions from failed
+attempts holding reservations. Twenty-odd services at `maxInstances: 6` will
+fill it the same way in time. When that happens the answer is the ceiling
+(point 1 below), not a third region.
 
 Cloud Run reserves `cpu x maxInstances` for a service whether or not a request
 ever arrives, so the cost of a function is its **ceiling, not its traffic**.
