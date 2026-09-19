@@ -8,7 +8,7 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as logger from "firebase-functions/logger";
 import { defineSecret } from "firebase-functions/params";
 import { listMeetings, getMeeting } from "./fireflies.js";
-import { runDigest } from "./digest.js";
+import { runDigest, buildDigest } from "./digest.js";
 import { readMailConfig, mailConfigured, mailMissing, mailProvider } from "./mail.js";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
@@ -1337,7 +1337,9 @@ export const consultantOps = onCall(
 export const firefliesMeetings = onCall(
   {
     ...commonOpts,
-    secrets: [FIREFLIES_API_KEY, LLM_API_KEY, OPENAI_API_KEY, SMTP_PASS],
+    // CEIPAL_PASSWORD is here for the digest's recruiter-activity table, which
+    // reads the same submissions and active-jobs reports the dashboard does.
+    secrets: [FIREFLIES_API_KEY, LLM_API_KEY, OPENAI_API_KEY, SMTP_PASS, CEIPAL_PASSWORD],
     timeoutSeconds: 300,
     // Smaller than the shared ceiling on purpose: this is an admin/manager
     // read that a handful of people open a few times a day, and two instances
@@ -1353,14 +1355,18 @@ export const firefliesMeetings = onCall(
     requireRole(profile, ["admin", "manager"]);
 
     const apiKey = FIREFLIES_API_KEY.value();
-    if (!apiKey) {
+    const action = String(request.data?.action ?? "list");
+
+    // Every action but the preview is about meetings, so they need the key.
+    // The preview renders the recruiter-activity half too, and that half comes
+    // from Ceipal — worth showing even when Fireflies is unreachable.
+    if (!apiKey && action !== "previewDigest") {
       throw new HttpsError(
         "failed-precondition",
         "Fireflies isn't connected yet. Set the FIREFLIES_API_KEY secret and redeploy."
       );
     }
 
-    const action = String(request.data?.action ?? "list");
     try {
       if (action === "list") {
         const limit = Number(request.data?.limit) || 25;
@@ -1396,6 +1402,7 @@ export const firefliesMeetings = onCall(
           zone: DIGEST_ZONE,
           firefliesKey: apiKey,
           llm: resolveLlm("ollama", ""),
+          ceipalPassword: CEIPAL_PASSWORD.value(),
           mail,
           // A test send goes to whoever asked for it, so trying it out never
           // mails the whole list.
@@ -1405,6 +1412,26 @@ export const firefliesMeetings = onCall(
         // which one actually carried the message. With two configured paths,
         // "it sent" is not enough to tell you what you just tested.
         return { ok: true, provider: mailProvider(mail), ...result };
+      }
+      if (action === "previewDigest") {
+        // Admin only, like the send: this renders transcript content, and the
+        // only difference between previewing and sending is the mailbox.
+        requireRole(profile, ["admin"]);
+
+        const when = new Date();
+        const back = Number(request.data?.daysAgo);
+        when.setDate(when.getDate() - (Number.isFinite(back) ? back : 1));
+
+        // buildDigest, not a re-implementation of it: the preview is the mail.
+        const content = await buildDigest({
+          dayISO: dayISO(when, DIGEST_ZONE),
+          dayLabel: dayLabel(when, DIGEST_ZONE),
+          zone: DIGEST_ZONE,
+          firefliesKey: apiKey,
+          llm: resolveLlm("ollama", ""),
+          ceipalPassword: CEIPAL_PASSWORD.value(),
+        });
+        return { ok: true, ...content };
       }
       if (action === "get") {
         const id = String(request.data?.id ?? "").trim();
@@ -1452,7 +1479,7 @@ export const meetingDigestSchedule = onSchedule(
     region: "us-east1",
     schedule: "0,30 9,22 * * *",
     timeZone: DIGEST_ZONE,
-    secrets: [FIREFLIES_API_KEY, LLM_API_KEY, OPENAI_API_KEY, SMTP_PASS],
+    secrets: [FIREFLIES_API_KEY, LLM_API_KEY, OPENAI_API_KEY, SMTP_PASS, CEIPAL_PASSWORD],
     timeoutSeconds: 540,
     memory: "512MiB",
     // A scheduled job has exactly one caller and no burst to absorb.
@@ -1500,6 +1527,7 @@ export const meetingDigestSchedule = onSchedule(
         zone: DIGEST_ZONE,
         firefliesKey,
         llm: resolveLlm("ollama", ""),
+        ceipalPassword: CEIPAL_PASSWORD.value(),
         mail,
       });
       logger.info("meetingDigest", { hhmm, back, provider: mailProvider(mail), ...result });
