@@ -114,6 +114,26 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Digest settings: who gets the daily meeting email, and whether it runs.
+    //
+    // Written straight from the browser rather than through a callable, on the
+    // same reasoning as `holidays` above: the check is entirely "is this person
+    // an admin", which is what these rules are for, and a whole Cloud Run
+    // service to restate it would cost regional CPU quota this project has run
+    // out of twice.
+    //
+    // Staff may read it so Preferences can show the current state; only an
+    // admin may change who receives transcript summaries by email.
+    match /appSettings/{key} {
+      allow get: if isStaff();
+      allow list: if isStaff();
+      allow create, update: if myRole() == "admin"
+        && request.resource.data.recipients is list
+        && request.resource.data.recipients.size() <= 25
+        && request.resource.data.enabled is bool;
+      allow delete: if false;
+    }
+
     // Signup OTP records — written/read only by Cloud Functions (the admin SDK
     // bypasses these rules). Clients must never touch them.
     match /signupOtps/{emailKey} {

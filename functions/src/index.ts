@@ -4,8 +4,12 @@
 //   - parseResume({ resumeText, jobDescription }): LLM fit assessment (auth required).
 
 import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onSchedule } from "firebase-functions/v2/scheduler";
+import * as logger from "firebase-functions/logger";
 import { defineSecret } from "firebase-functions/params";
 import { listMeetings, getMeeting } from "./fireflies.js";
+import { runDigest } from "./digest.js";
+import { smtpConfigured, smtpMissing } from "./mail.js";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
@@ -60,6 +64,26 @@ const FIREFLIES_API_KEY = defineSecret("FIREFLIES_API_KEY");
  * calls is a report, not a briefing.
  */
 const MAX_BRIEF_MEETINGS = 10;
+
+const SMTP_PASS = defineSecret("SMTP_PASS");
+
+/** The digest reports in this zone, and "today" means a day in it. */
+const DIGEST_ZONE = "America/New_York";
+
+/** yyyy-MM-dd for `date` in `zone`. en-CA is already that shape. */
+function dayISO(date: Date, zone: string): string {
+  return date.toLocaleDateString("en-CA", { timeZone: zone });
+}
+
+function dayLabel(date: Date, zone: string): string {
+  return date.toLocaleDateString("en-US", {
+    timeZone: zone,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
 
 const commonOpts = {
   region: "us-central1",
@@ -1312,8 +1336,8 @@ export const consultantOps = onCall(
 export const firefliesMeetings = onCall(
   {
     ...commonOpts,
-    secrets: [FIREFLIES_API_KEY],
-    timeoutSeconds: 60,
+    secrets: [FIREFLIES_API_KEY, LLM_API_KEY, OPENAI_API_KEY, SMTP_PASS],
+    timeoutSeconds: 300,
     // Smaller than the shared ceiling on purpose: this is an admin/manager
     // read that a handful of people open a few times a day, and two instances
     // is already ~160 concurrent requests.
@@ -1341,6 +1365,43 @@ export const firefliesMeetings = onCall(
         const limit = Number(request.data?.limit) || 25;
         return { ok: true, meetings: await listMeetings(apiKey, limit) };
       }
+      if (action === "sendDigest") {
+        // Admin only, and narrower than reading a meeting: this one puts
+        // transcript content into someone's inbox, where the app's access
+        // rules stop applying.
+        requireRole(profile, ["admin"]);
+
+        const smtpPassword = SMTP_PASS.value();
+        if (!smtpConfigured(smtpPassword)) {
+          throw new HttpsError(
+            "failed-precondition",
+            `Email isn't configured — missing ${smtpMissing(smtpPassword).join(", ")}.`
+          );
+        }
+
+        // Defaults to yesterday, which is the window the 9am run covers and
+        // the one most likely to have meetings in it when someone is testing.
+        const when = new Date();
+        const back = Number(request.data?.daysAgo);
+        when.setDate(when.getDate() - (Number.isFinite(back) ? back : 1));
+
+        const to = Array.isArray(request.data?.to)
+          ? (request.data.to as unknown[]).map((x) => String(x ?? "").trim()).filter(Boolean)
+          : [];
+
+        const result = await runDigest({
+          dayISO: dayISO(when, DIGEST_ZONE),
+          dayLabel: dayLabel(when, DIGEST_ZONE),
+          zone: DIGEST_ZONE,
+          firefliesKey: apiKey,
+          llm: resolveLlm("ollama", ""),
+          smtpPassword,
+          // A test send goes to whoever asked for it, so trying it out never
+          // mails the whole list.
+          recipientsOverride: to.length > 0 ? to : [profile.email],
+        });
+        return { ok: true, ...result };
+      }
       if (action === "get") {
         const id = String(request.data?.id ?? "").trim();
         if (!id) throw new HttpsError("invalid-argument", "A meeting id is required.");
@@ -1356,6 +1417,79 @@ export const firefliesMeetings = onCall(
       // Surface Fireflies' own wording — "invalid api key", "rate limited" — so
       // the page can say what is actually wrong instead of "internal".
       throw new HttpsError("unavailable", e instanceof Error ? e.message : "Fireflies request failed.");
+    }
+  }
+);
+
+// ---- The daily meeting digest ---------------------------------------------
+// One scheduled service, not two, and the cron is odd for that reason.
+//
+// The digest goes out twice: at 22:30 for the day just finished, and at 09:00
+// the next morning with the same content, for anyone who missed the late one.
+// Cron cannot express "22:30 and 09:00" in a single expression — the minute
+// differs per hour — so this fires four times and two of those do nothing.
+// Four no-op invocations a day cost nothing; a second Cloud Run service costs
+// reserved CPU in a region this project has already been refused quota in.
+export const meetingDigestSchedule = onSchedule(
+  {
+    ...commonOpts,
+    schedule: "0,30 9,22 * * *",
+    timeZone: DIGEST_ZONE,
+    secrets: [FIREFLIES_API_KEY, LLM_API_KEY, OPENAI_API_KEY, SMTP_PASS],
+    timeoutSeconds: 540,
+    memory: "512MiB",
+    // A scheduled job has exactly one caller and no burst to absorb.
+    maxInstances: 1,
+    retryCount: 0,
+  },
+  async () => {
+    const now = new Date();
+    const hhmm = now.toLocaleTimeString("en-GB", {
+      timeZone: DIGEST_ZONE,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+
+    // Which of the four firings this is decides which day is reported.
+    let back: number;
+    if (hhmm === "22:30") back = 0; // the day that is ending
+    else if (hhmm === "09:00") back = 1; // yesterday, again, for the morning
+    else {
+      logger.info(`meetingDigest: ${hhmm} is not a send time — nothing to do.`);
+      return;
+    }
+
+    const smtpPassword = SMTP_PASS.value();
+    if (!smtpConfigured(smtpPassword)) {
+      // Deliberately not thrown: a missing setting is not an incident, and an
+      // alert that fires four times a day is an alert nobody reads.
+      logger.warn(`meetingDigest: skipped — missing ${smtpMissing(smtpPassword).join(", ")}.`);
+      return;
+    }
+    const firefliesKey = FIREFLIES_API_KEY.value();
+    if (!firefliesKey) {
+      logger.warn("meetingDigest: skipped — FIREFLIES_API_KEY is not set.");
+      return;
+    }
+
+    const when = new Date();
+    when.setDate(when.getDate() - back);
+
+    try {
+      const result = await runDigest({
+        dayISO: dayISO(when, DIGEST_ZONE),
+        dayLabel: dayLabel(when, DIGEST_ZONE),
+        zone: DIGEST_ZONE,
+        firefliesKey,
+        llm: resolveLlm("ollama", ""),
+        smtpPassword,
+      });
+      logger.info("meetingDigest", { hhmm, back, ...result });
+    } catch (e) {
+      // This one IS worth surfacing: the schedule fired, everything was
+      // configured, and the send still failed.
+      logger.error("meetingDigest failed", { hhmm, back, error: e instanceof Error ? e.message : String(e) });
     }
   }
 );

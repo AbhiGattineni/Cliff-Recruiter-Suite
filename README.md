@@ -144,6 +144,7 @@ Everything you must fill in is marked `PLACEHOLDER_...`:
 | SMTP host / port / user / from | `functions/.env` (`SMTP_*`) |
 | SMTP password | secret `SMTP_PASS` |
 | Allowed signup domain | `functions/.env` → `ALLOWED_EMAIL_DOMAIN` (default `cliff-services.com`) |
+| Fireflies API key | secret `FIREFLIES_API_KEY` (Meetings tab + daily digest) |
 
 ---
 
