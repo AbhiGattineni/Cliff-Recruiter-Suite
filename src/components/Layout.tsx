@@ -18,6 +18,7 @@ const NAV = [
   { to: "/candidate-pool", icon: "👥", label: "Candidate Pool" },
   { to: "/timesheets", icon: "⏱️", label: "Timesheets" },
   { to: "/consultants", icon: "🧾", label: "Consultants" },
+  { to: "/meetings", icon: "🎙️", label: "Meetings" },
   { to: "/preferences", icon: "⚙️", label: "Preferences" },
 ];
 

@@ -860,6 +860,46 @@ table.data th.colf-th { padding-right: 0.35rem; }
   .login-card { padding: 1.5rem 1.25rem; }
 }
 
+/* ---------- Collapsed diagnostics ---------- */
+/* Attached to an .alert, so it inherits that alert's colour rather than
+   introducing a second one for the same problem. */
+.err-detail { margin-top: 0.5rem; }
+.err-detail > summary {
+  cursor: pointer; font-size: 0.8rem; font-weight: 600; opacity: 0.85;
+  user-select: none;
+}
+.err-detail > summary:hover { opacity: 1; }
+.err-detail pre {
+  margin: 0.45rem 0 0; padding: 0.55rem 0.7rem; max-height: 320px; overflow: auto;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  font-size: 0.76rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
+  color: var(--ink);
+}
+
+/* ---------- Meeting transcript ---------- */
+/* A long transcript is read, not scanned: speaker and timecode sit in a narrow
+   fixed gutter so the text keeps one left edge down the whole conversation,
+   rather than restarting at a different indent under every name. */
+.transcript { display: flex; flex-direction: column; gap: 0.15rem; }
+.transcript-line {
+  display: grid; grid-template-columns: 140px 1fr; gap: 0.75rem;
+  padding: 0.4rem 0.5rem; border-radius: 8px;
+}
+.transcript-line:hover { background: var(--hover); }
+.transcript-who { display: flex; flex-direction: column; min-width: 0; }
+.transcript-speaker {
+  font-size: 0.78rem; font-weight: 700; color: var(--ink-strong);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.transcript-time { font-size: 0.7rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.transcript-text { margin: 0; font-size: 0.9rem; line-height: 1.6; overflow-wrap: anywhere; }
+
+@media (max-width: 640px) {
+  /* The gutter costs more than it earns once the text column is this narrow. */
+  .transcript-line { grid-template-columns: 1fr; gap: 0.1rem; }
+  .transcript-who { flex-direction: row; align-items: baseline; gap: 0.45rem; }
+}
+
 /* ---------- Theme toggle ---------- */
 .theme-toggle {
   display: inline-flex; align-items: center; justify-content: center;

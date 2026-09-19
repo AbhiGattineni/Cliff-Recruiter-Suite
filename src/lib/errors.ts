@@ -88,3 +88,26 @@ export function friendlyError(err: unknown): string {
   const cleaned = clean(rawMessage);
   return cleaned || "Something went wrong. Please try again.";
 }
+
+/**
+ * The same message, plus the machine-readable bits underneath it.
+ *
+ * `friendlyError` deliberately hides the code and any server-supplied details,
+ * which is right for a recruiter mid-task and wrong for whoever is trying to
+ * work out why an integration is failing. Pages that talk to a third-party API
+ * show this behind a "technical details" toggle so a report can be copied
+ * rather than retyped from memory.
+ */
+export function errorDetail(err: unknown): { message: string; code: string; raw: string } {
+  const e = err as { code?: string; message?: string; details?: unknown };
+  return {
+    message: friendlyError(err),
+    code: (e?.code ?? "").toString(),
+    raw: [
+      (e?.message ?? String(err)).toString(),
+      e?.details == null ? "" : `details: ${JSON.stringify(e.details, null, 2)}`,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  };
+}
