@@ -128,48 +128,75 @@ jobs:
       - name: Deploy hosting + Firestore rules
         run: npx firebase-tools@13 deploy --only hosting,firestore:rules --project cliff-services --non-interactive --force
 
-      # Two passes, for the same quota reason.
+      # Deployed in batches, because of the regional CPU quota.
       #
-      # The regional CPU quota is spent on the ceiling each service is allowed
-      # to scale to, so a deploy that lowers those ceilings frees the headroom a
-      # *new* function needs — but only once it has landed. Doing it in one pass
-      # is a chicken-and-egg: the new function is created in the same breath
-      # that would have made room for it, and fails.
+      # Cloud Run spends that quota on the ceiling each service is allowed to
+      # scale to, and an update runs a new revision beside the old one until
+      # traffic moves — so a deploy needs headroom for a second copy of
+      # everything it touches at once.
       #
-      # So refresh what is already deployed first, then deploy the lot. The
-      # second pass is a no-op for anything the first one already settled, and
-      # if the listing fails it simply falls back to a single ordinary deploy.
+      # The old shape here was two whole-codebase passes. It hid a failure
+      # rather than avoiding one: a run where nineteen of twenty-two services
+      # were refused on quota in pass 1 then reported every one of them as
+      # "Skipped (No changes detected)" in pass 2, because firebase-tools
+      # records the source as current even when the revision never became
+      # ready. A red build that shipped nothing looked almost identical to a
+      # red build that shipped everything but the scheduler.
       - name: Deploy Cloud Functions
         run: |
-          # No `set -e`: discovering what is already deployed is an optimisation,
-          # and a failure in it must not stop the deploy. It did once — the
-          # listing exited non-zero, pipefail propagated it, and the step died in
-          # two seconds having printed nothing at all, with the fallback this
-          # comment promises never reached. Pass 2 below is the command whose
-          # exit status the step is judged on, because it is the one that has to
-          # work.
+          # No `set -e`: this step runs several deploys on purpose and decides
+          # its own exit status at the end, from what actually failed.
           set -uo pipefail
           in_source=$(grep -oP '^export const \K\w+(?= = onCall)' functions/src/index.ts | sort -u || true)
           echo "In source: $(echo "$in_source" | tr '\n' ' ')"
 
-          deployed=$(npx firebase-tools@13 functions:list --project cliff-services --json 2>/dev/null \
-            | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{for(const f of JSON.parse(s).result||[])if(f.id)console.log(f.id)}catch{}})' \
-            | sort -u || true)
-          if [ -z "$deployed" ]; then
-            echo "Could not list deployed functions — skipping pass 1 and deploying everything in one go."
-          fi
+          # Deploy in small batches, not all at once.
+          #
+          # Cloud Run charges the regional CPU quota by what a service may scale
+          # to (cpu x maxInstances), and an update runs its new revision beside
+          # the old one until traffic moves. Deploying twenty-two services in
+          # one command therefore asks the region for a second copy of nearly
+          # everything at the same moment, and us-central1 does not have that
+          # much headroom: one run had nineteen of twenty-two refused with
+          # "Quota exceeded for total allowable CPU per project per region".
+          #
+          # A batch of four needs headroom for four overlapping revisions
+          # instead of twenty-two, and each batch's old revisions retire before
+          # the next starts. The sleep gives that retirement a moment to
+          # actually free the reservation.
+          #
+          # This is also why the step cannot be judged on one command's exit
+          # code any more: it runs several, so failures are counted and
+          # reported at the end.
+          batch=()
+          failed=""
+          flush() {
+            [ ${#batch[@]} -eq 0 ] && return 0
+            local only
+            only=$(printf 'functions:%s,' "${batch[@]}" | sed 's/,$//')
+            echo "--- deploying: $only"
+            if ! npx firebase-tools@13 deploy --only "$only" --project cliff-services --non-interactive --force; then
+              failed="$failed ${batch[*]}"
+            fi
+            batch=()
+            sleep 20
+          }
 
-          only=$(comm -12 <(echo "$in_source") <(echo "$deployed") | sed 's/^/functions:/' | paste -sd, - || true)
-          if [ -n "$only" ]; then
-            # Not fatal: pass 1 exists only to free quota, and it is expected to
-            # report a failure for anything already wedged by the shortage it is
-            # there to clear.
-            echo "Pass 1 — already deployed: $only"
-            npx firebase-tools@13 deploy --only "$only" --project cliff-services --non-interactive --force || true
-          fi
+          for fn in $in_source; do
+            batch+=("$fn")
+            [ ${#batch[@]} -ge 4 ] && flush
+          done
+          flush
 
-          echo "Pass 2 — all functions"
-          npx firebase-tools@13 deploy --only functions --project cliff-services --non-interactive --force
+          # The scheduled functions are not onCall, so they are not in
+          # `in_source`; this catches them and anything else the grep missed.
+          echo "--- deploying anything left (schedules, triggers)"
+          npx firebase-tools@13 deploy --only functions --project cliff-services --non-interactive --force || failed="$failed <final-pass>"
+
+          if [ -n "$failed" ]; then
+            echo "::error::Functions that did not deploy:$failed"
+            exit 1
+          fi
 
       # A callable is a Cloud Run service, and the browser reaches it as an
       # anonymous caller — the user's identity travels in the request body, not
