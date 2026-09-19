@@ -8,7 +8,7 @@
 import { getFirestore } from "firebase-admin/firestore";
 import { listMeetings, getMeeting, Meeting } from "./fireflies.js";
 import { briefMeetings, BriefSource, MeetingBrief, LlmConfig } from "./llm.js";
-import { sendMail } from "./mail.js";
+import { sendMail, MailConfig } from "./mail.js";
 
 /** Where the recipient list lives. Managed by admins in Preferences. */
 export const SETTINGS_DOC = "appSettings/meetingDigest";
@@ -176,7 +176,7 @@ export async function runDigest(opts: {
   zone: string;
   firefliesKey: string;
   llm: LlmConfig;
-  smtpPassword: string;
+  mail: MailConfig;
   /** Overrides the stored list. Used by the admin test send. */
   recipientsOverride?: string[];
 }): Promise<DigestResult> {
@@ -195,7 +195,7 @@ export async function runDigest(opts: {
 
   if (todays.length === 0) {
     const content = emptyDigest(opts.dayLabel);
-    await sendMail({ to: recipients, ...content }, opts.smtpPassword);
+    await sendMail({ to: recipients, ...content }, opts.mail);
     return { sent: true, meetingCount: 0, recipients: recipients.length };
   }
 
@@ -225,7 +225,7 @@ export async function runDigest(opts: {
 
   const { brief, truncated } = await briefMeetings(sources, opts.llm);
   const content = render(opts.dayLabel, todays, brief, truncated, opts.llm.model, opts.zone);
-  await sendMail({ to: recipients, ...content }, opts.smtpPassword);
+  await sendMail({ to: recipients, ...content }, opts.mail);
 
   return { sent: true, meetingCount: todays.length, recipients: recipients.length };
 }

@@ -9,7 +9,7 @@ import * as logger from "firebase-functions/logger";
 import { defineSecret } from "firebase-functions/params";
 import { listMeetings, getMeeting } from "./fireflies.js";
 import { runDigest } from "./digest.js";
-import { smtpConfigured, smtpMissing } from "./mail.js";
+import { readMailConfig, mailConfigured, mailMissing, mailProvider } from "./mail.js";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
@@ -1372,11 +1372,11 @@ export const firefliesMeetings = onCall(
         // rules stop applying.
         requireRole(profile, ["admin"]);
 
-        const smtpPassword = SMTP_PASS.value();
-        if (!smtpConfigured(smtpPassword)) {
+        const mail = await readMailConfig(SMTP_PASS.value());
+        if (!mailConfigured(mail)) {
           throw new HttpsError(
             "failed-precondition",
-            `Email isn't configured — missing ${smtpMissing(smtpPassword).join(", ")}.`
+            `Email isn't configured — missing ${mailMissing(mail).join(", ")}.`
           );
         }
 
@@ -1396,12 +1396,15 @@ export const firefliesMeetings = onCall(
           zone: DIGEST_ZONE,
           firefliesKey: apiKey,
           llm: resolveLlm("ollama", ""),
-          smtpPassword,
+          mail,
           // A test send goes to whoever asked for it, so trying it out never
           // mails the whole list.
           recipientsOverride: to.length > 0 ? to : [profile.email],
         });
-        return { ok: true, ...result };
+        // The provider goes back to the caller so the Preferences page can say
+        // which one actually carried the message. With two configured paths,
+        // "it sent" is not enough to tell you what you just tested.
+        return { ok: true, provider: mailProvider(mail), ...result };
       }
       if (action === "get") {
         const id = String(request.data?.id ?? "").trim();
@@ -1474,11 +1477,11 @@ export const meetingDigestSchedule = onSchedule(
       return;
     }
 
-    const smtpPassword = SMTP_PASS.value();
-    if (!smtpConfigured(smtpPassword)) {
+    const mail = await readMailConfig(SMTP_PASS.value());
+    if (!mailConfigured(mail)) {
       // Deliberately not thrown: a missing setting is not an incident, and an
       // alert that fires four times a day is an alert nobody reads.
-      logger.warn(`meetingDigest: skipped — missing ${smtpMissing(smtpPassword).join(", ")}.`);
+      logger.warn(`meetingDigest: skipped — missing ${mailMissing(mail).join(", ")}.`);
       return;
     }
     const firefliesKey = FIREFLIES_API_KEY.value();
@@ -1497,9 +1500,9 @@ export const meetingDigestSchedule = onSchedule(
         zone: DIGEST_ZONE,
         firefliesKey,
         llm: resolveLlm("ollama", ""),
-        smtpPassword,
+        mail,
       });
-      logger.info("meetingDigest", { hhmm, back, ...result });
+      logger.info("meetingDigest", { hhmm, back, provider: mailProvider(mail), ...result });
     } catch (e) {
       // This one IS worth surfacing: the schedule fired, everything was
       // configured, and the send still failed.

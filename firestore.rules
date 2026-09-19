@@ -124,13 +124,42 @@ service cloud.firestore {
     //
     // Staff may read it so Preferences can show the current state; only an
     // admin may change who receives transcript summaries by email.
-    match /appSettings/{key} {
+    // Two settings documents with very different sensitivity, so they get a
+    // rule each rather than one shape that has to be true of both. There is
+    // deliberately no rule matching the collection itself: nothing lists
+    // appSettings, and a wildcard match would let a staff query sweep up the
+    // credentials document below.
+    match /appSettings/meetingDigest {
       allow get: if isStaff();
-      allow list: if isStaff();
       allow create, update: if myRole() == "admin"
         && request.resource.data.recipients is list
         && request.resource.data.recipients.size() <= 25
         && request.resource.data.enabled is bool;
+      allow delete: if false;
+    }
+
+    // The EmailJS credentials, private key included.
+    //
+    // Admins only, and unlike the digest settings that includes reading: this
+    // document is the ability to send email as Cliff Services, so a recruiter
+    // or manager having it would be a wider grant than anything the app gives
+    // them in the UI. The server reads it through the Admin SDK, which is not
+    // subject to these rules, so nothing here stands between the scheduled job
+    // and the key.
+    match /appSettings/emailjs {
+      allow get: if myRole() == "admin";
+      allow create, update: if myRole() == "admin"
+        && request.resource.data.keys().hasOnly(["serviceId", "templateId", "publicKey", "privateKey"])
+        && request.resource.data.serviceId is string
+        && request.resource.data.templateId is string
+        && request.resource.data.publicKey is string
+        && request.resource.data.privateKey is string
+        // Every one of these is an identifier well under this length. The cap
+        // is here so the document cannot be used as general-purpose storage.
+        && request.resource.data.serviceId.size() <= 200
+        && request.resource.data.templateId.size() <= 200
+        && request.resource.data.publicKey.size() <= 200
+        && request.resource.data.privateKey.size() <= 200;
       allow delete: if false;
     }
 

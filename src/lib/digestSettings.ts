@@ -54,20 +54,26 @@ export function looksLikeEmail(v: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
 }
 
+export interface SendNowResult {
+  sent: boolean;
+  reason?: string;
+  meetingCount: number;
+  recipients: number;
+  /** Which provider carried it. With two configured, "sent" alone is ambiguous. */
+  provider?: "emailjs" | "smtp" | "none";
+}
+
 /**
  * Send a digest immediately, to whoever asked for it.
  *
  * Runs the same code the schedule runs — a test that exercises a different
  * path proves nothing about the 22:30 job.
  */
-export async function sendDigestNow(
-  daysAgo: number,
-  to?: string[]
-): Promise<{ sent: boolean; reason?: string; meetingCount: number; recipients: number }> {
+export async function sendDigestNow(daysAgo: number, to?: string[]): Promise<SendNowResult> {
   ensureConfigured();
   const callable = httpsCallable<
     { action: string; daysAgo: number; to?: string[] },
-    { ok: boolean; sent: boolean; reason?: string; meetingCount: number; recipients: number }
+    SendNowResult & { ok: boolean }
   >(functions, "firefliesMeetings");
   const res = await callable({ action: "sendDigest", daysAgo, to });
   return res.data;
