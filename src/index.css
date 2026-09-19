@@ -876,6 +876,14 @@ table.data th.colf-th { padding-right: 0.35rem; }
   color: var(--ink);
 }
 
+/* ---------- Bulk-select action bar ---------- */
+.select-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.9rem;
+}
+table.data td input[type="checkbox"],
+table.data th input[type="checkbox"] { width: auto; margin: 0; cursor: pointer; }
+
 /* ---------- Meeting transcript ---------- */
 /* A long transcript is read, not scanned: speaker and timecode sit in a narrow
    fixed gutter so the text keeps one left edge down the whole conversation,

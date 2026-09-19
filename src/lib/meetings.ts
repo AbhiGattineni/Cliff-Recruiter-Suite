@@ -10,7 +10,7 @@
 
 import { httpsCallable } from "firebase/functions";
 import { functions } from "../firebase";
-import { ensureConfigured } from "./errors";
+import { ensureConfigured, AppError } from "./errors";
 
 export interface MeetingSummary {
   overview: string;
@@ -81,4 +81,60 @@ export function formatTimecode(startSec: number | null): string {
   const m = Math.floor(startSec / 60);
   const s = startSec % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+// ---------------------------------------------------------------------------
+// Briefing
+// ---------------------------------------------------------------------------
+
+export interface MeetingBrief {
+  overview: string;
+  themes: string[];
+  decisions: string[];
+  actionItems: Array<{ text: string; owner: string }>;
+  risks: string[];
+}
+
+export interface BriefResult {
+  brief: MeetingBrief;
+  /** How many of the selected transcripts had to be cut to fit the model. */
+  truncated: number;
+  meetingCount: number;
+  model: string;
+}
+
+/** Matches MAX_BRIEF_MEETINGS in functions/src/index.ts. */
+export const MAX_BRIEF_MEETINGS = 10;
+
+/**
+ * Brief a set of meetings.
+ *
+ * Only the ids go up. The function fetches the transcripts itself, so the
+ * browser never holds more than the one meeting a person has opened, and the
+ * text the model reads is the text Fireflies returned rather than whatever the
+ * client claimed it was.
+ */
+export async function briefMeetings(ids: string[]): Promise<BriefResult> {
+  ensureConfigured();
+  const callable = httpsCallable<
+    { action: string; ids: string[] },
+    {
+      ok: boolean;
+      error?: string;
+      brief: MeetingBrief;
+      truncated: number;
+      meetingCount: number;
+      model: string;
+    }
+  >(functions, "ai");
+  const res = await callable({ action: "briefMeetings", ids });
+  // The LLM cases report a model-side failure as ok:false rather than throwing,
+  // so an unhappy answer still carries its reason.
+  if (!res.data.ok) throw new AppError(res.data.error || "The briefing couldn't be generated.");
+  return {
+    brief: res.data.brief,
+    truncated: res.data.truncated ?? 0,
+    meetingCount: res.data.meetingCount ?? ids.length,
+    model: res.data.model ?? "",
+  };
 }

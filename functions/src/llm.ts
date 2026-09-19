@@ -584,3 +584,204 @@ export async function narrateAskResult(
   }
   return { text: text.slice(0, 800), usage };
 }
+
+// ---------------------------------------------------------------------------
+// Meeting brief
+// ---------------------------------------------------------------------------
+
+/** One meeting, flattened to what the model needs to read. */
+export interface BriefSource {
+  title: string;
+  date: string;
+  participants: string;
+  /** Fireflies' own summary, when it produced one. */
+  summary: string;
+  /** Speaker-prefixed lines, already joined. */
+  transcript: string;
+}
+
+export interface MeetingBrief {
+  overview: string;
+  themes: string[];
+  decisions: string[];
+  actionItems: Array<{ text: string; owner: string }>;
+  risks: string[];
+}
+
+/**
+ * How much transcript text the whole request may carry, in characters.
+ *
+ * Roughly 30k tokens at ~4 chars each, which leaves headroom under a 128k
+ * context after the system prompt and the reply. It is a character budget
+ * rather than a token count on purpose: tokenising server-side would mean
+ * shipping a tokeniser for a limit that only needs to be about right.
+ */
+const BRIEF_CHAR_BUDGET = 120_000;
+
+/**
+ * Share the budget across the selected meetings, giving away what the short
+ * ones don't use.
+ *
+ * A flat per-meeting cap would truncate a two-hour strategy call to the same
+ * length as a ten-minute standup and waste the difference. Two passes: hand
+ * everyone an equal share, then redistribute what the under-share meetings
+ * left behind to the ones that were cut.
+ */
+function fitToBudget(sources: BriefSource[]): { texts: string[]; truncated: number } {
+  const n = sources.length;
+  if (n === 0) return { texts: [], truncated: 0 };
+
+  const share = Math.floor(BRIEF_CHAR_BUDGET / n);
+  const lengths = sources.map((s) => s.transcript.length);
+  const spare = lengths.reduce((acc, len) => acc + Math.max(0, share - len), 0);
+  const overCount = lengths.filter((len) => len > share).length;
+  const bonus = overCount > 0 ? Math.floor(spare / overCount) : 0;
+
+  let truncated = 0;
+  const texts = sources.map((s, i) => {
+    const cap = lengths[i] > share ? share + bonus : share;
+    if (s.transcript.length <= cap) return s.transcript;
+    truncated += 1;
+    // Cut at a line boundary so the model never sees half a sentence
+    // attributed to the wrong speaker.
+    const cut = s.transcript.slice(0, cap);
+    const lastBreak = cut.lastIndexOf("\n");
+    return (lastBreak > cap * 0.5 ? cut.slice(0, lastBreak) : cut) + "\n[transcript truncated]";
+  });
+
+  return { texts, truncated };
+}
+
+function asStringList(v: unknown, limit = 12): string[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .map((x) => (typeof x === "string" ? x : ""))
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
+/**
+ * Summarise one or more meetings into a single brief.
+ *
+ * Unlike `narrateAskResult`, this one IS given the source material — there is
+ * no deterministic engine that can pre-compute what a conversation was about.
+ * So the prompt leans the other way: attribute nothing that was not said, and
+ * say when the transcripts do not answer something, rather than filling it in.
+ */
+export async function briefMeetings(
+  sources: BriefSource[],
+  config: LlmConfig
+): Promise<{ brief: MeetingBrief; usage: TokenUsage; truncated: number }> {
+  if (sources.length === 0) throw new Error("No meetings were provided to brief.");
+
+  const { apiKey, model } = config;
+  const url = `${config.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (apiKey && !apiKey.startsWith("PLACEHOLDER")) headers["authorization"] = `Bearer ${apiKey}`;
+
+  const { texts, truncated } = fitToBudget(sources);
+
+  const sys = [
+    "You brief a recruiting-agency manager on meetings they did not attend.",
+    "You are given transcripts. Use ONLY what is in them.",
+    "Never attribute a statement to someone who did not make it, and never infer an outcome that was not stated.",
+    "If the transcripts do not settle something, say so plainly instead of filling the gap.",
+    "Some transcripts are marked [transcript truncated]; treat the missing part as unknown, not as absent of content.",
+    "Write for someone with no context: name the client, role or person rather than saying 'they' or 'the call'.",
+    "Be specific and short. No preamble, no restating the question, no flattery.",
+    "",
+    "Return ONLY a JSON object with these keys:",
+    '{"overview": string, "themes": string[], "decisions": string[],',
+    ' "actionItems": [{"text": string, "owner": string}], "risks": string[]}',
+    "",
+    "overview: 2-4 sentences on what these meetings were about and where things stand.",
+    "themes: what came up repeatedly or mattered most. Empty array if nothing recurs.",
+    "decisions: what was actually decided. Empty array if nothing was.",
+    "actionItems: what someone committed to do. owner is the person's name, or \"\" if unassigned.",
+    "risks: problems, blockers or things at risk of slipping. Empty array if none were raised.",
+    "Output the JSON and nothing else.",
+  ].join("\n");
+
+  const user = sources
+    .map((s, i) =>
+      [
+        `## Meeting ${i + 1}: ${s.title}`,
+        s.date ? `Date: ${s.date}` : "",
+        s.participants ? `Participants: ${s.participants}` : "",
+        s.summary ? `Existing summary: ${s.summary}` : "",
+        "Transcript:",
+        texts[i] || "(no transcript text available)",
+      ]
+        .filter(Boolean)
+        .join("\n")
+    )
+    .join("\n\n---\n\n");
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model,
+      stream: false,
+      temperature: 0.2,
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: user },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new Error(`LLM brief request failed (${res.status}): ${t.slice(0, 300)}`);
+  }
+
+  const data = (await res.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    message?: { content?: string };
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+    prompt_eval_count?: number;
+    eval_count?: number;
+  };
+  const raw = data.choices?.[0]?.message?.content ?? data.message?.content ?? "";
+  if (!raw) throw new Error("The model returned an empty response.");
+
+  const promptTokens = data.usage?.prompt_tokens ?? data.prompt_eval_count ?? 0;
+  const completionTokens = data.usage?.completion_tokens ?? data.eval_count ?? 0;
+  const usage = computeUsage(model, Number(promptTokens) || 0, Number(completionTokens) || 0);
+  if (data.usage?.total_tokens) usage.totalTokens = Number(data.usage.total_tokens);
+
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = extractJson(raw) as Record<string, unknown>;
+  } catch {
+    // A model that ignored the JSON instruction still said something useful;
+    // keep it as the overview rather than failing the whole request.
+    parsed = { overview: raw.trim().slice(0, 2000) };
+  }
+
+  const actionItems = Array.isArray(parsed.actionItems)
+    ? parsed.actionItems
+        .map((x) => {
+          const o = (x ?? {}) as Record<string, unknown>;
+          return {
+            text: String(o.text ?? "").trim(),
+            owner: String(o.owner ?? "").trim(),
+          };
+        })
+        .filter((a) => a.text)
+        .slice(0, 20)
+    : [];
+
+  return {
+    brief: {
+      overview: String(parsed.overview ?? "").trim(),
+      themes: asStringList(parsed.themes),
+      decisions: asStringList(parsed.decisions),
+      actionItems,
+      risks: asStringList(parsed.risks),
+    },
+    usage,
+    truncated,
+  };
+}

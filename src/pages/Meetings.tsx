@@ -8,17 +8,20 @@
 // when a meeting is opened, so a long back-catalogue costs one small request
 // and the bodies of those conversations never sit in our database.
 
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { DateTime } from "luxon";
 import { useAuth } from "../context/AuthContext";
 import { errorDetail } from "../lib/errors";
 import {
   listMeetings,
   getMeeting,
+  briefMeetings,
   formatDuration,
   formatTimecode,
+  MAX_BRIEF_MEETINGS,
   Meeting,
+  BriefResult,
 } from "../lib/meetings";
 import Modal from "../components/Modal";
 import Pagination, { usePagination } from "../components/Pagination";
@@ -68,6 +71,74 @@ function attendees(m: Meeting): string[] {
     out.push(v);
   }
   return out;
+}
+
+/** A list section that simply isn't there when the model found nothing. */
+function BriefList({ title, items }: { title: string; items: string[] }) {
+  if (items.length === 0) return null;
+  return (
+    <>
+      <h3>{title}</h3>
+      <ul style={{ marginTop: 0 }}>
+        {items.map((x, i) => (
+          <li key={i}>{x}</li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+function BriefPanel({ result, onClose }: { result: BriefResult; onClose: () => void }) {
+  const b = result.brief;
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Brief — ${result.meetingCount} meeting${result.meetingCount === 1 ? "" : "s"}`}
+      wide
+    >
+      {result.truncated > 0 && (
+        <div className="alert warn">
+          {result.truncated === 1
+            ? "One transcript was too long to send in full and was cut short."
+            : `${result.truncated} transcripts were too long to send in full and were cut short.`}{" "}
+          The brief covers what fitted — brief fewer meetings at once for full coverage.
+        </div>
+      )}
+
+      {b.overview ? (
+        <p style={{ marginTop: 0 }}>{b.overview}</p>
+      ) : (
+        <p className="muted" style={{ marginTop: 0 }}>
+          The model returned no overview for these meetings.
+        </p>
+      )}
+
+      <BriefList title="Themes" items={b.themes} />
+      <BriefList title="Decisions" items={b.decisions} />
+
+      {b.actionItems.length > 0 && (
+        <>
+          <h3>Action items</h3>
+          <ul style={{ marginTop: 0 }}>
+            {b.actionItems.map((a, i) => (
+              <li key={i}>
+                {a.text}
+                {a.owner && <span className="muted"> — {a.owner}</span>}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      <BriefList title="Risks and blockers" items={b.risks} />
+
+      <p className="muted" style={{ fontSize: "0.78rem", marginTop: "1.25rem", marginBottom: 0 }}>
+        Written by {result.model || "the model"} from the transcripts. It can misread a
+        conversation — check anything you are about to act on against the transcript itself.
+      </p>
+    </Modal>
+  );
 }
 
 function MeetingDetail({
@@ -170,6 +241,8 @@ export default function Meetings() {
   const canSee = profile?.role === "admin" || profile?.role === "manager";
   const isAdmin = profile?.role === "admin";
   const [openId, setOpenId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [brief, setBrief] = useState<BriefResult | null>(null);
 
   const q = useQuery({
     queryKey: ["meetings"],
@@ -179,6 +252,36 @@ export default function Meetings() {
 
   const rows = q.data ?? [];
   const p = usePagination(rows, 25, "meetings");
+
+  // Selection survives paging, so the count is over everything ticked, not
+  // just what is currently on screen.
+  const selectedIds = useMemo(() => Array.from(selected), [selected]);
+  const tooMany = selectedIds.length > MAX_BRIEF_MEETINGS;
+
+  const briefQ = useMutation({
+    mutationFn: () => briefMeetings(selectedIds),
+    onSuccess: setBrief,
+  });
+
+  const toggle = (id: string) =>
+    setSelected((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  // The header box acts on the current page only — "select all" across pages
+  // you have not looked at is a good way to brief the wrong meetings.
+  const pageIds = p.pageItems.map((m) => m.id);
+  const allOnPage = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  const togglePage = () =>
+    setSelected((cur) => {
+      const next = new Set(cur);
+      if (allOnPage) pageIds.forEach((id) => next.delete(id));
+      else pageIds.forEach((id) => next.add(id));
+      return next;
+    });
 
   if (profileLoading && !profile) {
     return (
@@ -224,10 +327,58 @@ export default function Meetings() {
           </div>
         ) : (
           <>
+            <div className="select-bar">
+              <div>
+                {selectedIds.length === 0 ? (
+                  <span className="muted">Tick meetings to brief them together.</span>
+                ) : (
+                  <>
+                    <strong>{selectedIds.length}</strong> selected
+                    <button
+                      className="btn ghost"
+                      style={{ marginLeft: "0.6rem", padding: "0.25rem 0.7rem", fontSize: "0.8rem" }}
+                      onClick={() => setSelected(new Set())}
+                    >
+                      Clear
+                    </button>
+                  </>
+                )}
+              </div>
+              <button
+                className="btn"
+                disabled={selectedIds.length === 0 || tooMany || briefQ.isPending}
+                onClick={() => briefQ.mutate()}
+                title={
+                  tooMany
+                    ? `Select at most ${MAX_BRIEF_MEETINGS}`
+                    : "Summarise the selected meetings together"
+                }
+              >
+                {briefQ.isPending ? <span className="spinner" /> : "✨"} Brief selected
+              </button>
+            </div>
+
+            {tooMany && (
+              <div className="alert warn">
+                Up to {MAX_BRIEF_MEETINGS} meetings can be briefed at once — {selectedIds.length}{" "}
+                are selected. Each one is fetched in full before the model sees it, so a larger
+                batch is slow and expensive rather than impossible.
+              </div>
+            )}
+            {briefQ.isError && <ErrorPanel err={briefQ.error} />}
+
             <div className="table-wrap">
               <table className="data">
                 <thead>
                   <tr>
+                    <th style={{ width: 34 }}>
+                      <input
+                        type="checkbox"
+                        checked={allOnPage}
+                        onChange={togglePage}
+                        aria-label="Select every meeting on this page"
+                      />
+                    </th>
                     <th>Meeting</th>
                     <th>When</th>
                     <th>Length</th>
@@ -245,6 +396,16 @@ export default function Meetings() {
                         onClick={() => setOpenId(m.id)}
                         title="Open the transcript"
                       >
+                        {/* Stops the row's open-transcript click firing when the
+                            intent was to tick the box. */}
+                        <td onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={selected.has(m.id)}
+                            onChange={() => toggle(m.id)}
+                            aria-label={`Select ${m.title}`}
+                          />
+                        </td>
                         <td style={{ whiteSpace: "normal", maxWidth: 380 }}>{m.title}</td>
                         <td>{when(m.date)}</td>
                         <td>{formatDuration(m.durationMins)}</td>
@@ -283,6 +444,7 @@ export default function Meetings() {
       {openId && (
         <MeetingDetail id={openId} isAdmin={!!isAdmin} onClose={() => setOpenId(null)} />
       )}
+      {brief && <BriefPanel result={brief} onClose={() => setBrief(null)} />}
     </div>
   );
 }
