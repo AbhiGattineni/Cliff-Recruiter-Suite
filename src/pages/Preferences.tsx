@@ -4,6 +4,7 @@ import { getUseAI, setUseAI } from "../lib/preferences";
 import { getLlmUsageSummary } from "../lib/resume";
 import LlmUsagePanel from "../components/LlmUsagePanel";
 import RoleManagement from "../components/RoleManagement";
+import DigestSettings from "../components/DigestSettings";
 import { useAuth } from "../context/AuthContext";
 
 export default function Preferences() {
@@ -41,6 +42,8 @@ export default function Preferences() {
           AI is currently <strong>{useAI ? "ON" : "OFF"}</strong>. This setting is saved on this device.
         </p>
       </div>
+
+      <DigestSettings />
 
       <LlmUsagePanel summary={usageQ.data} />
 
