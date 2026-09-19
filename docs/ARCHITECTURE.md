@@ -10,16 +10,31 @@ Browser (React + Vite + TS)
   │  Firebase Auth (email/password — currently OPEN/optional)
   │  Firestore (reads: reports, configs)
   │  httpsCallable ──────────────► Cloud Functions (us-east1)    [secrets held here]
-  │                                    ├─ parseResume        → LLM (Ollama / OpenAI)
-  │                                    ├─ ceipalReport       → Ceipal Custom Reports API
-  │                                    ├─ saveResumeReport / listResumeReports
-  │                                    ├─ saveReportConfig / listReportConfigs / deleteReportConfig
-  │                                    ├─ logReportRun / dashboardStats
-  │                                    └─ requestSignupOtp / verifySignupOtp (auth, on hold)
+  │                                    ├─ ai                 → LLM (Ollama / OpenAI)
+  │                                    ├─ ceipalData         → Ceipal Custom Reports API
+  │                                    ├─ firefliesMeetings  → Fireflies transcripts + digest
+  │                                    ├─ consultantOps      → invites, assignments, timesheets
+  │                                    ├─ resumeReports / reportConfigs / timesheetOps / userOps
+  │                                    └─ dashboardStats / llmUsageSummary / linkedinLookup
+
+Eleven callables, not twenty-two. Most of the names above dispatch on an
+`action` field rather than existing as a service each — see "Why so few
+callables" below.
   │
   └─ The report transform + Excel build run in the BROWSER (ExcelJS), from either
      the Ceipal API JSON or an uploaded .xlsx.
 ```
+
+## Why so few callables
+A 2nd-gen function is a Cloud Run service, and Cloud Run reserves
+`cpu x maxInstances` for it whether or not a request ever arrives. The count of
+services — not the traffic — is what spends the region's CPU allocation, and
+that allocation filled `us-central1` completely and forced the whole backend to
+move. Merging related calls behind one `action` switch halved the count.
+
+`functions/test/callableWiring.test.ts` checks that every `httpsCallable` in the
+app names a callable that exists and sends an action it handles. TypeScript
+cannot: both are plain strings crossing a network boundary.
 
 ## Why Cloud Functions
 Ceipal and the LLM need secret credentials, and Ceipal blocks direct browser calls (CORS).

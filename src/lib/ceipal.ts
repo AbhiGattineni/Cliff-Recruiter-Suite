@@ -24,13 +24,16 @@ export async function fetchCeipalReport(
   opts: { refresh?: boolean } = {}
 ): Promise<unknown> {
   ensureConfigured();
-  const callable = httpsCallable<{ report: CeipalReportKey; refresh: boolean }, CeipalResponse>(
+  const callable = httpsCallable<
+    { action: string; report: CeipalReportKey; refresh: boolean },
+    CeipalResponse
+  >(
     functions,
-    "ceipalReport",
+    "ceipalData",
     // A forced refresh pulls every page from Ceipal — can take minutes.
     { timeout: 540_000 }
   );
-  const res = await callable({ report, refresh: opts.refresh === true });
+  const res = await callable({ action: "report", report, refresh: opts.refresh === true });
   const payload = res.data;
   if (!payload?.ok) {
     throw new Error(payload?.error || "Ceipal request failed.");

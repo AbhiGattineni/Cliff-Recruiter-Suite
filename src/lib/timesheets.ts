@@ -59,10 +59,10 @@ function rowToProfile(id: string, x: DocumentData): UserProfile {
 export async function ensureUserProfile(): Promise<UserProfile> {
   ensureConfigured();
   const callable = httpsCallable<
-    Record<string, never>,
+    { action: string },
     { ok: boolean; profile: UserProfile; serverNow?: number; today?: string }
-  >(functions, "ensureUserProfile");
-  const res = await callable({});
+  >(functions, "userOps");
+  const res = await callable({ action: "ensureProfile" });
   // Sync the app's clock to the server's while we're here — every timesheet
   // date is decided by it, and the local clock can be wrong or set wrongly.
   if (res.data.serverNow) setServerNow(res.data.serverNow);
@@ -85,11 +85,11 @@ export async function listUsers(): Promise<UserProfile[]> {
 
 export async function setUserRole(uid: string, role: Role): Promise<UserProfile> {
   ensureConfigured();
-  const callable = httpsCallable<{ uid: string; role: Role }, { ok: boolean; user: UserProfile }>(
+  const callable = httpsCallable<{ action: string; uid: string; role: Role }, { ok: boolean; user: UserProfile }>(
     functions,
-    "setUserRole"
+    "userOps"
   );
-  const res = await callable({ uid, role });
+  const res = await callable({ action: "setRole", uid, role });
   return res.data.user;
 }
 
@@ -160,10 +160,17 @@ export async function saveTimesheetEntry(
 ): Promise<TimesheetEntry> {
   ensureConfigured();
   const callable = httpsCallable<
-    { date: string; hours: number; workedOn: string; jobs: JobHours[]; forUid?: string },
+    { action: string; date: string; hours: number; workedOn: string; jobs: JobHours[]; forUid?: string },
     { ok: boolean; entry: TimesheetEntry }
-  >(functions, "saveTimesheetEntry");
-  const res = await callable({ date, hours, workedOn, jobs, ...(forUid ? { forUid } : {}) });
+  >(functions, "timesheetOps");
+  const res = await callable({
+    action: "saveEntry",
+    date,
+    hours,
+    workedOn,
+    jobs,
+    ...(forUid ? { forUid } : {}),
+  });
   return res.data.entry;
 }
 
@@ -257,10 +264,10 @@ export async function requestLeave(
 ): Promise<LeaveRequest> {
   ensureConfigured();
   const callable = httpsCallable<
-    { leaveType: LeaveType; startDate: string; endDate: string; reason: string },
+    { action: string; leaveType: LeaveType; startDate: string; endDate: string; reason: string },
     { ok: boolean; leave: LeaveRequest }
-  >(functions, "requestLeave");
-  const res = await callable({ leaveType, startDate, endDate, reason });
+  >(functions, "timesheetOps");
+  const res = await callable({ action: "requestLeave", leaveType, startDate, endDate, reason });
   return res.data.leave;
 }
 
@@ -291,9 +298,9 @@ export async function decideLeaveRequest(
 ): Promise<LeaveRequest> {
   ensureConfigured();
   const callable = httpsCallable<
-    { id: string; decision: "approved" | "rejected"; note: string },
+    { action: string; id: string; decision: "approved" | "rejected"; note: string },
     { ok: boolean; leave: LeaveRequest }
-  >(functions, "decideLeaveRequest");
-  const res = await callable({ id, decision, note });
+  >(functions, "timesheetOps");
+  const res = await callable({ action: "decideLeave", id, decision, note });
   return res.data.leave;
 }

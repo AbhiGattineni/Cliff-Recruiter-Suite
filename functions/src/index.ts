@@ -3,7 +3,7 @@
 //   - ceipalReport({ report }): proxies a Ceipal custom report (auth required).
 //   - parseResume({ resumeText, jobDescription }): LLM fit assessment (auth required).
 
-import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onCall, HttpsError, CallableRequest } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as logger from "firebase-functions/logger";
 import { defineSecret } from "firebase-functions/params";
@@ -254,9 +254,7 @@ async function refreshCeipalReport(report: "job_duration" | "submissions", passw
   return data;
 }
 
-export const ceipalReport = onCall(
-  { ...commonOpts, secrets: [CEIPAL_PASSWORD], timeoutSeconds: 540, memory: "512MiB" },
-  async (request) => {
+async function ceipalReportHandler(request: CallableRequest) {
     // AUTH ON HOLD: app runs in open mode. Re-enable requireAuth(request.auth)
     // once authentication is turned back on.
     void request;
@@ -307,8 +305,7 @@ export const ceipalReport = onCall(
       const msg = err instanceof Error ? err.message : String(err);
       return { ok: false, data: null, error: msg };
     }
-  }
-);
+}
 
 // ---- Recruiter activity (job-board credits, pipeline updates, mail merge) ----
 // These reports are large; we pull them, COUNT per recruiter/date, and discard —
@@ -344,9 +341,7 @@ interface ActivityAcc {
   advSearchInternalDb: number; // NOT date-filtered — the report has no date column
 }
 
-export const recruiterActivity = onCall(
-  { ...commonOpts, secrets: [CEIPAL_PASSWORD], timeoutSeconds: 540, memory: "512MiB" },
-  async (request) => {
+async function recruiterActivityHandler(request: CallableRequest) {
     void request; // auth on hold (open mode)
     const password = CEIPAL_PASSWORD.value();
     if (!password || password.startsWith("PLACEHOLDER")) {
@@ -404,13 +399,10 @@ export const recruiterActivity = onCall(
     const byRecruiter: Record<string, ActivityAcc> = {};
     for (const [k, v] of by) byRecruiter[k] = v;
     return { ok: true, from: request.data?.from ?? null, to: request.data?.to ?? null, byRecruiter, fetchedAt: Date.now() };
-  }
-);
+}
 
 // Currently-open jobs (Ceipal "Active Jobs - All" report). Small live snapshot.
-export const activeJobs = onCall(
-  { ...commonOpts, secrets: [CEIPAL_PASSWORD], timeoutSeconds: 120, memory: "256MiB" },
-  async (request) => {
+async function activeJobsHandler(request: CallableRequest) {
     void request;
     const password = CEIPAL_PASSWORD.value();
     if (!password || password.startsWith("PLACEHOLDER")) {
@@ -437,8 +429,7 @@ export const activeJobs = onCall(
       jobCreated: s(r.JobCreated),
     }));
     return { ok: true, jobs, fetchedAt: Date.now() };
-  }
-);
+}
 
 // ---- Internally-selected candidate pool ------------------------------------
 function parseCeipalMs(v: unknown): number {
@@ -474,9 +465,7 @@ async function logLlmCall(
 // Candidates already sourced/submitted (Ceipal "internally selected" report),
 // de-duplicated to one row per candidate with the distinct roles they've been
 // submitted to (used for JD matching).
-export const candidatePool = onCall(
-  { ...commonOpts, secrets: [CEIPAL_PASSWORD], timeoutSeconds: 300, memory: "512MiB" },
-  async (request) => {
+async function candidatePoolHandler(request: CallableRequest) {
     void request;
     const password = CEIPAL_PASSWORD.value();
     if (!password || password.startsWith("PLACEHOLDER")) {
@@ -526,8 +515,7 @@ export const candidatePool = onCall(
       .sort((a, b) => b._ms - a._ms)
       .map(({ _ms, ...rest }) => rest); // eslint-disable-line @typescript-eslint/no-unused-vars
     return { ok: true, candidates, fetchedAt: Date.now() };
-  }
-);
+}
 
 // Match a pasted JD to the pool's distinct role titles (LLM). Returns the relevant
 // titles; the client filters candidates by them. Usage is logged for the metrics.
@@ -572,9 +560,7 @@ export const linkedinLookup = onCall(
 
 // Patch profile links / portfolio onto an already-saved resume report (the
 // portfolio finishes after the report auto-saves, and links are editable).
-export const updateResumeReport = onCall(
-  { ...commonOpts, timeoutSeconds: 30 },
-  async (request) => {
+async function updateResumeReportHandler(request: CallableRequest) {
     void request; // auth on hold (open mode)
     const id = String(request.data?.id ?? "");
     if (!id) throw new HttpsError("invalid-argument", "id is required.");
@@ -591,8 +577,7 @@ export const updateResumeReport = onCall(
     patch.updatedAt = FieldValue.serverTimestamp();
     await getFirestore().collection("resumeReports").doc(id).set(patch, { merge: true });
     return { ok: true };
-  }
-);
+}
 
 
 // ---- AI / enrichment: one function, many actions ----------------------------
@@ -948,9 +933,7 @@ function actorOf(
 }
 
 // Save an already-computed assessment to the reports history.
-export const saveResumeReport = onCall(
-  { ...commonOpts, timeoutSeconds: 30 },
-  async (request) => {
+async function saveResumeReportHandler(request: CallableRequest) {
     void request; // auth on hold (open mode)
     const assessment = request.data?.assessment;
     const provider: string = request.data?.provider ?? "";
@@ -989,13 +972,10 @@ export const saveResumeReport = onCall(
       createdAt: FieldValue.serverTimestamp(),
     });
     return { ok: true, reportId: doc.id };
-  }
-);
+}
 
 // List saved resume assessments (most recent first) for the Resume Reports tab.
-export const listResumeReports = onCall(
-  { ...commonOpts, timeoutSeconds: 30 },
-  async (request) => {
+async function listResumeReportsHandler(request: CallableRequest) {
     void request; // auth on hold (open mode)
     const limit = Math.min(Number(request.data?.limit) || 200, 500);
     const snap = await getFirestore()
@@ -1009,8 +989,7 @@ export const listResumeReports = onCall(
       return { id: d.id, ...x, createdAt: createdAt?.toMillis?.() ?? null };
     });
     return { ok: true, reports };
-  }
-);
+}
 
 // Which LLM providers are configured (have a real API key). The UI uses this to
 // enable/disable providers in the model picker. Never returns key values.
@@ -1068,9 +1047,7 @@ export const llmUsageSummary = onCall(
 );
 
 // Record a report-generation run (for dashboard stats).
-export const logReportRun = onCall(
-  { ...commonOpts, timeoutSeconds: 15 },
-  async (request) => {
+async function logReportRunHandler(request: CallableRequest) {
     void request; // auth on hold (open mode)
     await getFirestore().collection("reportRuns").add({
       source: String(request.data?.source ?? ""),
@@ -1080,8 +1057,7 @@ export const logReportRun = onCall(
       createdAt: FieldValue.serverTimestamp(),
     });
     return { ok: true };
-  }
-);
+}
 
 // Aggregate counts for the dashboard.
 export const dashboardStats = onCall(
@@ -1127,9 +1103,7 @@ export const dashboardStats = onCall(
 );
 
 // ---- Saved report configurations -------------------------------------------
-export const saveReportConfig = onCall(
-  { ...commonOpts, timeoutSeconds: 20 },
-  async (request) => {
+async function saveReportConfigHandler(request: CallableRequest) {
     void request; // auth on hold (open mode)
     const name = String(request.data?.name ?? "").trim();
     const config = request.data?.config;
@@ -1142,12 +1116,9 @@ export const saveReportConfig = onCall(
       createdAt: FieldValue.serverTimestamp(),
     });
     return { ok: true, id: doc.id };
-  }
-);
+}
 
-export const listReportConfigs = onCall(
-  { ...commonOpts, timeoutSeconds: 20 },
-  async (request) => {
+async function listReportConfigsHandler(request: CallableRequest) {
     void request;
     const snap = await getFirestore()
       .collection("reportConfigs")
@@ -1172,26 +1143,20 @@ export const listReportConfigs = onCall(
       };
     });
     return { ok: true, configs };
-  }
-);
+}
 
-export const deleteReportConfig = onCall(
-  { ...commonOpts, timeoutSeconds: 15 },
-  async (request) => {
+async function deleteReportConfigHandler(request: CallableRequest) {
     void request;
     const id = String(request.data?.id ?? "");
     if (id) await getFirestore().collection("reportConfigs").doc(id).delete();
     return { ok: true };
-  }
-);
+}
 
 // ---- Timesheets, leave requests, and role management -----------------------
 
 // Called once per sign-in (from AuthContext) to fetch-or-create the caller's
 // role profile. Identity comes from the verified token, never the client.
-export const ensureUserProfile = onCall(
-  { ...commonOpts, timeoutSeconds: 15 },
-  async (request) => {
+async function ensureUserProfileHandler(request: CallableRequest) {
     requireAuth(request.auth);
     const uid = request.auth!.uid!;
     const email = String(request.auth!.token.email ?? "");
@@ -1201,12 +1166,9 @@ export const ensureUserProfile = onCall(
     // the wrong system date would offer a day the server then refuses. This is
     // already called on every sign-in, so it costs nothing to carry the truth.
     return { ok: true, profile, serverNow: Date.now(), today: todayInZone() };
-  }
-);
+}
 
-export const setUserRole = onCall(
-  { ...commonOpts, timeoutSeconds: 15 },
-  async (request) => {
+async function setUserRoleHandler(request: CallableRequest) {
     const profile = await requireProfile(request.auth);
     requireRole(profile, ["admin"]);
     const targetUid = String(request.data?.uid ?? "");
@@ -1221,12 +1183,9 @@ export const setUserRole = onCall(
     } catch (e) {
       throw new HttpsError("failed-precondition", e instanceof Error ? e.message : String(e));
     }
-  }
-);
+}
 
-export const saveTimesheetEntry = onCall(
-  { ...commonOpts, timeoutSeconds: 15 },
-  async (request) => {
+async function saveTimesheetEntryHandler(request: CallableRequest) {
     const profile = await requireProfile(request.auth);
     const date = String(request.data?.date ?? "");
     const hours = Number(request.data?.hours);
@@ -1244,12 +1203,9 @@ export const saveTimesheetEntry = onCall(
     } catch (e) {
       throw new HttpsError("invalid-argument", e instanceof Error ? e.message : String(e));
     }
-  }
-);
+}
 
-export const requestLeave = onCall(
-  { ...commonOpts, timeoutSeconds: 15 },
-  async (request) => {
+async function requestLeaveHandler(request: CallableRequest) {
     const profile = await requireProfile(request.auth);
     const leaveType = request.data?.leaveType;
     const startDate = String(request.data?.startDate ?? "");
@@ -1261,12 +1217,9 @@ export const requestLeave = onCall(
     } catch (e) {
       throw new HttpsError("invalid-argument", e instanceof Error ? e.message : String(e));
     }
-  }
-);
+}
 
-export const decideLeaveRequest = onCall(
-  { ...commonOpts, timeoutSeconds: 15 },
-  async (request) => {
+async function decideLeaveRequestHandler(request: CallableRequest) {
     const profile = await requireProfile(request.auth);
     requireRole(profile, ["admin", "manager"]);
     const id = String(request.data?.id ?? "");
@@ -1281,8 +1234,7 @@ export const decideLeaveRequest = onCall(
     } catch (e) {
       throw new HttpsError("failed-precondition", e instanceof Error ? e.message : String(e));
     }
-  }
-);
+}
 
 /**
  * Consultant billing: invites, assignments, weekly timesheets, approval.
@@ -1545,6 +1497,137 @@ export const meetingDigestSchedule = onSchedule(
       // This one IS worth surfacing: the schedule fired, everything was
       // configured, and the send still failed.
       logger.error("meetingDigest failed", { hhmm, back, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+);
+
+// ---- Merged callables ------------------------------------------------------
+//
+// Twenty-two callables became eleven. A 2nd-gen function is a Cloud Run
+// service, and Cloud Run reserves cpu x maxInstances for it whether or not a
+// request ever arrives — so the count of services, not the traffic, is what
+// spends the regional CPU quota. That quota filled us-central1 completely and
+// forced the whole backend into us-east1; halving the service count is what
+// keeps the same thing from happening there.
+//
+// The handlers above are unchanged. Each group is a switch over `action`, the
+// same shape `ai`, `consultantOps` and `firefliesMeetings` already use.
+
+/**
+ * Saved report configurations, and the run log that feeds dashboard stats.
+ *
+ * One callable branching on `action`, not four. Every 2nd-gen function is a
+ * Cloud Run service holding reserved CPU whether or not anyone calls it, and
+ * this project has hit the region's allowable-CPU quota enough times to have
+ * moved regions over it. Four services for four small Firestore writes was the
+ * clearest waste left.
+ */
+export const reportConfigs = onCall(
+  { ...commonOpts, timeoutSeconds: 20 },
+  async (request) => {
+    const action = String(request.data?.action ?? "");
+    switch (action) {
+      case "save":
+        return saveReportConfigHandler(request);
+      case "list":
+        return listReportConfigsHandler(request);
+      case "delete":
+        return deleteReportConfigHandler(request);
+      case "logRun":
+        return logReportRunHandler(request);
+      default:
+        throw new HttpsError("invalid-argument", `Unknown action "${action}".`);
+    }
+  }
+);
+
+/** Saved resume assessments: write, read back, and patch after the fact. */
+export const resumeReports = onCall(
+  { ...commonOpts, timeoutSeconds: 30 },
+  async (request) => {
+    const action = String(request.data?.action ?? "");
+    switch (action) {
+      case "save":
+        return saveResumeReportHandler(request);
+      case "list":
+        return listResumeReportsHandler(request);
+      case "update":
+        return updateResumeReportHandler(request);
+      default:
+        throw new HttpsError("invalid-argument", `Unknown action "${action}".`);
+    }
+  }
+);
+
+/**
+ * Timesheet entries and leave requests.
+ *
+ * `saveTimesheetEntry` already folded "a manager filling in for someone" into
+ * itself rather than taking a second service, for the quota reason; this
+ * extends the same reasoning to the two leave calls beside it.
+ */
+export const timesheetOps = onCall(
+  { ...commonOpts, timeoutSeconds: 15 },
+  async (request) => {
+    const action = String(request.data?.action ?? "");
+    switch (action) {
+      case "saveEntry":
+        return saveTimesheetEntryHandler(request);
+      case "requestLeave":
+        return requestLeaveHandler(request);
+      case "decideLeave":
+        return decideLeaveRequestHandler(request);
+      default:
+        throw new HttpsError("invalid-argument", `Unknown action "${action}".`);
+    }
+  }
+);
+
+/**
+ * The caller's own profile, and (for admins) other people's roles.
+ *
+ * `ensureProfile` runs on every sign-in and `setRole` almost never, which is
+ * exactly why they can share a service: the one that matters keeps it warm.
+ */
+export const userOps = onCall(
+  { ...commonOpts, timeoutSeconds: 15 },
+  async (request) => {
+    const action = String(request.data?.action ?? "");
+    switch (action) {
+      case "ensureProfile":
+        return ensureUserProfileHandler(request);
+      case "setRole":
+        return setUserRoleHandler(request);
+      default:
+        throw new HttpsError("invalid-argument", `Unknown action "${action}".`);
+    }
+  }
+);
+
+/**
+ * Everything read out of Ceipal.
+ *
+ * Four services became one. They shared a secret, a client and a failure mode,
+ * and differed only in which report they pulled — so four reserved CPU
+ * allocations bought nothing but four names. The merged service takes the
+ * widest timeout and memory of the four, which costs the lighter reads a little
+ * more headroom each and saves three whole services.
+ */
+export const ceipalData = onCall(
+  { ...commonOpts, secrets: [CEIPAL_PASSWORD], timeoutSeconds: 540, memory: "512MiB" },
+  async (request) => {
+    const action = String(request.data?.action ?? "");
+    switch (action) {
+      case "report":
+        return ceipalReportHandler(request);
+      case "recruiterActivity":
+        return recruiterActivityHandler(request);
+      case "activeJobs":
+        return activeJobsHandler(request);
+      case "candidatePool":
+        return candidatePoolHandler(request);
+      default:
+        throw new HttpsError("invalid-argument", `Unknown action "${action}".`);
     }
   }
 );

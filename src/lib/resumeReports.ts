@@ -37,7 +37,7 @@ interface ListResponse {
 
 export async function listResumeReports(limit = 200): Promise<ResumeReport[]> {
   ensureConfigured();
-  const callable = httpsCallable<{ limit: number }, ListResponse>(functions, "listResumeReports");
-  const res = await callable({ limit });
+  const callable = httpsCallable<{ action: string; limit: number }, ListResponse>(functions, "resumeReports");
+  const res = await callable({ action: "list", limit });
   return res.data?.reports ?? [];
 }

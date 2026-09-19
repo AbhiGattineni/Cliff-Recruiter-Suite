@@ -24,11 +24,11 @@ export interface ActiveJob {
 
 export async function getActiveJobs(): Promise<ActiveJob[]> {
   ensureConfigured();
-  const callable = httpsCallable<Record<string, never>, { ok: boolean; jobs: ActiveJob[] }>(
+  const callable = httpsCallable<{ action: string }, { ok: boolean; jobs: ActiveJob[] }>(
     functions,
-    "activeJobs",
+    "ceipalData",
     { timeout: 120_000 }
   );
-  const res = await callable({});
+  const res = await callable({ action: "activeJobs" });
   return res.data?.jobs ?? [];
 }

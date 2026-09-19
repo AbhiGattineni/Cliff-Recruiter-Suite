@@ -93,6 +93,9 @@ export interface ResumeReportPatch {
 /** Patch profile links / portfolio onto an already-saved resume report. */
 export async function updateResumeReport(id: string, patch: ResumeReportPatch): Promise<void> {
   ensureConfigured();
-  const callable = httpsCallable<{ id: string } & ResumeReportPatch, { ok: boolean }>(functions, "updateResumeReport");
-  await callable({ id, ...patch });
+  const callable = httpsCallable<{ action: string; id: string } & ResumeReportPatch, { ok: boolean }>(
+    functions,
+    "resumeReports"
+  );
+  await callable({ action: "update", id, ...patch });
 }

@@ -29,25 +29,25 @@ export interface SavedReportConfig {
 export async function saveReportConfig(name: string, config: ReportConfigData): Promise<string> {
   ensureConfigured();
   const callable = httpsCallable<
-    { name: string; config: ReportConfigData; by: Actor },
+    { action: string; name: string; config: ReportConfigData; by: Actor },
     { ok: boolean; id?: string }
-  >(functions, "saveReportConfig");
-  const res = await callable({ name, config, by: currentActor() });
+  >(functions, "reportConfigs");
+  const res = await callable({ action: "save", name, config, by: currentActor() });
   return res.data?.id ?? "";
 }
 
 export async function listReportConfigs(): Promise<SavedReportConfig[]> {
   ensureConfigured();
-  const callable = httpsCallable<Record<string, never>, { ok: boolean; configs: SavedReportConfig[] }>(
+  const callable = httpsCallable<{ action: string }, { ok: boolean; configs: SavedReportConfig[] }>(
     functions,
-    "listReportConfigs"
+    "reportConfigs"
   );
-  const res = await callable({});
+  const res = await callable({ action: "list" });
   return res.data?.configs ?? [];
 }
 
 export async function deleteReportConfig(id: string): Promise<void> {
   ensureConfigured();
-  const callable = httpsCallable<{ id: string }, { ok: boolean }>(functions, "deleteReportConfig");
-  await callable({ id });
+  const callable = httpsCallable<{ action: string; id: string }, { ok: boolean }>(functions, "reportConfigs");
+  await callable({ action: "delete", id });
 }
