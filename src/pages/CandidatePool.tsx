@@ -118,7 +118,10 @@ export default function CandidatePool() {
         {poolQ.isLoading ? (
           <div className="center-load" style={{ minHeight: "30vh" }}><div className="spinner dark" /></div>
         ) : poolQ.error ? (
-          <p className="muted">Couldn&#39;t load the candidate pool.</p>
+          <div className="alert error">
+            <strong>Couldn&#39;t load the candidate pool.</strong>
+            <p style={{ margin: "0.4rem 0 0" }}>{friendlyError(poolQ.error)}</p>
+          </div>
         ) : (
           <>
             <p className="sub">
