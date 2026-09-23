@@ -466,14 +466,75 @@ async function logLlmCall(
 // de-duplicated to one row per candidate with the distinct roles they've been
 // submitted to (used for JD matching).
 async function candidatePoolHandler(request: CallableRequest) {
-    void request;
+    const refresh = request.data?.refresh === true;
     const password = CEIPAL_PASSWORD.value();
-    if (!password || password.startsWith("PLACEHOLDER")) {
+    const configured = !!password && !password.startsWith("PLACEHOLDER");
+    const s = (v: unknown) => String(v ?? "").trim();
+
+    // The pool is read the same way the dashboard reads its reports: from the
+    // cache when Ceipal has not moved, and from the last good pull when Ceipal
+    // will not answer at all. selected_candidates is the widest report here and
+    // the likeliest to trip Ceipal's report-level errors, so a page that could
+    // only ever show a live pull was one bad answer away from showing nothing.
+    let rows: Record<string, unknown>[] = [];
+    let fetchedAt = 0;
+    let stale = false;
+    let problem = "";
+
+    const serveCache = async () => {
+      const cached = await readCache("selected_candidates");
+      if (!cached || cached.rows.length === 0) return false;
+      rows = cached.rows as Record<string, unknown>[];
+      fetchedAt = cached.fetchedAt;
+      return true;
+    };
+
+    // Cache hit + Ceipal's record_count unchanged = nothing to pull.
+    if (!refresh) {
+      const meta = await readCacheMeta("selected_candidates");
+      if (meta && meta.recordCount > 0) {
+        let unchanged = true;
+        if (configured) {
+          try {
+            const currentTotal = await probeTotal("selected_candidates", password);
+            unchanged = currentTotal === (meta.totalAvailable || meta.recordCount);
+          } catch {
+            unchanged = true; // probe failed -> keep serving cache rather than break
+          }
+        }
+        if (unchanged && (await serveCache())) {
+          return { ok: true, ...poolFromRows(rows, s), fetchedAt, stale: false, problem: "" };
+        }
+      }
+    }
+
+    if (!configured) {
+      if (await serveCache()) {
+        return { ok: true, ...poolFromRows(rows, s), fetchedAt, stale: true, problem: "Ceipal password is not configured." };
+      }
       throw new HttpsError("failed-precondition", "Ceipal password is not configured.");
     }
-    const s = (v: unknown) => String(v ?? "").trim();
-    const data = (await fetchReport("selected_candidates", password, 0)) as { result?: Record<string, unknown>[] };
-    const rows = Array.isArray(data.result) ? data.result : [];
+
+    try {
+      const data = (await fetchReport("selected_candidates", password, 0)) as { result?: Record<string, unknown>[] };
+      rows = Array.isArray(data.result) ? data.result : [];
+      fetchedAt = Date.now();
+      await writeCache("selected_candidates", rows, rows.length);
+    } catch (err) {
+      // Ceipal answers report-level errors with HTTP 200 and { success: 0 },
+      // which ceipal.ts turns into a thrown Error carrying its message. Keep
+      // that message: it is the only thing that says what actually went wrong.
+      problem = err instanceof Error ? err.message : String(err);
+      if (!(await serveCache())) throw new HttpsError("unavailable", problem);
+      stale = true;
+    }
+
+    return { ok: true, ...poolFromRows(rows, s), fetchedAt, stale, problem };
+}
+
+// Fold the report's submission rows into one row per candidate, carrying the
+// distinct roles each was submitted to (what the JD matching filters on).
+function poolFromRows(rows: Record<string, unknown>[], s: (v: unknown) => string) {
 
     interface Cand {
       name: string; email: string; mobile: string; location: string; status: string;
@@ -485,7 +546,11 @@ async function candidatePoolHandler(request: CallableRequest) {
       const email = s(r.EmailAddress).toLowerCase();
       const phone = s(r.MobileNumber).replace(/\D/g, "");
       const name = s(r.ApplicantName) || `${s(r.ApplicantFirstName)} ${s(r.ApplicantLastName)}`.trim();
-      const key = email || phone || `${name.toLowerCase()}|${s(r.ApplicantID)}`;
+      const id = s(r.ApplicantID);
+      // A row with no email, phone, name or id identifies nobody. Built blind,
+      // the composite key is "|" — truthy — so every such row collapsed into
+      // one nameless candidate instead of being skipped.
+      const key = email || phone || (name || id ? `${name.toLowerCase()}|${id}` : "");
       if (!key) continue;
       const role = s(r.JobTitle);
       const ms = parseCeipalMs(r.SubmittedOn);
@@ -514,7 +579,7 @@ async function candidatePoolHandler(request: CallableRequest) {
     const candidates = Array.from(byKey.values())
       .sort((a, b) => b._ms - a._ms)
       .map(({ _ms, ...rest }) => rest); // eslint-disable-line @typescript-eslint/no-unused-vars
-    return { ok: true, candidates, fetchedAt: Date.now() };
+    return { candidates };
 }
 
 // Match a pasted JD to the pool's distinct role titles (LLM). Returns the relevant

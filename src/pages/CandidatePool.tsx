@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCandidatePool, matchCandidatesToJd, keywordMatchRoles, PoolCandidate } from "../lib/candidatePool";
 import { getLlmUsageSummary } from "../lib/resume";
@@ -11,9 +11,21 @@ const dateOnly = (s: string) => (s ? s.split(/\s+/)[0] : "—");
 
 export default function CandidatePool() {
   const qc = useQueryClient();
-  const poolQ = useQuery({ queryKey: ["candidatePool"], queryFn: () => getCandidatePool() });
+  // Refresh means "go past the cache to Ceipal". It rides a ref rather than the
+  // query key so a refresh reuses the same cache entry, and the table keeps
+  // showing the rows it has while the live pull runs.
+  const forceLive = useRef(false);
+  const poolQ = useQuery({
+    queryKey: ["candidatePool"],
+    queryFn: () => {
+      const live = forceLive.current;
+      forceLive.current = false;
+      return getCandidatePool(live);
+    },
+  });
+  const pool = poolQ.data;
   const usageQ = useQuery({ queryKey: ["llmUsageSummary"], queryFn: () => getLlmUsageSummary() });
-  const candidates = poolQ.data ?? [];
+  const candidates = pool?.candidates ?? [];
 
   const [jd, setJd] = useState("");
   const [matching, setMatching] = useState(false);
@@ -83,7 +95,11 @@ export default function CandidatePool() {
             ones whose past role matches — reach out to them before sourcing fresh.
           </p>
         </div>
-        <button className="btn secondary" onClick={() => poolQ.refetch()} disabled={poolQ.isFetching}>
+        <button
+          className="btn secondary"
+          onClick={() => { forceLive.current = true; poolQ.refetch(); }}
+          disabled={poolQ.isFetching}
+        >
           {poolQ.isFetching ? <span className="spinner dark" /> : "⟳"} Refresh
         </button>
       </div>
@@ -124,6 +140,12 @@ export default function CandidatePool() {
           </div>
         ) : (
           <>
+            {pool?.stale && (
+              <div className="alert error" style={{ marginBottom: "0.6rem" }}>
+                <strong>Ceipal didn&#39;t answer — showing the last good pull{pool.fetchedAt ? ` from ${new Date(pool.fetchedAt).toLocaleString()}` : ""}.</strong>
+                {pool.problem && <p style={{ margin: "0.4rem 0 0" }}>{pool.problem}</p>}
+              </div>
+            )}
             <p className="sub">
               {matchRoles ? `Showing ${filtered.length} matching of ${candidates.length}` : `${candidates.length} candidates`} in the pool.
             </p>

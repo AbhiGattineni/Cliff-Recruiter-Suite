@@ -19,15 +19,29 @@ export interface PoolCandidate {
   count: number; // number of submissions
 }
 
-export async function getCandidatePool(): Promise<PoolCandidate[]> {
+export interface Pool {
+  candidates: PoolCandidate[];
+  /** When the underlying Ceipal rows were pulled (epoch ms, 0 if unknown). */
+  fetchedAt: number;
+  /** True when Ceipal could not be reached and this is the last good pull. */
+  stale: boolean;
+  /** Ceipal's own message when the live pull failed. Empty when it succeeded. */
+  problem: string;
+}
+
+export async function getCandidatePool(refresh = false): Promise<Pool> {
   ensureConfigured();
-  const callable = httpsCallable<{ action: string }, { ok: boolean; candidates: PoolCandidate[] }>(
-    functions,
-    "ceipalData",
-    { timeout: 300_000 }
-  );
-  const res = await callable({ action: "candidatePool" });
-  return res.data?.candidates ?? [];
+  const callable = httpsCallable<
+    { action: string; refresh: boolean },
+    { ok: boolean; candidates: PoolCandidate[]; fetchedAt?: number; stale?: boolean; problem?: string }
+  >(functions, "ceipalData", { timeout: 300_000 });
+  const res = await callable({ action: "candidatePool", refresh });
+  return {
+    candidates: res.data?.candidates ?? [],
+    fetchedAt: res.data?.fetchedAt ?? 0,
+    stale: res.data?.stale === true,
+    problem: res.data?.problem ?? "",
+  };
 }
 
 /** LLM semantic match: returns the pool role titles relevant to the JD. */
