@@ -14,7 +14,7 @@ import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
-import { fetchReport, probeTotal } from "./ceipal.js";
+import { fetchReport, probeTotal, reportUrl } from "./ceipal.js";
 import { readCache, readCacheMeta, writeCache, cacheEnvelope } from "./ceipalCache.js";
 import { assessResume, matchRolesToJd, assessPortfolio, planAskQuery, narrateAskResult, briefMeetings, BriefSource } from "./llm.js";
 import { searchUsers, buildPortfolio, parseGithubUsername } from "./github.js";
@@ -466,10 +466,35 @@ async function logLlmCall(
 // de-duplicated to one row per candidate with the distinct roles they've been
 // submitted to (used for JD matching).
 async function candidatePoolHandler(request: CallableRequest) {
+  // A callable turns anything that is not an HttpsError into "INTERNAL" and
+  // drops the message on the way out, which is how every Ceipal failure here
+  // reached the browser as a bare INTERNAL with nothing to act on. Everything
+  // below rethrows with the reason attached.
+  try {
+    return await candidatePool(request);
+  } catch (err) {
+    if (err instanceof HttpsError) throw err;
+    throw new HttpsError("unavailable", err instanceof Error ? err.message : String(err));
+  }
+}
+
+async function candidatePool(request: CallableRequest) {
     const refresh = request.data?.refresh === true;
     const password = CEIPAL_PASSWORD.value();
     const configured = !!password && !password.startsWith("PLACEHOLDER");
     const s = (v: unknown) => String(v ?? "").trim();
+
+    // selected_candidates arrived with the Candidate Pool page, after the other
+    // reports were already deployed, and functions/.env is not in the repo. A
+    // deployment missing this one line fails here and nowhere else, so name it
+    // rather than letting fetchReport throw about an endpoint nobody set.
+    if (!reportUrl("selected_candidates")) {
+      throw new HttpsError(
+        "failed-precondition",
+        "No Ceipal endpoint is configured for the candidate pool. Set CEIPAL_SELECTED_CANDIDATES_URL " +
+          "in functions/.env (see functions/.env.example) and redeploy the functions."
+      );
+    }
 
     // The pool is read the same way the dashboard reads its reports: from the
     // cache when Ceipal has not moved, and from the last good pull when Ceipal
@@ -482,16 +507,20 @@ async function candidatePoolHandler(request: CallableRequest) {
     let problem = "";
 
     const serveCache = async () => {
-      const cached = await readCache("selected_candidates");
-      if (!cached || cached.rows.length === 0) return false;
-      rows = cached.rows as Record<string, unknown>[];
-      fetchedAt = cached.fetchedAt;
-      return true;
+      try {
+        const cached = await readCache("selected_candidates");
+        if (!cached || cached.rows.length === 0) return false;
+        rows = cached.rows as Record<string, unknown>[];
+        fetchedAt = cached.fetchedAt;
+        return true;
+      } catch {
+        return false; // a cache that cannot be read is a cache miss, not a failure
+      }
     };
 
     // Cache hit + Ceipal's record_count unchanged = nothing to pull.
     if (!refresh) {
-      const meta = await readCacheMeta("selected_candidates");
+      const meta = await readCacheMeta("selected_candidates").catch(() => null);
       if (meta && meta.recordCount > 0) {
         let unchanged = true;
         if (configured) {
