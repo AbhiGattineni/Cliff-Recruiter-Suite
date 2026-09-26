@@ -8,8 +8,13 @@ import { applyColumnFilters, optionsForColumn, ColumnSelections } from "../lib/c
 import { friendlyError } from "../lib/errors";
 import ColumnFilter from "../components/ColumnFilter";
 import Pagination, { usePagination } from "../components/Pagination";
+import { Sort, nextSort, sortRows, sortIndicator } from "../lib/tableSort";
 
 type Tab = "bench" | "submissions";
+
+/** Screen readers announce the sort state from the header cell, not the arrow. */
+const ariaSort = (sort: Sort | null, col: string): "ascending" | "descending" | "none" =>
+  sort?.col !== col ? "none" : sort.dir === "asc" ? "ascending" : "descending";
 
 export default function BenchSubmissions() {
   // Refresh means "go past the cache to Ceipal", on a ref so the tables keep
@@ -28,6 +33,8 @@ export default function BenchSubmissions() {
   const [benchFilters, setBenchFilters] = useState<ColumnSelections>({});
   const [subFilters, setSubFilters] = useState<ColumnSelections>({});
   const [search, setSearch] = useState("");
+  const [benchSort, setBenchSort] = useState<Sort | null>(null);
+  const [subSort, setSubSort] = useState<Sort | null>(null);
 
   const bench = q.data?.bench ?? [];
   const submissions = q.data?.submissions ?? [];
@@ -61,15 +68,17 @@ export default function BenchSubmissions() {
 
   const benchRows = useMemo(() => {
     const filtered = applyColumnFilters(joined, benchFilters, benchCell);
-    return filtered.filter((c) => matches(benchTableCols.map((col) => benchCell(c, col))));
+    const searched = filtered.filter((c) => matches(benchTableCols.map((col) => benchCell(c, col))));
+    return sortRows(searched, benchSort, benchCell);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [joined, benchFilters, benchTableCols, search]);
+  }, [joined, benchFilters, benchTableCols, search, benchSort]);
 
   const subRows = useMemo(() => {
     const filtered = applyColumnFilters(submissions, subFilters, subCell);
-    return filtered.filter((r) => matches(subCols.map((col) => r[col])));
+    const searched = filtered.filter((r) => matches(subCols.map((col) => r[col])));
+    return sortRows(searched, subSort, subCell);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [submissions, subFilters, subCols, search]);
+  }, [submissions, subFilters, subCols, search, subSort]);
 
   const benchPage = usePagination(benchRows, 25, "benchList");
   const subPage = usePagination(subRows, 25, "benchSubmissions");
@@ -78,6 +87,8 @@ export default function BenchSubmissions() {
     setBenchFilters({});
     setSubFilters({});
     setSearch("");
+    setBenchSort(null);
+    setSubSort(null);
   };
   const filterCount =
     Object.values(benchFilters).filter((v) => v?.length).length +
@@ -220,9 +231,16 @@ export default function BenchSubmissions() {
                         <tr>
                           <th style={{ width: 44 }}>#</th>
                           {benchTableCols.map((c) => (
-                            <th key={c} className="colf-th">
+                            <th key={c} className="colf-th" aria-sort={ariaSort(benchSort, c)}>
                               <span className="colf-th-inner">
-                                <span>{c}</span>
+                                <button
+                                  type="button"
+                                  className="sort-th"
+                                  onClick={() => setBenchSort((s) => nextSort(s, c))}
+                                  title={`Sort by ${c}`}
+                                >
+                                  {c}{sortIndicator(benchSort, c)}
+                                </button>
                                 <ColumnFilter
                                   column={c}
                                   options={optionsForColumn(joined, c, benchFilters, benchCell)}
@@ -275,9 +293,16 @@ export default function BenchSubmissions() {
                       <tr>
                         <th style={{ width: 44 }}>#</th>
                         {subCols.map((c) => (
-                          <th key={c} className="colf-th">
+                          <th key={c} className="colf-th" aria-sort={ariaSort(subSort, c)}>
                             <span className="colf-th-inner">
-                              <span>{c}</span>
+                              <button
+                                type="button"
+                                className="sort-th"
+                                onClick={() => setSubSort((s) => nextSort(s, c))}
+                                title={`Sort by ${c}`}
+                              >
+                                {c}{sortIndicator(subSort, c)}
+                              </button>
                               <ColumnFilter
                                 column={c}
                                 options={optionsForColumn(submissions, c, subFilters, subCell)}
