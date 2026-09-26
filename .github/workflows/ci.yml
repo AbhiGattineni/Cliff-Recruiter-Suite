@@ -27,6 +27,15 @@ jobs:
       - name: Install
         run: npm ci
 
+      # vitest has no include config, so its defaults sweep up functions/test/*
+      # as well as src/*. Those suites import functions/src, which imports
+      # firebase-admin, so this job needs the functions dependencies even though
+      # the functions job below builds them separately. Without this the whole
+      # suite fails to load with "Failed to load url firebase-admin/firestore",
+      # which reads like a missing file rather than a missing install.
+      - name: Install functions dependencies
+        run: npm ci --prefix functions
+
       - name: Type-check
         run: npx tsc -b
 
