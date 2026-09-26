@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  discoverColumns, findColumn, joinBench, statusCounts, benchStats, personKey, ALIASES, Row,
+  discoverColumns, findColumn, joinBench, statusCounts, benchStats, personKey,
+  autoMap, NOT_A_PERSON, ALIASES, Row,
 } from "./benchSubmissions";
 
 describe("discoverColumns", () => {
@@ -144,5 +145,61 @@ describe("benchStats", () => {
 
   it("reports an empty bench without dividing by it", () => {
     expect(benchStats([], [])).toMatchObject({ benchTotal: 0, covered: 0, idle: 0 });
+  });
+});
+
+describe("findColumn exclusions", () => {
+  it("does not hand the person slot to a company column", () => {
+    // "VendorName" and "ContactPerson" both contain a name alias. Picking either
+    // builds join keys out of vendors, which matches nobody and reads as an
+    // empty bench rather than a mislabelled column.
+    expect(findColumn(["VendorName", "ContactPerson"], [...ALIASES.name], NOT_A_PERSON)).toBeNull();
+  });
+
+  it("still finds the real person column beside company ones", () => {
+    const cols = ["VendorName", "ContactPerson", "ApplicantName"];
+    expect(findColumn(cols, [...ALIASES.name], NOT_A_PERSON)).toBe("ApplicantName");
+  });
+});
+
+describe("autoMap", () => {
+  it("detects each side independently", () => {
+    const m = autoMap(
+      [{ "Applicant Name": "A", "Email Address": "a@x.com", VendorName: "V" }],
+      [{ "Candidate Name": "A", "Submission Status": "Submitted" }]
+    );
+    expect(m).toEqual({
+      benchName: "Applicant Name",
+      benchEmail: "Email Address",
+      subName: "Candidate Name",
+      subEmail: null,
+      subStatus: "Submission Status",
+    });
+  });
+});
+
+describe("explicit column overrides", () => {
+  const bench: Row[] = [{ Who: "Jane Roe" }];
+  const submissions: Row[] = [{ Person: "Jane Roe", Outcome: "Offer", Junk: "N/A" }];
+
+  it("joins on columns detection would never have guessed", () => {
+    const map = { benchName: "Who", benchEmail: null, subName: "Person", subEmail: null, subStatus: "Outcome" };
+    expect(joinBench(bench, submissions, map)[0].count).toBe(1);
+  });
+
+  it("counts statuses from the chosen column, not the detected one", () => {
+    expect(statusCounts(submissions, "Outcome")).toEqual([{ status: "Offer", count: 1 }]);
+    expect(statusCounts(submissions, "Junk")).toEqual([{ status: "N/A", count: 1 }]);
+  });
+
+  it("reports no statuses when the column is explicitly cleared", () => {
+    expect(statusCounts(submissions, null)).toEqual([]);
+  });
+
+  it("passes the chosen status column through benchStats", () => {
+    const map = { benchName: "Who", benchEmail: null, subName: "Person", subEmail: null, subStatus: "Outcome" };
+    const stats = benchStats(joinBench(bench, submissions, map), submissions, "Outcome");
+    expect(stats.covered).toBe(1);
+    expect(stats.byStatus).toEqual([{ status: "Offer", count: 1 }]);
   });
 });

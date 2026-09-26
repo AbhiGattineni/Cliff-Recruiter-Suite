@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  getBenchSubmissions, joinBench, benchStats, discoverColumns, findColumn, cell,
-  ALIASES, BenchConsultant, Row,
+  getBenchSubmissions, joinBench, benchStats, discoverColumns, cell,
+  autoMap, ColumnMap, BenchConsultant, Row,
 } from "../lib/benchSubmissions";
 import { applyColumnFilters, optionsForColumn, ColumnSelections } from "../lib/columnFilter";
 import { friendlyError } from "../lib/errors";
@@ -11,6 +11,48 @@ import Pagination, { usePagination } from "../components/Pagination";
 import { Sort, nextSort, sortRows, sortIndicator } from "../lib/tableSort";
 
 type Tab = "bench" | "submissions";
+
+const STORE = "benchSubmissions:columnMap";
+
+function readOverrides(): Partial<ColumnMap> {
+  try {
+    return JSON.parse(localStorage.getItem(STORE) || "{}") as Partial<ColumnMap>;
+  } catch {
+    return {}; // a corrupt or blocked store just means no corrections yet
+  }
+}
+
+function writeOverrides(v: Partial<ColumnMap>) {
+  try {
+    localStorage.setItem(STORE, JSON.stringify(v));
+  } catch {
+    /* private mode — the correction lasts this session only */
+  }
+}
+
+/** One "which column means what" picker. */
+function MapField({
+  label, value, columns, onChange, hint,
+}: {
+  label: string;
+  value: string | null;
+  columns: string[];
+  onChange: (v: string) => void;
+  hint?: string;
+}) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: "0.2rem", fontSize: "0.8rem" }}>
+      <span className="muted">{label}</span>
+      <select value={value ?? ""} onChange={(e) => onChange(e.target.value)}>
+        <option value="">(none detected)</option>
+        {columns.map((c) => (
+          <option key={c} value={c}>{c}</option>
+        ))}
+      </select>
+      {hint && <span className="muted" style={{ fontSize: "0.74rem" }}>{hint}</span>}
+    </label>
+  );
+}
 
 /** Screen readers announce the sort state from the header cell, not the arrow. */
 const ariaSort = (sort: Sort | null, col: string): "ascending" | "descending" | "none" =>
@@ -35,12 +77,28 @@ export default function BenchSubmissions() {
   const [search, setSearch] = useState("");
   const [benchSort, setBenchSort] = useState<Sort | null>(null);
   const [subSort, setSubSort] = useState<Sort | null>(null);
+  // Corrections to the detected column mapping, kept per field so a fixed one
+  // is not undone by re-detection when the reports refresh.
+  const [overrides, setOverrides] = useState<Partial<ColumnMap>>(readOverrides);
 
   const bench = q.data?.bench ?? [];
   const submissions = q.data?.submissions ?? [];
 
-  const joined = useMemo(() => joinBench(bench, submissions), [bench, submissions]);
-  const stats = useMemo(() => benchStats(joined, submissions), [joined, submissions]);
+  const map = useMemo<ColumnMap>(
+    () => ({ ...autoMap(bench, submissions), ...overrides }),
+    [bench, submissions, overrides]
+  );
+  const joined = useMemo(() => joinBench(bench, submissions, map), [bench, submissions, map]);
+  const stats = useMemo(
+    () => benchStats(joined, submissions, map.subStatus),
+    [joined, submissions, map.subStatus]
+  );
+
+  const setField = (field: keyof ColumnMap, value: string) => {
+    const next = { ...overrides, [field]: value || null };
+    setOverrides(next);
+    writeOverrides(next);
+  };
 
   // Columns come from the rows themselves — these reports are configured in
   // Ceipal, not here, so whatever arrives is what the table shows.
@@ -94,8 +152,7 @@ export default function BenchSubmissions() {
     Object.values(benchFilters).filter((v) => v?.length).length +
     Object.values(subFilters).filter((v) => v?.length).length;
 
-  // Name the consultant column so the idle list reads as people, not rows.
-  const benchNameCol = findColumn(benchCols, [...ALIASES.name]);
+  const benchNameCol = map.benchName;
 
   return (
     <div>
@@ -138,6 +195,31 @@ export default function BenchSubmissions() {
           )}
 
           <div className="card">
+            <details open={stats.covered === 0 && submissions.length > 0}>
+              <summary style={{ cursor: "pointer", fontSize: "0.85rem" }} className="muted">
+                Column mapping — which column means what
+              </summary>
+              <p className="muted" style={{ fontSize: "0.8rem", margin: "0.5rem 0" }}>
+                These are detected from the report headers. If the numbers below look wrong — nobody
+                matched, or a status tile counting something odd — the detection picked the wrong
+                column. Correct it here; the choice is remembered.
+              </p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "0.6rem" }}>
+                <MapField label="Bench: consultant" value={map.benchName} columns={benchCols} onChange={(v) => setField("benchName", v)} />
+                <MapField label="Bench: email" value={map.benchEmail} columns={benchCols} onChange={(v) => setField("benchEmail", v)} hint="Optional" />
+                <MapField label="Submissions: consultant" value={map.subName} columns={subCols} onChange={(v) => setField("subName", v)} hint="Must name the same person as the bench column" />
+                <MapField label="Submissions: email" value={map.subEmail} columns={subCols} onChange={(v) => setField("subEmail", v)} hint="Optional" />
+                <MapField label="Submissions: status" value={map.subStatus} columns={subCols} onChange={(v) => setField("subStatus", v)} hint="Drives the status tiles" />
+              </div>
+              {Object.keys(overrides).length > 0 && (
+                <button className="btn ghost" style={{ marginTop: "0.6rem" }} onClick={() => { setOverrides({}); writeOverrides({}); }}>
+                  Reset to detected
+                </button>
+              )}
+            </details>
+          </div>
+
+          <div className="card">
             <div className="stat-grid">
               <div className="stat">
                 <div className="num">{stats.benchTotal}</div>
@@ -162,6 +244,13 @@ export default function BenchSubmissions() {
                 </div>
               ))}
             </div>
+            {stats.covered === 0 && submissions.length > 0 && bench.length > 0 && (
+              <p className="muted" style={{ margin: "0.6rem 0 0", fontSize: "0.85rem" }}>
+                None of the {submissions.length} submissions matched anyone on the bench. That
+                usually means the two consultant columns above name different things — check the
+                mapping.
+              </p>
+            )}
             {stats.byStatus.length === 0 && submissions.length > 0 && (
               <p className="muted" style={{ margin: "0.6rem 0 0", fontSize: "0.85rem" }}>
                 No column in the submissions report looks like a status, so there is nothing to

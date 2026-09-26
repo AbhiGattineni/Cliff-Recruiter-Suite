@@ -58,7 +58,7 @@ export function discoverColumns(rows: Row[]): string[] {
 }
 
 /** The first column whose normalised header matches an alias, in alias order. */
-export function findColumn(columns: string[], aliases: string[]): string | null {
+export function findColumn(columns: string[], aliases: string[], exclude: string[] = []): string | null {
   const byNorm = new Map<string, string>();
   for (const c of columns) {
     const n = normHeader(c);
@@ -70,13 +70,24 @@ export function findColumn(columns: string[], aliases: string[]): string | null 
   }
   // Nothing exact — accept a header that merely contains an alias, longest
   // alias first so "submissionstatus" wins over "status".
+  //
+  // `exclude` keeps the short aliases honest. "name" appears in VendorName and
+  // ContactPerson as readily as in ApplicantName, and a person slot filled by a
+  // vendor column produces join keys that match nothing, which looks like an
+  // empty result rather than a mislabelled column.
   for (const a of [...aliases].sort((x, y) => y.length - x.length)) {
     for (const c of columns) {
-      if (normHeader(c).includes(a)) return c;
+      const n = normHeader(c);
+      if (!n.includes(a)) continue;
+      if (exclude.some((bad) => n.includes(bad))) continue;
+      return c;
     }
   }
   return null;
 }
+
+/** Headers that name a company or a third party, never the person submitted. */
+export const NOT_A_PERSON = ["vendor", "client", "company", "partner", "contactperson", "submittedby"];
 
 export const ALIASES = {
   name: ["consultantname", "candidatename", "applicantfullname", "applicantname", "employeename",
@@ -133,14 +144,41 @@ export interface BenchConsultant {
  * Bench rows that match nobody still come back, with a count of zero — those
  * are the point of the page, not a gap in it.
  */
-export function joinBench(bench: Row[], submissions: Row[]): BenchConsultant[] {
-  const benchCols = discoverColumns(bench);
-  const subCols = discoverColumns(submissions);
-  const bName = findColumn(benchCols, [...ALIASES.name]);
-  const bEmail = findColumn(benchCols, [...ALIASES.email]);
-  const sName = findColumn(subCols, [...ALIASES.name]);
-  const sEmail = findColumn(subCols, [...ALIASES.email]);
-  const sStatus = findColumn(subCols, [...ALIASES.status]);
+/**
+ * Which column carries which meaning. Detected by default, overridable by hand.
+ *
+ * Detection is a guess about a report this code has never seen, and a wrong
+ * guess is quiet: the join silently matches nobody, or a status tile counts a
+ * column that happens to read "N/A". So the guess is shown in the UI and can be
+ * corrected there, and the correction is what everything downstream uses.
+ */
+export interface ColumnMap {
+  benchName: string | null;
+  benchEmail: string | null;
+  subName: string | null;
+  subEmail: string | null;
+  subStatus: string | null;
+}
+
+export function autoMap(bench: Row[], submissions: Row[]): ColumnMap {
+  const b = discoverColumns(bench);
+  const s = discoverColumns(submissions);
+  return {
+    benchName: findColumn(b, [...ALIASES.name], NOT_A_PERSON),
+    benchEmail: findColumn(b, [...ALIASES.email]),
+    subName: findColumn(s, [...ALIASES.name], NOT_A_PERSON),
+    subEmail: findColumn(s, [...ALIASES.email]),
+    subStatus: findColumn(s, [...ALIASES.status]),
+  };
+}
+
+export function joinBench(bench: Row[], submissions: Row[], map?: ColumnMap): BenchConsultant[] {
+  const m = map ?? autoMap(bench, submissions);
+  const bName = m.benchName;
+  const bEmail = m.benchEmail;
+  const sName = m.subName;
+  const sEmail = m.subEmail;
+  const sStatus = m.subStatus;
 
   // Index every submission under each identifier it offers, so a bench row can
   // match on whichever identifier the two reports happen to share.
@@ -176,8 +214,9 @@ export interface StatusCount {
 }
 
 /** Submissions per status, commonest first. Blank statuses group as "No status". */
-export function statusCounts(submissions: Row[]): StatusCount[] {
-  const statusCol = findColumn(discoverColumns(submissions), [...ALIASES.status]);
+export function statusCounts(submissions: Row[], column?: string | null): StatusCount[] {
+  const statusCol =
+    column !== undefined ? column : findColumn(discoverColumns(submissions), [...ALIASES.status]);
   if (!statusCol) return [];
   const tally = new Map<string, number>();
   for (const s of submissions) {
@@ -199,13 +238,13 @@ export interface BenchStats {
   byStatus: StatusCount[];
 }
 
-export function benchStats(joined: BenchConsultant[], submissions: Row[]): BenchStats {
+export function benchStats(joined: BenchConsultant[], submissions: Row[], statusCol?: string | null): BenchStats {
   const covered = joined.filter((c) => c.count > 0).length;
   return {
     benchTotal: joined.length,
     submissionTotal: submissions.length,
     covered,
     idle: joined.length - covered,
-    byStatus: statusCounts(submissions),
+    byStatus: statusCounts(submissions, statusCol),
   };
 }
