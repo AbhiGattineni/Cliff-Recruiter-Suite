@@ -14,7 +14,7 @@ import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
-import { fetchReport, probeTotal, reportUrl } from "./ceipal.js";
+import { fetchReport, probeTotal, reportUrl, ReportKey } from "./ceipal.js";
 import { readCache, readCacheMeta, writeCache, cacheEnvelope } from "./ceipalCache.js";
 import { assessResume, matchRolesToJd, assessPortfolio, planAskQuery, narrateAskResult, briefMeetings, BriefSource } from "./llm.js";
 import { searchUsers, buildPortfolio, parseGithubUsername } from "./github.js";
@@ -465,100 +465,152 @@ async function logLlmCall(
 // Candidates already sourced/submitted (Ceipal "internally selected" report),
 // de-duplicated to one row per candidate with the distinct roles they've been
 // submitted to (used for JD matching).
-async function candidatePoolHandler(request: CallableRequest) {
-  // A callable turns anything that is not an HttpsError into "INTERNAL" and
-  // drops the message on the way out, which is how every Ceipal failure here
-  // reached the browser as a bare INTERNAL with nothing to act on. Everything
-  // below rethrows with the reason attached.
+/** A report read, with where the rows came from and why if it was not live. */
+interface ReportRead {
+  rows: Record<string, unknown>[];
+  fetchedAt: number;
+  stale: boolean;
+  problem: string;
+}
+
+/**
+ * Read a Ceipal report the way the dashboard does: serve the cache while
+ * Ceipal's record_count still matches it, pull live otherwise, and fall back to
+ * the last good pull when Ceipal will not answer. Only a failure with nothing
+ * cached behind it throws, and it throws Ceipal's own message rather than the
+ * "INTERNAL" a plain Error becomes on the way out of a callable.
+ *
+ * `envVar` is named in the not-configured message because functions/.env is not
+ * in the repo: a report added after the last deploy fails on its own page and
+ * nowhere else, which is a hard thing to recognise from a generic error.
+ */
+async function readReport(
+  report: ReportKey,
+  envVar: string,
+  label: string,
+  password: string,
+  refresh: boolean
+): Promise<ReportRead> {
+  const configured = !!password && !password.startsWith("PLACEHOLDER");
+
+  if (!reportUrl(report)) {
+    throw new HttpsError(
+      "failed-precondition",
+      `No Ceipal endpoint is configured for ${label}. Set ${envVar} in functions/.env ` +
+        "(see functions/.env.example) and redeploy the functions."
+    );
+  }
+
+  const serveCache = async (): Promise<ReportRead | null> => {
+    try {
+      const cached = await readCache(report);
+      if (!cached || cached.rows.length === 0) return null;
+      return {
+        rows: cached.rows as Record<string, unknown>[],
+        fetchedAt: cached.fetchedAt,
+        stale: true,
+        problem: "",
+      };
+    } catch {
+      return null; // a cache that cannot be read is a miss, not a failure
+    }
+  };
+
+  // Cache hit whose count still matches Ceipal's = nothing to pull.
+  if (!refresh) {
+    const meta = await readCacheMeta(report).catch(() => null);
+    if (meta && meta.recordCount > 0) {
+      let unchanged = true;
+      if (configured) {
+        try {
+          const currentTotal = await probeTotal(report, password);
+          unchanged = currentTotal === (meta.totalAvailable || meta.recordCount);
+        } catch {
+          unchanged = true; // probe failed -> keep serving cache rather than break
+        }
+      }
+      if (unchanged) {
+        const hit = await serveCache();
+        if (hit) return { ...hit, stale: false };
+      }
+    }
+  }
+
+  if (!configured) {
+    const hit = await serveCache();
+    if (hit) return { ...hit, problem: "Ceipal password is not configured." };
+    throw new HttpsError("failed-precondition", "Ceipal password is not configured.");
+  }
+
   try {
-    return await candidatePool(request);
+    const data = (await fetchReport(report, password, 0)) as { result?: Record<string, unknown>[] };
+    const rows = Array.isArray(data.result) ? data.result : [];
+    await writeCache(report, rows, rows.length);
+    return { rows, fetchedAt: Date.now(), stale: false, problem: "" };
+  } catch (err) {
+    // Ceipal answers report-level errors with HTTP 200 and { success: 0 },
+    // which ceipal.ts turns into a thrown Error carrying its message. Keep that
+    // message: it is the only thing that says what actually went wrong.
+    const problem = err instanceof Error ? err.message : String(err);
+    const hit = await serveCache();
+    if (!hit) throw new HttpsError("unavailable", problem);
+    return { ...hit, problem };
+  }
+}
+
+/** Rethrow anything that is not an HttpsError with its message attached. */
+async function withReason<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
   } catch (err) {
     if (err instanceof HttpsError) throw err;
     throw new HttpsError("unavailable", err instanceof Error ? err.message : String(err));
   }
 }
 
-async function candidatePool(request: CallableRequest) {
-    const refresh = request.data?.refresh === true;
-    const password = CEIPAL_PASSWORD.value();
-    const configured = !!password && !password.startsWith("PLACEHOLDER");
+async function candidatePoolHandler(request: CallableRequest) {
+  return withReason(async () => {
     const s = (v: unknown) => String(v ?? "").trim();
-
-    // selected_candidates arrived with the Candidate Pool page, after the other
-    // reports were already deployed, and functions/.env is not in the repo. A
-    // deployment missing this one line fails here and nowhere else, so name it
-    // rather than letting fetchReport throw about an endpoint nobody set.
-    if (!reportUrl("selected_candidates")) {
-      throw new HttpsError(
-        "failed-precondition",
-        "No Ceipal endpoint is configured for the candidate pool. Set CEIPAL_SELECTED_CANDIDATES_URL " +
-          "in functions/.env (see functions/.env.example) and redeploy the functions."
-      );
-    }
-
-    // The pool is read the same way the dashboard reads its reports: from the
-    // cache when Ceipal has not moved, and from the last good pull when Ceipal
-    // will not answer at all. selected_candidates is the widest report here and
-    // the likeliest to trip Ceipal's report-level errors, so a page that could
-    // only ever show a live pull was one bad answer away from showing nothing.
-    let rows: Record<string, unknown>[] = [];
-    let fetchedAt = 0;
-    let stale = false;
-    let problem = "";
-
-    const serveCache = async () => {
-      try {
-        const cached = await readCache("selected_candidates");
-        if (!cached || cached.rows.length === 0) return false;
-        rows = cached.rows as Record<string, unknown>[];
-        fetchedAt = cached.fetchedAt;
-        return true;
-      } catch {
-        return false; // a cache that cannot be read is a cache miss, not a failure
-      }
+    const read = await readReport(
+      "selected_candidates",
+      "CEIPAL_SELECTED_CANDIDATES_URL",
+      "the candidate pool",
+      CEIPAL_PASSWORD.value(),
+      request.data?.refresh === true
+    );
+    return {
+      ok: true,
+      ...poolFromRows(read.rows, s),
+      fetchedAt: read.fetchedAt,
+      stale: read.stale,
+      problem: read.problem,
     };
+  });
+}
 
-    // Cache hit + Ceipal's record_count unchanged = nothing to pull.
-    if (!refresh) {
-      const meta = await readCacheMeta("selected_candidates").catch(() => null);
-      if (meta && meta.recordCount > 0) {
-        let unchanged = true;
-        if (configured) {
-          try {
-            const currentTotal = await probeTotal("selected_candidates", password);
-            unchanged = currentTotal === (meta.totalAvailable || meta.recordCount);
-          } catch {
-            unchanged = true; // probe failed -> keep serving cache rather than break
-          }
-        }
-        if (unchanged && (await serveCache())) {
-          return { ok: true, ...poolFromRows(rows, s), fetchedAt, stale: false, problem: "" };
-        }
-      }
-    }
-
-    if (!configured) {
-      if (await serveCache()) {
-        return { ok: true, ...poolFromRows(rows, s), fetchedAt, stale: true, problem: "Ceipal password is not configured." };
-      }
-      throw new HttpsError("failed-precondition", "Ceipal password is not configured.");
-    }
-
-    try {
-      const data = (await fetchReport("selected_candidates", password, 0)) as { result?: Record<string, unknown>[] };
-      rows = Array.isArray(data.result) ? data.result : [];
-      fetchedAt = Date.now();
-      await writeCache("selected_candidates", rows, rows.length);
-    } catch (err) {
-      // Ceipal answers report-level errors with HTTP 200 and { success: 0 },
-      // which ceipal.ts turns into a thrown Error carrying its message. Keep
-      // that message: it is the only thing that says what actually went wrong.
-      problem = err instanceof Error ? err.message : String(err);
-      if (!(await serveCache())) throw new HttpsError("unavailable", problem);
-      stale = true;
-    }
-
-    return { ok: true, ...poolFromRows(rows, s), fetchedAt, stale, problem };
+/**
+ * The bench roster and the submissions made for it, returned as the raw Ceipal
+ * rows. Neither report's columns are known here, and guessing at them is what
+ * leaves a page full of dashes, so the shaping is left to the client, which
+ * derives its columns from whatever actually arrives.
+ */
+async function benchSubmissionsHandler(request: CallableRequest) {
+  return withReason(async () => {
+    const password = CEIPAL_PASSWORD.value();
+    const refresh = request.data?.refresh === true;
+    const [bench, submissions] = await Promise.all([
+      readReport("bench_list", "CEIPAL_BENCH_LIST_URL", "the bench list", password, refresh),
+      readReport("bench_submissions", "CEIPAL_BENCH_SUBMISSIONS_URL", "bench submissions", password, refresh),
+    ]);
+    return {
+      ok: true,
+      bench: bench.rows,
+      submissions: submissions.rows,
+      fetchedAt: Math.max(bench.fetchedAt, submissions.fetchedAt),
+      stale: bench.stale || submissions.stale,
+      problem: [bench.problem, submissions.problem].filter(Boolean).join(" "),
+    };
+  });
 }
 
 // Fold the report's submission rows into one row per candidate, carrying the
@@ -1720,6 +1772,8 @@ export const ceipalData = onCall(
         return activeJobsHandler(request);
       case "candidatePool":
         return candidatePoolHandler(request);
+      case "benchSubmissions":
+        return benchSubmissionsHandler(request);
       default:
         throw new HttpsError("invalid-argument", `Unknown action "${action}".`);
     }

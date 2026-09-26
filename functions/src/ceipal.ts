@@ -22,7 +22,9 @@ export type ReportKey =
   | "mail_merge"
   | "advanced_search"
   | "active_jobs"
-  | "selected_candidates";
+  | "selected_candidates"
+  | "bench_list"
+  | "bench_submissions";
 
 const REPORT_ENV: Record<ReportKey, string> = {
   job_duration: "CEIPAL_JOB_DURATION_URL",
@@ -33,6 +35,8 @@ const REPORT_ENV: Record<ReportKey, string> = {
   advanced_search: "CEIPAL_ADV_SEARCH_URL",
   active_jobs: "CEIPAL_ACTIVE_JOBS_URL",
   selected_candidates: "CEIPAL_SELECTED_CANDIDATES_URL",
+  bench_list: "CEIPAL_BENCH_LIST_URL",
+  bench_submissions: "CEIPAL_BENCH_SUBMISSIONS_URL",
 };
 
 export function reportUrl(report: ReportKey): string {
