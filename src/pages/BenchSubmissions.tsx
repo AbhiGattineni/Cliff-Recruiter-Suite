@@ -206,8 +206,10 @@ export default function BenchSubmissions() {
               </p>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: "0.6rem" }}>
                 <MapField label="Bench: consultant" value={map.benchName} columns={benchCols} onChange={(v) => setField("benchName", v)} />
+                <MapField label="Bench: surname" value={map.benchLast} columns={benchCols} onChange={(v) => setField("benchLast", v)} hint="Only if the name is split across two columns" />
                 <MapField label="Bench: email" value={map.benchEmail} columns={benchCols} onChange={(v) => setField("benchEmail", v)} hint="Optional" />
                 <MapField label="Submissions: consultant" value={map.subName} columns={subCols} onChange={(v) => setField("subName", v)} hint="Must name the same person as the bench column" />
+                <MapField label="Submissions: surname" value={map.subLast} columns={subCols} onChange={(v) => setField("subLast", v)} hint="Only if the name is split across two columns" />
                 <MapField label="Submissions: email" value={map.subEmail} columns={subCols} onChange={(v) => setField("subEmail", v)} hint="Optional" />
                 <MapField label="Submissions: status" value={map.subStatus} columns={subCols} onChange={(v) => setField("subStatus", v)} hint="Drives the status tiles" />
               </div>

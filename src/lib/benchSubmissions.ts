@@ -98,6 +98,8 @@ export const ALIASES = {
   client: ["endclient", "clientname", "client", "vendor"],
   title: ["jobtitle", "positionname", "requirement", "position", "title"],
   date: ["submittedon", "submissiondate", "submitteddate", "appliedon", "createdon", "date"],
+  first: ["firstname", "givenname", "fname"],
+  last: ["lastname", "surname", "familyname", "lname"],
 } as const;
 
 /** Trimmed string cell. */
@@ -113,18 +115,49 @@ export const cell = (r: Row, col: string | null): string =>
  * roster with emails and a submissions report without would key on different
  * things and match nobody, which looks exactly like an empty bench.
  */
-export function personKeys(r: Row, nameCol: string | null, emailCol: string | null): string[] {
+export function personKeys(
+  r: Row,
+  nameCol: string | null,
+  emailCol: string | null,
+  lastCol: string | null = null
+): string[] {
   const keys: string[] = [];
   const email = cell(r, emailCol).toLowerCase();
   if (email) keys.push(`e:${email}`);
-  const name = cell(r, nameCol).toLowerCase().replace(/\s+/g, " ");
-  if (name) keys.push(`n:${name}`);
+  const name = fullName(r, nameCol, lastCol);
+  if (name) keys.push(`n:${name.toLowerCase()}`);
   return keys;
+}
+
+/**
+ * The person's name, joined from a surname column when the report splits it.
+ *
+ * The bench roster carries FirstName and LastName while the submissions report
+ * carries one ApplicantName, so one side reads "Anil" and the other "Anil
+ * Challa" unless the halves are put back together.
+ */
+export function fullName(r: Row, nameCol: string | null, lastCol: string | null = null): string {
+  return [cell(r, nameCol), cell(r, lastCol)].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
 }
 
 /** The strongest identifier a row offers, or "" when it identifies nobody. */
 export function personKey(r: Row, nameCol: string | null, emailCol: string | null): string {
   return personKeys(r, nameCol, emailCol)[0] ?? "";
+}
+
+/**
+ * The columns naming a person: a single full-name column, or a first/last pair.
+ *
+ * The pair is looked for first. A report with FirstName and LastName has no
+ * column matching a full-name alias, so the containing-header fallback settles
+ * on FirstName -- and keying the bench on "anil" while the submissions key on
+ * "anil challa" matches nobody at all.
+ */
+export function findNameColumns(columns: string[]): { name: string | null; last: string | null } {
+  const first = findColumn(columns, [...ALIASES.first]);
+  const last = findColumn(columns, [...ALIASES.last]);
+  if (first && last) return { name: first, last };
+  return { name: findColumn(columns, [...ALIASES.name], NOT_A_PERSON), last: null };
 }
 
 export interface BenchConsultant {
@@ -154,8 +187,11 @@ export interface BenchConsultant {
  */
 export interface ColumnMap {
   benchName: string | null;
+  /** Surname column, when the report splits the name across two. */
+  benchLast: string | null;
   benchEmail: string | null;
   subName: string | null;
+  subLast: string | null;
   subEmail: string | null;
   subStatus: string | null;
 }
@@ -163,10 +199,14 @@ export interface ColumnMap {
 export function autoMap(bench: Row[], submissions: Row[]): ColumnMap {
   const b = discoverColumns(bench);
   const s = discoverColumns(submissions);
+  const bn = findNameColumns(b);
+  const sn = findNameColumns(s);
   return {
-    benchName: findColumn(b, [...ALIASES.name], NOT_A_PERSON),
+    benchName: bn.name,
+    benchLast: bn.last,
     benchEmail: findColumn(b, [...ALIASES.email]),
-    subName: findColumn(s, [...ALIASES.name], NOT_A_PERSON),
+    subName: sn.name,
+    subLast: sn.last,
     subEmail: findColumn(s, [...ALIASES.email]),
     subStatus: findColumn(s, [...ALIASES.status]),
   };
@@ -184,7 +224,7 @@ export function joinBench(bench: Row[], submissions: Row[], map?: ColumnMap): Be
   // match on whichever identifier the two reports happen to share.
   const byKey = new Map<string, number[]>();
   submissions.forEach((s, i) => {
-    for (const k of personKeys(s, sName, sEmail)) {
+    for (const k of personKeys(s, sName, sEmail, m.subLast)) {
       const list = byKey.get(k);
       if (list) list.push(i);
       else byKey.set(k, [i]);
@@ -192,7 +232,7 @@ export function joinBench(bench: Row[], submissions: Row[], map?: ColumnMap): Be
   });
 
   return bench.map((row) => {
-    const keys = personKeys(row, bName, bEmail);
+    const keys = personKeys(row, bName, bEmail, m.benchLast);
     // A submission indexed under both an email and a name must still be counted
     // once, so collect indices before resolving them to rows.
     const hits = new Set<number>();
@@ -204,7 +244,7 @@ export function joinBench(bench: Row[], submissions: Row[], map?: ColumnMap): Be
       const v = cell(s, sStatus);
       if (v && !statuses.includes(v)) statuses.push(v);
     }
-    return { row, key: keys[0] ?? "", name: cell(row, bName), submissions: subs, count: subs.length, statuses };
+    return { row, key: keys[0] ?? "", name: fullName(row, bName, m.benchLast), submissions: subs, count: subs.length, statuses };
   });
 }
 

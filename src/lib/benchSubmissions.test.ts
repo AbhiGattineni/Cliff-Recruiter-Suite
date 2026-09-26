@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   discoverColumns, findColumn, joinBench, statusCounts, benchStats, personKey,
-  autoMap, NOT_A_PERSON, ALIASES, Row,
+  autoMap, NOT_A_PERSON, findNameColumns, fullName, ALIASES, Row,
 } from "./benchSubmissions";
 
 describe("discoverColumns", () => {
@@ -170,8 +170,10 @@ describe("autoMap", () => {
     );
     expect(m).toEqual({
       benchName: "Applicant Name",
+      benchLast: null,
       benchEmail: "Email Address",
       subName: "Candidate Name",
+      subLast: null,
       subEmail: null,
       subStatus: "Submission Status",
     });
@@ -183,7 +185,7 @@ describe("explicit column overrides", () => {
   const submissions: Row[] = [{ Person: "Jane Roe", Outcome: "Offer", Junk: "N/A" }];
 
   it("joins on columns detection would never have guessed", () => {
-    const map = { benchName: "Who", benchEmail: null, subName: "Person", subEmail: null, subStatus: "Outcome" };
+    const map = { benchName: "Who", benchLast: null, benchEmail: null, subName: "Person", subLast: null, subEmail: null, subStatus: "Outcome" };
     expect(joinBench(bench, submissions, map)[0].count).toBe(1);
   });
 
@@ -197,9 +199,80 @@ describe("explicit column overrides", () => {
   });
 
   it("passes the chosen status column through benchStats", () => {
-    const map = { benchName: "Who", benchEmail: null, subName: "Person", subEmail: null, subStatus: "Outcome" };
+    const map = { benchName: "Who", benchLast: null, benchEmail: null, subName: "Person", subLast: null, subEmail: null, subStatus: "Outcome" };
     const stats = benchStats(joinBench(bench, submissions, map), submissions, "Outcome");
     expect(stats.covered).toBe(1);
     expect(stats.byStatus).toEqual([{ status: "Offer", count: 1 }]);
+  });
+});
+
+describe("the real Ceipal reports", () => {
+  // The roster splits the name; the submissions report does not. Keying one on
+  // "anil" and the other on "anil challa" matched nobody, which is what the
+  // page showed: 8 on the bench, 7 submissions, 0 covered.
+  const roster: Row[] = [
+    { FirstName: "Anil", LastName: "Challa", EmailAddress: "anilchalla926@gmail.com", WorkAuthorization: "H1-B" },
+    { FirstName: "Bapu", LastName: "Naidu", EmailAddress: "jbnaidu456.edi@gmail.com", WorkAuthorization: "Have H1 Visa" },
+    { FirstName: "Mohan", LastName: "Babu", EmailAddress: "mohan2fast@gmail.com", WorkAuthorization: "GC" },
+  ];
+  const subs: Row[] = [
+    { VendorName: "Ramy Infotech", JobTitle: "VJ -2", ProfileStatus: "Submitted", SubmittedBy: "Mohammed Ahmed", ApplicantName: "Anil Challa" },
+    { VendorName: "EXL NEO", JobTitle: "VJ -3", ProfileStatus: "Rejected By Client", SubmittedBy: "Mohammed Ahmed", ApplicantName: "Anil Challa" },
+    { VendorName: "Apolis Rises", JobTitle: "VJ -4", ProfileStatus: "Submitted", SubmittedBy: "Mohammed Ahmed", ApplicantName: "Bapu Naidu" },
+  ];
+
+  it("detects the split name on the roster and the single name on the submissions", () => {
+    expect(autoMap(roster, subs)).toEqual({
+      benchName: "FirstName",
+      benchLast: "LastName",
+      benchEmail: "EmailAddress",
+      subName: "ApplicantName",
+      subLast: null,
+      subEmail: null,
+      subStatus: "ProfileStatus",
+    });
+  });
+
+  it("never mistakes VendorName or SubmittedBy for the applicant", () => {
+    expect(autoMap(roster, subs).subName).toBe("ApplicantName");
+  });
+
+  it("matches the roster to its submissions", () => {
+    const joined = joinBench(roster, subs, autoMap(roster, subs));
+    expect(joined.map((c) => [c.name, c.count])).toEqual([
+      ["Anil Challa", 2],
+      ["Bapu Naidu", 1],
+      ["Mohan Babu", 0],
+    ]);
+  });
+
+  it("produces the stats the page should have shown", () => {
+    const map = autoMap(roster, subs);
+    const stats = benchStats(joinBench(roster, subs, map), subs, map.subStatus);
+    expect(stats).toMatchObject({ benchTotal: 3, submissionTotal: 3, covered: 2, idle: 1 });
+    expect(stats.byStatus).toEqual([
+      { status: "Submitted", count: 2 },
+      { status: "Rejected By Client", count: 1 },
+    ]);
+  });
+});
+
+describe("findNameColumns", () => {
+  it("prefers a first/last pair over a lone containing match", () => {
+    expect(findNameColumns(["FirstName", "LastName"])).toEqual({ name: "FirstName", last: "LastName" });
+  });
+
+  it("uses a single column when the name is not split", () => {
+    expect(findNameColumns(["ApplicantName"])).toEqual({ name: "ApplicantName", last: null });
+  });
+});
+
+describe("fullName", () => {
+  it("joins the halves and collapses the gap", () => {
+    expect(fullName({ F: " Anil ", L: " Challa " }, "F", "L")).toBe("Anil Challa");
+  });
+
+  it("returns the single column untouched when there is no surname column", () => {
+    expect(fullName({ N: "Anil Challa" }, "N", null)).toBe("Anil Challa");
   });
 });
