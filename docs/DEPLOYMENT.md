@@ -33,8 +33,25 @@ security is enforced by Auth + Firestore rules, not by hiding the web apiKey).
 ## Build
 ```bash
 npm run build                 # → dist/
-(cd functions && npm run build)
+(cd functions && npm run build)   # → functions/lib/
 ```
+
+Both now also run as `predeploy` hooks in `firebase.json`, so a deploy compiles
+what it is about to ship. Running them by hand is still the faster way to find a
+type error, because a `predeploy` failure aborts the deploy after the CLI has
+already spent a minute enabling APIs.
+
+`functions/lib/` is gitignored and `functions/package.json` points `main` at it.
+Deploying a fresh checkout without building it once failed as:
+
+```
+Error: User code failed to load. Cannot determine backend specification. Timeout after 10000.
+```
+
+which names the symptom rather than the cause: the CLI starts the discovery
+server, the entry point is not there to load, nothing ever answers, and the wait
+times out. If that appears again, build the functions before reading anything
+into the timeout.
 
 ## Deploy
 ```bash

@@ -1,5 +1,8 @@
 {
   "hosting": {
+    // dist/ is gitignored, so a deploy from a fresh checkout would otherwise
+    // publish whatever happened to be there -- or nothing at all.
+    "predeploy": ["npm --prefix \"$PROJECT_DIR\" run build"],
     "public": "dist",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [{ "source": "**", "destination": "/index.html" }],
@@ -18,6 +21,11 @@
     ]
   },
   "functions": {
+    // functions/lib is gitignored and package.json's main points into it, so
+    // without this the CLI loads nothing, the discovery server never answers,
+    // and the deploy fails as "Cannot determine backend specification.
+    // Timeout after 10000" -- which names the symptom and not the cause.
+    "predeploy": ["npm --prefix \"$RESOURCE_DIR\" run build"],
     "source": "functions",
     "runtime": "nodejs20"
   },
