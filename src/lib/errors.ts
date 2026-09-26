@@ -38,12 +38,19 @@ const AUTH_MESSAGES: Record<string, string> = {
 // Firebase Functions codes we may hit when a call can't complete.
 const FUNCTION_FALLBACKS: Record<string, string> = {
   "functions/unavailable": "Can't reach the server right now. Please try again in a moment.",
-  // A failed fetch to a non-existent callable surfaces as functions/internal with a
-  // generic message — most often it means the Cloud Functions aren't deployed yet.
+  // A callable the browser cannot reach at all surfaces here, because the 404 it
+  // got back carries no CORS headers and the fetch fails before any code runs.
+  // Two things cause it and they are indistinguishable from the browser: the
+  // function is not deployed, or it is deployed somewhere this build is not
+  // looking. The second is easy to miss, so it is named — the region is baked
+  // into the bundle at build time from VITE_FUNCTIONS_REGION, and a deploy that
+  // moved regions leaves every call pointing at a region holding nothing.
   "functions/internal":
-    "This service isn't available yet — the Cloud Functions may not be deployed. Please try again later or contact your administrator.",
+    "Couldn't reach the server. The Cloud Functions may not be deployed, or this build may be " +
+    "pointing at the wrong region — check VITE_FUNCTIONS_REGION against where the functions are deployed.",
   "functions/not-found":
-    "This service isn't available yet — the Cloud Functions may not be deployed. Please contact your administrator.",
+    "Couldn't reach the server. The Cloud Functions may not be deployed, or this build may be " +
+    "pointing at the wrong region — check VITE_FUNCTIONS_REGION against where the functions are deployed.",
   "functions/deadline-exceeded": "The request timed out. Please try again.",
   "functions/unauthenticated": "Please sign in and try again.",
 };
