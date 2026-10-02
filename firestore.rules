@@ -25,10 +25,17 @@ service cloud.firestore {
     // profile, because that check is on the uid rather than the role — which
     // is how the app learns to sign them out and say why.
     //
-    // `active` is absent on every profile written before deactivation
-    // existed, so only an explicit false counts.
+    // `active` is absent on every profile written before deactivation existed,
+    // and reading a field a document does not have is an EVALUATION ERROR in
+    // this language, not null — the rule then denies. Writing
+    // `myProfile().active == false` therefore locked out every account whose
+    // profile predated the field, which was all of them: "Missing or
+    // insufficient permissions" on the roster, for admins included. `get` with
+    // a default is the only safe way to read a field that may be absent.
     function myRole() {
-      return myProfile() == null || myProfile().active == false ? null : myProfile().role;
+      return myProfile() == null || myProfile().get("active", true) == false
+        ? null
+        : myProfile().role;
     }
 
     // Staff = people who work for Cliff. Consultants are outsiders we placed at

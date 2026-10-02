@@ -144,6 +144,10 @@ export async function getOrCreateProfile(uid: string, email: string, displayName
   if (displayName && data.displayName !== displayName) patch.displayName = displayName;
   if (isPermanentAdmin && data.role !== "admin") patch.role = "admin";
   if (isPermanentAdmin && data.active === false) patch.active = true;
+  // Backfill the flag on profiles written before it existed. The rules read it
+  // with a default so an absent field is already treated as active, but a
+  // field that is actually there is one less thing depending on that default.
+  if (data.active === undefined) patch.active = true;
   if (Object.keys(patch).length) {
     patch.updatedAt = FieldValue.serverTimestamp();
     await ref.set(patch, { merge: true });
