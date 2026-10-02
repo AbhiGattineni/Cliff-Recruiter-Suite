@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   discoverColumns, findColumn, joinBench, statusCounts, benchStats, personKey,
   autoMap, NOT_A_PERSON, findNameColumns, fullName, ALIASES, Row,
+  rowDay, inputDay, filterByDate, filterByStatus,
 } from "./benchSubmissions";
 
 describe("discoverColumns", () => {
@@ -176,6 +177,7 @@ describe("autoMap", () => {
       subLast: null,
       subEmail: null,
       subStatus: "Submission Status",
+      subDate: null,
     });
   });
 });
@@ -185,7 +187,7 @@ describe("explicit column overrides", () => {
   const submissions: Row[] = [{ Person: "Jane Roe", Outcome: "Offer", Junk: "N/A" }];
 
   it("joins on columns detection would never have guessed", () => {
-    const map = { benchName: "Who", benchLast: null, benchEmail: null, subName: "Person", subLast: null, subEmail: null, subStatus: "Outcome" };
+    const map = { benchName: "Who", benchLast: null, benchEmail: null, subName: "Person", subLast: null, subEmail: null, subStatus: "Outcome", subDate: null };
     expect(joinBench(bench, submissions, map)[0].count).toBe(1);
   });
 
@@ -199,7 +201,7 @@ describe("explicit column overrides", () => {
   });
 
   it("passes the chosen status column through benchStats", () => {
-    const map = { benchName: "Who", benchLast: null, benchEmail: null, subName: "Person", subLast: null, subEmail: null, subStatus: "Outcome" };
+    const map = { benchName: "Who", benchLast: null, benchEmail: null, subName: "Person", subLast: null, subEmail: null, subStatus: "Outcome", subDate: null };
     const stats = benchStats(joinBench(bench, submissions, map), submissions, "Outcome");
     expect(stats.covered).toBe(1);
     expect(stats.byStatus).toEqual([{ status: "Offer", count: 1 }]);
@@ -216,9 +218,9 @@ describe("the real Ceipal reports", () => {
     { FirstName: "Mohan", LastName: "Babu", EmailAddress: "mohan2fast@gmail.com", WorkAuthorization: "GC" },
   ];
   const subs: Row[] = [
-    { VendorName: "Ramy Infotech", JobTitle: "VJ -2", ProfileStatus: "Submitted", SubmittedBy: "Mohammed Ahmed", ApplicantName: "Anil Challa" },
-    { VendorName: "EXL NEO", JobTitle: "VJ -3", ProfileStatus: "Rejected By Client", SubmittedBy: "Mohammed Ahmed", ApplicantName: "Anil Challa" },
-    { VendorName: "Apolis Rises", JobTitle: "VJ -4", ProfileStatus: "Submitted", SubmittedBy: "Mohammed Ahmed", ApplicantName: "Bapu Naidu" },
+    { VendorName: "Ramy Infotech", JobTitle: "VJ -2", SubmittedOn: "09/21/2026 17:37:28", ProfileStatus: "Submitted", SubmittedBy: "Mohammed Ahmed", ApplicantName: "Anil Challa" },
+    { VendorName: "EXL NEO", JobTitle: "VJ -3", SubmittedOn: "08/02/2026 09:14:00", ProfileStatus: "Rejected By Client", SubmittedBy: "Mohammed Ahmed", ApplicantName: "Anil Challa" },
+    { VendorName: "Apolis Rises", JobTitle: "VJ -4", SubmittedOn: "09/22/2026 11:02:41", ProfileStatus: "Submitted", SubmittedBy: "Mohammed Ahmed", ApplicantName: "Bapu Naidu" },
   ];
 
   it("detects the split name on the roster and the single name on the submissions", () => {
@@ -230,6 +232,7 @@ describe("the real Ceipal reports", () => {
       subLast: null,
       subEmail: null,
       subStatus: "ProfileStatus",
+      subDate: "SubmittedOn",
     });
   });
 
@@ -274,5 +277,117 @@ describe("fullName", () => {
 
   it("returns the single column untouched when there is no surname column", () => {
     expect(fullName({ N: "Anil Challa" }, "N", null)).toBe("Anil Challa");
+  });
+});
+
+describe("rowDay", () => {
+  it("reads Ceipal's M/D/YYYY, with or without a time", () => {
+    expect(rowDay("9/21/2026")).toBe(Date.UTC(2026, 8, 21));
+    // The time is dropped, so a late submission still falls on its own day.
+    expect(rowDay("09/21/2026 17:37:28")).toBe(Date.UTC(2026, 8, 21));
+  });
+
+  it("reads ISO too, in case the report is configured that way", () => {
+    expect(rowDay("2026-09-21")).toBe(Date.UTC(2026, 8, 21));
+    expect(rowDay("2026-9-1")).toBe(Date.UTC(2026, 8, 1));
+  });
+
+  it("is null for a blank or unreadable cell", () => {
+    expect(rowDay("")).toBeNull();
+    expect(rowDay(null)).toBeNull();
+    expect(rowDay("not a date")).toBeNull();
+  });
+});
+
+describe("inputDay", () => {
+  it("reads what a date input produces, and nothing else", () => {
+    expect(inputDay("2026-09-21")).toBe(Date.UTC(2026, 8, 21));
+    expect(inputDay("")).toBeNull();
+    expect(inputDay("21/09/2026")).toBeNull();
+  });
+});
+
+describe("filterByDate", () => {
+  const rows: Row[] = [
+    { Who: "A", SubmittedOn: "9/20/2026" },
+    { Who: "B", SubmittedOn: "9/21/2026 23:59:00" },
+    { Who: "C", SubmittedOn: "9/22/2026" },
+    { Who: "D", SubmittedOn: "" },
+  ];
+  const who = (out: Row[]) => out.map((r) => r.Who);
+
+  it("includes both ends of the range", () => {
+    expect(who(filterByDate(rows, "SubmittedOn", "2026-09-20", "2026-09-21"))).toEqual(["A", "B"]);
+  });
+
+  it("treats a missing bound as open-ended", () => {
+    expect(who(filterByDate(rows, "SubmittedOn", "2026-09-22", ""))).toEqual(["C"]);
+    expect(who(filterByDate(rows, "SubmittedOn", "", "2026-09-20"))).toEqual(["A"]);
+  });
+
+  it("returns the rows untouched when no bound is set", () => {
+    expect(filterByDate(rows, "SubmittedOn", "", "")).toBe(rows);
+  });
+
+  it("returns the rows untouched when no date column is mapped", () => {
+    expect(filterByDate(rows, null, "2026-09-20", "2026-09-21")).toBe(rows);
+  });
+
+  it("drops rows with no readable date while a bound is set", () => {
+    expect(who(filterByDate(rows, "SubmittedOn", "2026-01-01", ""))).toEqual(["A", "B", "C"]);
+  });
+});
+
+describe("filterByStatus", () => {
+  const rows: Row[] = [
+    { Who: "A", ProfileStatus: "Submitted To Client" },
+    { Who: "B", ProfileStatus: "Client Interview" },
+    { Who: "C", ProfileStatus: "" },
+  ];
+  const who = (out: Row[]) => out.map((r) => r.Who);
+
+  it("keeps only the picked statuses", () => {
+    expect(who(filterByStatus(rows, "ProfileStatus", ["Client Interview"]))).toEqual(["B"]);
+  });
+
+  it("groups a blank status under the same label the tiles use", () => {
+    expect(who(filterByStatus(rows, "ProfileStatus", ["No status"]))).toEqual(["C"]);
+  });
+
+  it("means all when nothing is picked, or no status column is mapped", () => {
+    expect(filterByStatus(rows, "ProfileStatus", [])).toBe(rows);
+    expect(filterByStatus(rows, null, ["Client Interview"])).toBe(rows);
+  });
+});
+
+describe("filtering before the join", () => {
+  // The point of narrowing the submissions first: the bench roster is whole,
+  // but "no submissions yet" must mean "none in this range".
+  const bench: Row[] = [{ FirstName: "Anil", LastName: "Challa" }, { FirstName: "Mia", LastName: "Diaz" }];
+  const submissions: Row[] = [
+    { ApplicantName: "Anil Challa", ProfileStatus: "Submitted To Client", SubmittedOn: "9/21/2026" },
+    { ApplicantName: "Mia Diaz", ProfileStatus: "Client Interview", SubmittedOn: "8/02/2026" },
+  ];
+
+  it("counts a consultant idle when their only submission is outside the range", () => {
+    const map = autoMap(bench, submissions);
+    const inRange = filterByDate(submissions, map.subDate, "2026-09-01", "2026-09-30");
+    const stats = benchStats(joinBench(bench, inRange, map), inRange, map.subStatus);
+    expect(stats.benchTotal).toBe(2);
+    expect(stats.submissionTotal).toBe(1);
+    expect(stats.covered).toBe(1);
+    expect(stats.idle).toBe(1);
+  });
+
+  it("detects the date column from the real report's header", () => {
+    expect(autoMap(bench, submissions).subDate).toBe("SubmittedOn");
+  });
+
+  it("never reads a name column as a date", () => {
+    // "candidatename" contains "date", and the containing-header fallback was
+    // happy to take it until NOT_A_DATE said otherwise.
+    expect(autoMap([{ Who: "A" }], [{ "Candidate Name": "A" }]).subDate).toBeNull();
+    expect(autoMap([{ Who: "A" }], [{ "Candidate Name": "A", "Status Change Date": "9/1/2026" }]).subDate)
+      .toBe("Status Change Date");
   });
 });

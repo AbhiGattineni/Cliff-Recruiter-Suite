@@ -12,6 +12,7 @@ import { httpsCallable } from "firebase/functions";
 import { functions } from "../firebase";
 import { ensureConfigured } from "./errors";
 import { normHeader } from "./report/columns";
+import { asDate } from "./tableSort";
 
 export type Row = Record<string, unknown>;
 
@@ -89,6 +90,16 @@ export function findColumn(columns: string[], aliases: string[], exclude: string
 /** Headers that name a company or a third party, never the person submitted. */
 export const NOT_A_PERSON = ["vendor", "client", "company", "partner", "contactperson", "submittedby"];
 
+/**
+ * Headers that only contain "date" by accident.
+ *
+ * "Candidate Name" normalises to "candidatename", which contains "date", and
+ * the containing-header fallback would otherwise hand the date filter a column
+ * full of people. A header naming a person is never a date; one that is really
+ * about a date, like "Status Change Date", is untouched by this.
+ */
+export const NOT_A_DATE = ["candidate", "name"];
+
 export const ALIASES = {
   name: ["consultantname", "candidatename", "applicantfullname", "applicantname", "employeename",
          "resourcename", "fullname", "consultant", "candidate", "applicant", "name"],
@@ -160,6 +171,64 @@ export function findNameColumns(columns: string[]): { name: string | null; last:
   return { name: findColumn(columns, [...ALIASES.name], NOT_A_PERSON), last: null };
 }
 
+/**
+ * The day a report cell falls on, as epoch ms at UTC midnight, or null when it
+ * carries no date.
+ *
+ * Ceipal returns M/D/YYYY with an optional time, which `asDate` already reads;
+ * ISO is accepted too because these reports are configured by hand in Ceipal
+ * and a column set to a different format is one checkbox away. The time is
+ * dropped so a range reads inclusively at both ends: a submission at 17:37 on
+ * the "to" day is in the range, not just past it.
+ */
+export function rowDay(value: unknown): number | null {
+  const s = String(value ?? "").trim();
+  if (!s) return null;
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  if (iso) return Date.UTC(+iso[1], +iso[2] - 1, +iso[3]);
+  const ms = asDate(s);
+  if (ms === null) return null;
+  const d = new Date(ms);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+/** The day an `<input type="date">` value names, or null when it is empty. */
+export function inputDay(v: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v.trim());
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : null;
+}
+
+/**
+ * Submissions falling inside an inclusive day range.
+ *
+ * Rows whose date cell is blank or unreadable are dropped while a bound is set.
+ * Keeping them would mean a range of one day still returned rows from outside
+ * it, which reads as the filter being broken; the page says this next to the
+ * inputs rather than leaving it to be discovered.
+ */
+export function filterByDate(
+  rows: Row[],
+  dateCol: string | null,
+  from: string,
+  to: string
+): Row[] {
+  const lo = inputDay(from);
+  const hi = inputDay(to);
+  if (!dateCol || (lo === null && hi === null)) return rows;
+  return rows.filter((r) => {
+    const d = rowDay(r[dateCol]);
+    if (d === null) return false;
+    return (lo === null || d >= lo) && (hi === null || d <= hi);
+  });
+}
+
+/** Submissions whose status is one of `picked`. An empty pick means all. */
+export function filterByStatus(rows: Row[], statusCol: string | null, picked: string[]): Row[] {
+  if (!statusCol || picked.length === 0) return rows;
+  const want = new Set(picked);
+  return rows.filter((r) => want.has(cell(r, statusCol) || "No status"));
+}
+
 export interface BenchConsultant {
   row: Row;
   key: string;
@@ -194,6 +263,8 @@ export interface ColumnMap {
   subLast: string | null;
   subEmail: string | null;
   subStatus: string | null;
+  /** Drives the date range filter. Null when the report carries no date. */
+  subDate: string | null;
 }
 
 export function autoMap(bench: Row[], submissions: Row[]): ColumnMap {
@@ -209,6 +280,7 @@ export function autoMap(bench: Row[], submissions: Row[]): ColumnMap {
     subLast: sn.last,
     subEmail: findColumn(s, [...ALIASES.email]),
     subStatus: findColumn(s, [...ALIASES.status]),
+    subDate: findColumn(s, [...ALIASES.date], NOT_A_DATE),
   };
 }
 
