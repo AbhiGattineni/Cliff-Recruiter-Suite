@@ -9,7 +9,7 @@ import {
   Role,
   ROLE_LABELS,
 } from "../../lib/timesheets";
-import { dayRows, DayRow, leaveLabel } from "../../lib/timesheetDays";
+import { dayRows, DayRow, leaveLabel, trackedThrough } from "../../lib/timesheetDays";
 import { daysBetween, missingDays } from "../../lib/timesheetStats";
 import { listHolidays, holidayDateSet } from "../../lib/holidays";
 import FillOnBehalfModal from "./FillOnBehalfModal";
@@ -64,13 +64,15 @@ export default function TeamDashboardTab({ role }: { role: Role }) {
     if (!tsQ.data) return [];
     const { entries, users } = tsQ.data;
     const approvedLeaves = (leavesQ.data ?? []).filter((l) => l.status === "approved");
-    // Admins aren't tracked here — they're not expected to log hours — and
-    // neither is anyone deactivated, which is what deactivating is for.
-    // Everything either of them filed is still in `entries` and still counted
-    // everywhere it was before; they just stop appearing as a name with
-    // missing days nobody intends to chase.
+    // Admins aren't tracked here — they're not expected to log hours.
+    //
+    // Someone deactivated IS still shown, for the time they were here. Their
+    // September is still their September, and dropping them from this table
+    // took it off the page entirely. What stops at the day they left is the
+    // chasing: `trackedThrough` ends their missing-day count there, so a
+    // person who left in September doesn't accumulate October.
     return users
-      .filter((u) => u.role !== "admin" && u.active)
+      .filter((u) => u.role !== "admin")
       .map((u) => {
         const myEntries = entries.filter((e) => e.uid === u.uid).sort((a, b) => b.date.localeCompare(a.date));
         const myLeaves = (leavesQ.data ?? []).filter((l) => l.uid === u.uid);
@@ -79,7 +81,14 @@ export default function TeamDashboardTab({ role }: { role: Role }) {
         approvedLeaves
           .filter((l) => l.uid === u.uid)
           .forEach((l) => daysBetween(l.startDate, l.endDate).forEach((d) => myLeaveDates.add(d)));
-        const missing = missingDays(from, to, today, filledDates, myLeaveDates, holidayDates);
+        const missing = missingDays(
+          from,
+          to,
+          trackedThrough(u, today),
+          filledDates,
+          myLeaveDates,
+          holidayDates
+        );
         const totalHours = myEntries.reduce((s, e) => s + e.hours, 0);
         return {
           user: u,
@@ -91,6 +100,9 @@ export default function TeamDashboardTab({ role }: { role: Role }) {
           days: dayRows(myEntries, myLeaves).filter((d) => (!from || d.date >= from) && (!to || d.date <= to)),
         };
       })
+      // A deactivated person with nothing in this range is just noise; one who
+      // worked part of it belongs here.
+      .filter((r) => r.user.active || r.days.length > 0 || r.missing.length > 0)
       .sort((a, b) => b.missing.length - a.missing.length || a.user.email.localeCompare(b.user.email));
   }, [tsQ.data, leavesQ.data, holidayDates, from, to, today]);
 
@@ -154,7 +166,24 @@ export default function TeamDashboardTab({ role }: { role: Role }) {
                       >
                         <td style={{ color: "var(--muted)" }}>{open ? "▾" : "▸"}</td>
                         <td style={{ fontWeight: 600 }}>{r.user.displayName || r.user.email}</td>
-                        <td className="muted">{ROLE_LABELS[r.user.role]}</td>
+                        <td className="muted">
+                          {ROLE_LABELS[r.user.role]}
+                          {!r.user.active && (
+                            <>
+                              {" "}
+                              <span
+                                className="pill grey"
+                                title={
+                                  r.user.deactivatedAt
+                                    ? `Deactivated ${new Date(r.user.deactivatedAt).toLocaleDateString()} — not chased after that day`
+                                    : "Deactivated — not chased for missing days"
+                                }
+                              >
+                                inactive
+                              </span>
+                            </>
+                          )}
+                        </td>
                         <td style={{ textAlign: "right" }}>{r.filled}</td>
                         <td style={{ textAlign: "right" }}>{r.totalHours}</td>
                         <td>

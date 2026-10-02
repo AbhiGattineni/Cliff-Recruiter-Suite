@@ -11,7 +11,8 @@
 // is approved nothing has been granted, and the day stays missing — the same
 // rule missingDays() already applies.
 
-import { TimesheetEntry, LeaveRequest, LeaveType } from "./timesheets";
+import { DateTime } from "luxon";
+import { TimesheetEntry, LeaveRequest, LeaveType, TIMESHEET_ZONE } from "./timesheets";
 import { daysBetween } from "./timesheetStats";
 
 export interface DayRow {
@@ -86,4 +87,27 @@ export function dayRowsInRange(
   to: string
 ): DayRow[] {
   return dayRows(entries, leaves).filter((r) => (!from || r.date >= from) && (!to || r.date <= to));
+}
+
+/**
+ * The last day someone was expected to fill a timesheet.
+ *
+ * Today, for anyone still here. For someone deactivated, the day they were
+ * deactivated — nothing is owed for the days after a person leaves, so those
+ * must not pile up as missing, which is the whole point of deactivating them.
+ *
+ * What they filed before that day is untouched and still shown: deactivating
+ * stops the chasing, it does not retire the record. An account marked inactive
+ * with no date to go on is not chased at all, since there is no day to say
+ * "until".
+ */
+export function trackedThrough(
+  user: { active: boolean; deactivatedAt: number | null },
+  today: string,
+  zone: string = TIMESHEET_ZONE
+): string {
+  if (user.active) return today;
+  if (user.deactivatedAt == null) return "";
+  const left = DateTime.fromMillis(user.deactivatedAt, { zone }).toFormat("yyyy-MM-dd");
+  return left < today ? left : today;
 }
