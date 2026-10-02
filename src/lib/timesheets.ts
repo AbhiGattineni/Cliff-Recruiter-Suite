@@ -22,10 +22,22 @@ import { ensureConfigured } from "./errors";
 import { setServerNow, todayInZone } from "./serverClock";
 
 /**
- * admin/manager/employee are STAFF. consultant is someone we placed at a
- * client, who signs in only to file billable hours — see functions/src/timesheets.ts.
+ * admin/manager/employee/benchsales are STAFF. consultant is someone we placed
+ * at a client, who signs in only to file billable hours — see
+ * functions/src/timesheets.ts.
  */
-export type Role = "admin" | "manager" | "employee" | "consultant";
+export type Role = "admin" | "manager" | "employee" | "benchsales" | "consultant";
+
+export const ROLES: Role[] = ["admin", "manager", "employee", "benchsales", "consultant"];
+
+/** What each role is called in the UI. The stored value stays a bare word. */
+export const ROLE_LABELS: Record<Role, string> = {
+  admin: "admin",
+  manager: "manager",
+  employee: "employee",
+  benchsales: "bench sales recruiter",
+  consultant: "consultant",
+};
 
 /** Staff see the recruiter suite; consultants see only their own portal. */
 export function isStaff(role: Role | undefined | null): boolean {
@@ -37,6 +49,9 @@ export interface UserProfile {
   email: string;
   displayName: string;
   role: Role;
+  /** False once deactivated: no longer tracked, and no longer able to sign in. */
+  active: boolean;
+  deactivatedAt: number | null;
   createdAt: number | null;
   updatedAt: number | null;
 }
@@ -51,6 +66,9 @@ function rowToProfile(id: string, x: DocumentData): UserProfile {
     email: String(x.email ?? ""),
     displayName: String(x.displayName ?? ""),
     role: (x.role as Role) ?? "employee",
+    // Absent means active — every profile written before deactivation existed.
+    active: x.active !== false,
+    deactivatedAt: toMillis(x.deactivatedAt),
     createdAt: toMillis(x.createdAt),
     updatedAt: toMillis(x.updatedAt),
   };
@@ -93,11 +111,39 @@ export async function setUserRole(uid: string, role: Role): Promise<UserProfile>
   return res.data.user;
 }
 
+/**
+ * Stop or resume tracking someone. Deactivating deletes nothing: their
+ * timesheets, leave and history stay visible exactly as they are.
+ */
+export async function setUserActive(uid: string, active: boolean): Promise<UserProfile> {
+  ensureConfigured();
+  const callable = httpsCallable<{ action: string; uid: string; active: boolean }, { ok: boolean; user: UserProfile }>(
+    functions,
+    "userOps"
+  );
+  const res = await callable({ action: "setActive", uid, active });
+  return res.data.user;
+}
+
 /** Hours booked against one requirement on a given day. */
 export interface JobHours {
   jobCode: string;
   jobTitle: string;
   client: string;
+  hours: number;
+}
+
+/**
+ * Hours booked against one bench submission. `subKey` identifies the
+ * submission row; the rest is a snapshot so the entry still reads months later
+ * even if that row leaves the report.
+ */
+export interface BenchHours {
+  subKey: string;
+  consultant: string;
+  vendor: string;
+  jobTitle: string;
+  submittedOn: string;
   hours: number;
 }
 
@@ -111,6 +157,8 @@ export interface TimesheetEntry {
   hours: number;
   /** Per-requirement split. Empty on older entries. */
   jobs: JobHours[];
+  /** Per-bench-submission split, for bench sales. Empty for everyone else. */
+  bench: BenchHours[];
   workedOn: string;
   /** Set when a manager/admin filled this day for the person, not the person themselves. */
   filledByUid: string | null;
@@ -135,6 +183,16 @@ function rowToEntry(id: string, x: DocumentData): TimesheetEntry {
           hours: Number(j?.hours) || 0,
         }))
       : [],
+    bench: Array.isArray(x.bench)
+      ? (x.bench as DocumentData[]).map((b) => ({
+          subKey: String(b?.subKey ?? ""),
+          consultant: String(b?.consultant ?? ""),
+          vendor: String(b?.vendor ?? ""),
+          jobTitle: String(b?.jobTitle ?? ""),
+          submittedOn: String(b?.submittedOn ?? ""),
+          hours: Number(b?.hours) || 0,
+        }))
+      : [],
     workedOn: String(x.workedOn ?? ""),
     filledByUid: x.filledByUid ? String(x.filledByUid) : null,
     filledByName: x.filledByName ? String(x.filledByName) : null,
@@ -156,11 +214,20 @@ export async function saveTimesheetEntry(
   hours: number,
   workedOn: string,
   jobs: JobHours[] = [],
-  forUid?: string
+  forUid?: string,
+  bench: BenchHours[] = []
 ): Promise<TimesheetEntry> {
   ensureConfigured();
   const callable = httpsCallable<
-    { action: string; date: string; hours: number; workedOn: string; jobs: JobHours[]; forUid?: string },
+    {
+      action: string;
+      date: string;
+      hours: number;
+      workedOn: string;
+      jobs: JobHours[];
+      bench: BenchHours[];
+      forUid?: string;
+    },
     { ok: boolean; entry: TimesheetEntry }
   >(functions, "timesheetOps");
   const res = await callable({
@@ -169,6 +236,7 @@ export async function saveTimesheetEntry(
     hours,
     workedOn,
     jobs,
+    bench,
     ...(forUid ? { forUid } : {}),
   });
   return res.data.entry;
@@ -279,12 +347,18 @@ export async function listMyLeaves(uid: string): Promise<LeaveRequest[]> {
     .sort((a, b) => (b.requestedAt ?? 0) - (a.requestedAt ?? 0));
 }
 
-// Admin sees every request; a manager's query is constrained to role=="employee"
+// Admin sees every request; a manager's query is constrained to the roles a
+// manager may decide for
 // to match firestore.rules (a manager can't list manager/admin leave at all).
 export async function listLeaveRequests(role: Role): Promise<LeaveRequest[]> {
   ensureConfigured();
   const base = collection(db, "leaveRequests");
-  const q = role === "manager" ? query(base, where("role", "==", "employee")) : query(base);
+  // A manager sees what a manager may decide. That is both employee-level
+  // roles, not just "employee" — a bench sales recruiter whose leave never
+  // reached their manager could never have it approved, and their approved
+  // days would be missing from the Team Dashboard's day list too.
+  const q =
+    role === "manager" ? query(base, where("role", "in", ["employee", "benchsales"])) : query(base);
   const snap = await getDocs(q);
   return snap.docs
     .map((d) => rowToLeave(d.id, d.data()))

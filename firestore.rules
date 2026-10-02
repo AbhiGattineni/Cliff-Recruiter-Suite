@@ -7,13 +7,28 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // The caller's own role, looked up once per request (Firestore caches
+    // The caller's own profile, looked up once per request (Firestore caches
     // get() results within a single rule evaluation, so this doesn't cost
     // extra reads per document in a list query).
-    function myRole() {
+    function myProfile() {
       return request.auth != null && exists(/databases/$(database)/documents/userProfiles/$(request.auth.uid))
-        ? get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data.role
+        ? get(/databases/$(database)/documents/userProfiles/$(request.auth.uid)).data
         : null;
+    }
+
+    // The caller's role — or null when they have been deactivated.
+    //
+    // Deactivation is enforced here rather than at each call site. A
+    // deactivated account has no role as far as these rules are concerned, so
+    // every `myRole() in [...]` test below fails at once and nothing has to
+    // remember to ask. The one thing still permitted is reading their OWN
+    // profile, because that check is on the uid rather than the role — which
+    // is how the app learns to sign them out and say why.
+    //
+    // `active` is absent on every profile written before deactivation
+    // existed, so only an explicit false counts.
+    function myRole() {
+      return myProfile() == null || myProfile().active == false ? null : myProfile().role;
     }
 
     // Staff = people who work for Cliff. Consultants are outsiders we placed at
@@ -23,7 +38,7 @@ service cloud.firestore {
     // sufficient test for anything, because signing in no longer implies
     // working here.
     function isStaff() {
-      return myRole() in ["admin", "manager", "employee"];
+      return myRole() in ["admin", "manager", "employee", "benchsales"];
     }
 
     // Timesheets/leave/roles: reads happen directly from the client (cheaper
@@ -75,7 +90,7 @@ service cloud.firestore {
       allow get, list: if isStaff() && (
         resource.data.uid == request.auth.uid ||
         myRole() == "admin" ||
-        (myRole() == "manager" && resource.data.role == "employee")
+        (myRole() == "manager" && resource.data.role in ["employee", "benchsales"])
       );
       allow write: if false;
     }

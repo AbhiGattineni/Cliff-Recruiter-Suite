@@ -166,6 +166,8 @@ export async function inviteConsultant(
       email: String(d.email ?? ""),
       displayName: String(d.displayName ?? ""),
       role: (d.role as Role) ?? "consultant",
+      active: d.active !== false,
+      deactivatedAt: toMillis(d.deactivatedAt),
       createdAt: toMillis(d.createdAt),
       updatedAt: toMillis(d.updatedAt),
     },

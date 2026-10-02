@@ -7,7 +7,7 @@ import { isPlaceholderConfig } from "../firebase";
 import AuthShell from "../components/AuthShell";
 
 export default function Login() {
-  const { signIn, user } = useAuth();
+  const { signIn, user, lockedOut } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -63,6 +63,9 @@ export default function Login() {
             reload before signing in.
           </div>
         )}
+        {/* A deactivated account signs in fine and is turned round immediately,
+            so without this the page just bounces back to itself. */}
+        {lockedOut && !error && <div className="alert error">{lockedOut}</div>}
         {error && <div className="alert error">{error}</div>}
         {notice && <div className="alert">{notice}</div>}
 

@@ -8,10 +8,12 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { friendlyError } from "../../lib/errors";
-import { saveTimesheetEntry, JobHours } from "../../lib/timesheets";
+import { saveTimesheetEntry, JobHours, BenchHours } from "../../lib/timesheets";
 import { EXPECTED_DAILY_HOURS } from "../../lib/timesheetStats";
 import { listOpenJobs } from "../../lib/openJobs";
+import { listBenchOptions } from "../../lib/benchOptions";
 import JobHoursPicker from "./JobHoursPicker";
+import BenchHoursPicker from "./BenchHoursPicker";
 import Modal from "../Modal";
 
 export default function FillOnBehalfModal({
@@ -27,22 +29,34 @@ export default function FillOnBehalfModal({
 }) {
   const qc = useQueryClient();
   const [jobs, setJobs] = useState<JobHours[]>([]);
+  const [bench, setBench] = useState<BenchHours[]>([]);
   const [workedOn, setWorkedOn] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const openJobsQ = useQuery({ queryKey: ["openJobs"], queryFn: listOpenJobs, staleTime: 10 * 60_000 });
+  const benchOptionsQ = useQuery({
+    queryKey: ["benchOptions"],
+    queryFn: listBenchOptions,
+    staleTime: 10 * 60_000,
+  });
 
-  const total = Math.round(jobs.reduce((s, j) => s + (Number(j.hours) || 0), 0) * 100) / 100;
-  const incomplete = jobs.length > 0 && jobs.some((j) => !(Number(j.hours) > 0));
-  const canSave = jobs.length > 0 && total > 0 && !incomplete;
+  const total =
+    Math.round(
+      (jobs.reduce((s, j) => s + (Number(j.hours) || 0), 0) +
+        bench.reduce((s, b) => s + (Number(b.hours) || 0), 0)) *
+        100
+    ) / 100;
+  const incomplete =
+    jobs.some((j) => !(Number(j.hours) > 0)) || bench.some((b) => !(Number(b.hours) > 0));
+  const canSave = jobs.length + bench.length > 0 && total > 0 && !incomplete;
 
   const submit = async () => {
     if (!canSave) return;
     setSaving(true);
     setError(null);
     try {
-      await saveTimesheetEntry(date, total, workedOn, jobs, uid);
+      await saveTimesheetEntry(date, total, workedOn, jobs, uid, bench);
       await qc.invalidateQueries({ queryKey: ["teamTimesheets"] });
       await qc.invalidateQueries({ queryKey: ["myTimesheets"] });
       onClose();
@@ -67,7 +81,7 @@ export default function FillOnBehalfModal({
         </label>
         <input type="number" value={total || ""} placeholder="0" disabled readOnly />
         <span className="muted" style={{ fontSize: "0.78rem" }}>
-          Total from the requirements below.
+          Total from the requirements and bench submissions below.
         </span>
       </div>
 
@@ -77,7 +91,15 @@ export default function FillOnBehalfModal({
         loading={openJobsQ.isLoading}
         error={openJobsQ.error ? friendlyError(openJobsQ.error) : null}
         onChange={setJobs}
-        required
+        required={bench.length === 0}
+      />
+
+      <BenchHoursPicker
+        bench={bench}
+        options={benchOptionsQ.data ?? []}
+        loading={benchOptionsQ.isLoading}
+        error={benchOptionsQ.error ? friendlyError(benchOptionsQ.error) : null}
+        onChange={setBench}
       />
 
       <div className="field">

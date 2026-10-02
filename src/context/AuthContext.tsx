@@ -16,6 +16,9 @@ import { ensureUserProfile, UserProfile } from "../lib/timesheets";
 
 const DOMAIN_MSG = `Only @${ALLOWED_DOMAIN} accounts are allowed.`;
 
+export const DEACTIVATED_MSG =
+  "This account has been deactivated. Ask an administrator if you think that's wrong.";
+
 // ensureUserProfile is what actually writes the userProfiles doc (server
 // side) on first login — it runs on a Cloud Run service that shares this
 // project's CPU quota with everything else, and that quota has been hit
@@ -38,6 +41,8 @@ interface AuthContextValue {
   signUp: (email: string, password: string, displayName?: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  /** Set when the last sign-in was turned away because the account is deactivated. */
+  lockedOut: string | null;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -47,6 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [lockedOut, setLockedOut] = useState<string | null>(null);
 
   /** One attempt, no retry — errors are for the caller to handle. */
   const fetchProfile = useCallback(async (): Promise<UserProfile | null> => {
@@ -64,6 +70,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(await fetchProfile());
   }, [fetchProfile]);
 
+  /**
+   * A deactivated account is signed straight back out.
+   *
+   * Firebase Auth has no idea about deactivation — the credentials are still
+   * valid, so the sign-in itself succeeds and the profile is what says
+   * otherwise. The server refuses them anyway (every profile-gated callable
+   * checks `active`), so this is not the lock; it is what stops someone
+   * sitting inside a shell of an app where nothing works and nothing explains
+   * why.
+   */
+  const rejectIfDeactivated = useCallback(async (p: UserProfile | null): Promise<boolean> => {
+    if (!p || p.active) return false;
+    setProfile(null);
+    setLockedOut(DEACTIVATED_MSG);
+    await fbSignOut(auth);
+    return true;
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     let timer: number | undefined;
@@ -72,6 +96,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const p = await fetchProfile();
       if (cancelled) return;
       if (p) {
+        if (await rejectIfDeactivated(p)) {
+          setProfileLoading(false);
+          return;
+        }
         setProfile(p);
         setProfileLoading(false);
         return;
@@ -94,6 +122,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       if (timer) window.clearTimeout(timer);
       if (u) {
+        setLockedOut(null);
         setProfileLoading(true);
         void attempt(QUICK_RETRY_DELAYS_MS, true);
       } else {
@@ -107,7 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       unsub();
       if (timer) window.clearTimeout(timer);
     };
-  }, [fetchProfile]);
+  }, [fetchProfile, rejectIfDeactivated]);
 
   /**
    * Signing IN is open to any address.
@@ -142,7 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, profile, profileLoading, signIn, signUp, signOut, refreshProfile }}
+      value={{ user, loading, profile, profileLoading, signIn, signUp, signOut, refreshProfile, lockedOut }}
     >
       {children}
     </AuthContext.Provider>

@@ -107,6 +107,10 @@ export const ALIASES = {
   status: ["submissionstatus", "currentstatus", "profilestatus", "benchstatus", "candidatestatus", "status"],
   recruiter: ["submittedby", "marketingrecruiter", "recruitername", "marketer", "recruiter", "assignedto"],
   client: ["endclient", "clientname", "client", "vendor"],
+  // Vendor-first, because on the submissions report the counterparty IS the
+  // vendor ("Ramy Infotech"), and "client" is the alias that happens to also
+  // appear on other reports.
+  vendor: ["vendorname", "vendor", "endclient", "clientname", "client"],
   title: ["jobtitle", "positionname", "requirement", "position", "title"],
   date: ["submittedon", "submissiondate", "submitteddate", "appliedon", "createdon", "date"],
   first: ["firstname", "givenname", "fname"],
@@ -222,11 +226,48 @@ export function filterByDate(
   });
 }
 
+/**
+ * Rows whose value in `col` is one of `picked`. An empty pick means all, and
+ * so does an unmapped column — a filter on a column the report doesn't have
+ * should show everything rather than nothing.
+ */
+export function filterByValues(
+  rows: Row[],
+  col: string | null,
+  picked: string[],
+  blank = "(blank)"
+): Row[] {
+  if (!col || picked.length === 0) return rows;
+  const want = new Set(picked);
+  return rows.filter((r) => want.has(cell(r, col) || blank));
+}
+
+/** The distinct values a column takes, sorted, for a filter's option list. */
+export function distinctValues(rows: Row[], col: string | null, blank = "(blank)"): string[] {
+  if (!col) return [];
+  const seen = new Set<string>();
+  for (const r of rows) seen.add(cell(r, col) || blank);
+  return [...seen].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
+}
+
 /** Submissions whose status is one of `picked`. An empty pick means all. */
 export function filterByStatus(rows: Row[], statusCol: string | null, picked: string[]): Row[] {
-  if (!statusCol || picked.length === 0) return rows;
-  const want = new Set(picked);
-  return rows.filter((r) => want.has(cell(r, statusCol) || "No status"));
+  return filterByValues(rows, statusCol, picked, "No status");
+}
+
+/**
+ * Submissions that matched nobody on the bench.
+ *
+ * These are the point of showing them at all: a submission whose applicant
+ * name doesn't line up with the roster is either someone who left the bench or
+ * a column mapped wrongly, and both are invisible if the row is simply
+ * dropped. Identity, not equality — joinBench hands back the very rows it was
+ * given.
+ */
+export function unmatchedSubmissions(joined: BenchConsultant[], submissions: Row[]): Row[] {
+  const matched = new Set<Row>();
+  for (const c of joined) for (const s of c.submissions) matched.add(s);
+  return submissions.filter((s) => !matched.has(s));
 }
 
 export interface BenchConsultant {
@@ -265,6 +306,10 @@ export interface ColumnMap {
   subStatus: string | null;
   /** Drives the date range filter. Null when the report carries no date. */
   subDate: string | null;
+  /** Who the consultant was submitted to. */
+  subVendor: string | null;
+  /** What they were submitted for. */
+  subTitle: string | null;
 }
 
 export function autoMap(bench: Row[], submissions: Row[]): ColumnMap {
@@ -281,6 +326,8 @@ export function autoMap(bench: Row[], submissions: Row[]): ColumnMap {
     subEmail: findColumn(s, [...ALIASES.email]),
     subStatus: findColumn(s, [...ALIASES.status]),
     subDate: findColumn(s, [...ALIASES.date], NOT_A_DATE),
+    subVendor: findColumn(s, [...ALIASES.vendor]),
+    subTitle: findColumn(s, [...ALIASES.title]),
   };
 }
 

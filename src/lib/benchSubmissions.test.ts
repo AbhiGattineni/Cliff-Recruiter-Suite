@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   discoverColumns, findColumn, joinBench, statusCounts, benchStats, personKey,
   autoMap, NOT_A_PERSON, findNameColumns, fullName, ALIASES, Row,
-  rowDay, inputDay, filterByDate, filterByStatus,
+  rowDay, inputDay, filterByDate, filterByStatus, filterByValues, distinctValues,
+  unmatchedSubmissions,
 } from "./benchSubmissions";
 
 describe("discoverColumns", () => {
@@ -178,6 +179,8 @@ describe("autoMap", () => {
       subEmail: null,
       subStatus: "Submission Status",
       subDate: null,
+      subVendor: null,
+      subTitle: null,
     });
   });
 });
@@ -187,7 +190,7 @@ describe("explicit column overrides", () => {
   const submissions: Row[] = [{ Person: "Jane Roe", Outcome: "Offer", Junk: "N/A" }];
 
   it("joins on columns detection would never have guessed", () => {
-    const map = { benchName: "Who", benchLast: null, benchEmail: null, subName: "Person", subLast: null, subEmail: null, subStatus: "Outcome", subDate: null };
+    const map = { benchName: "Who", benchLast: null, benchEmail: null, subName: "Person", subLast: null, subEmail: null, subStatus: "Outcome", subDate: null, subVendor: null, subTitle: null };
     expect(joinBench(bench, submissions, map)[0].count).toBe(1);
   });
 
@@ -201,7 +204,7 @@ describe("explicit column overrides", () => {
   });
 
   it("passes the chosen status column through benchStats", () => {
-    const map = { benchName: "Who", benchLast: null, benchEmail: null, subName: "Person", subLast: null, subEmail: null, subStatus: "Outcome", subDate: null };
+    const map = { benchName: "Who", benchLast: null, benchEmail: null, subName: "Person", subLast: null, subEmail: null, subStatus: "Outcome", subDate: null, subVendor: null, subTitle: null };
     const stats = benchStats(joinBench(bench, submissions, map), submissions, "Outcome");
     expect(stats.covered).toBe(1);
     expect(stats.byStatus).toEqual([{ status: "Offer", count: 1 }]);
@@ -233,6 +236,8 @@ describe("the real Ceipal reports", () => {
       subEmail: null,
       subStatus: "ProfileStatus",
       subDate: "SubmittedOn",
+      subVendor: "VendorName",
+      subTitle: "JobTitle",
     });
   });
 
@@ -389,5 +394,59 @@ describe("filtering before the join", () => {
     expect(autoMap([{ Who: "A" }], [{ "Candidate Name": "A" }]).subDate).toBeNull();
     expect(autoMap([{ Who: "A" }], [{ "Candidate Name": "A", "Status Change Date": "9/1/2026" }]).subDate)
       .toBe("Status Change Date");
+  });
+});
+
+describe("filterByValues / distinctValues", () => {
+  const rows: Row[] = [
+    { Who: "A", VendorName: "Ramy" },
+    { Who: "B", VendorName: "EXL" },
+    { Who: "C", VendorName: "" },
+  ];
+  const who = (out: Row[]) => out.map((r) => r.Who);
+
+  it("keeps only the picked values", () => {
+    expect(who(filterByValues(rows, "VendorName", ["EXL"]))).toEqual(["B"]);
+  });
+
+  it("groups blanks under the blank label it is given", () => {
+    expect(who(filterByValues(rows, "VendorName", ["(blank)"]))).toEqual(["C"]);
+  });
+
+  it("means all when nothing is picked, or the column isn't mapped", () => {
+    expect(filterByValues(rows, "VendorName", [])).toBe(rows);
+    // A filter on a column the report doesn't have must not empty the table.
+    expect(filterByValues(rows, null, ["EXL"])).toBe(rows);
+  });
+
+  it("lists distinct values, blanks labelled, sorted", () => {
+    expect(distinctValues(rows, "VendorName")).toEqual(["(blank)", "EXL", "Ramy"]);
+    expect(distinctValues(rows, null)).toEqual([]);
+  });
+});
+
+describe("unmatchedSubmissions", () => {
+  const bench: Row[] = [{ FirstName: "Anil", LastName: "Challa" }];
+  const subs: Row[] = [
+    { ApplicantName: "Anil Challa", ProfileStatus: "Submitted" },
+    { ApplicantName: "Someone Else", ProfileStatus: "Submitted" },
+  ];
+
+  it("returns the submissions no bench row claimed", () => {
+    const map = autoMap(bench, subs);
+    const joined = joinBench(bench, subs, map);
+    expect(unmatchedSubmissions(joined, subs)).toEqual([subs[1]]);
+  });
+
+  it("is empty when everyone matched", () => {
+    const map = autoMap(bench, [subs[0]]);
+    expect(unmatchedSubmissions(joinBench(bench, [subs[0]], map), [subs[0]])).toEqual([]);
+  });
+
+  it("counts a submission matched on either identifier only once", () => {
+    const b: Row[] = [{ FirstName: "Anil", LastName: "Challa", EmailAddress: "a@x.com" }];
+    const s: Row[] = [{ ApplicantName: "Anil Challa", EmailAddress: "a@x.com" }];
+    const map = autoMap(b, s);
+    expect(unmatchedSubmissions(joinBench(b, s, map), s)).toEqual([]);
   });
 });
