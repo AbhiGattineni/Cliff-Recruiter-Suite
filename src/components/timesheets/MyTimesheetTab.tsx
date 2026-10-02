@@ -10,6 +10,7 @@ import {
   timesheetToday,
   TimesheetEntry,
   JobHours,
+  BenchHours,
 } from "../../lib/timesheets";
 import {
   EXPECTED_DAILY_HOURS,
@@ -20,7 +21,9 @@ import {
 } from "../../lib/timesheetStats";
 import { listHolidays, holidayDateSet } from "../../lib/holidays";
 import { listOpenJobs } from "../../lib/openJobs";
+import { listBenchOptions } from "../../lib/benchOptions";
 import JobHoursPicker from "./JobHoursPicker";
+import BenchHoursPicker from "./BenchHoursPicker";
 import { useAuth } from "../../context/AuthContext";
 
 // The server only accepts today's date, decided in the team's zone and on the
@@ -76,6 +79,14 @@ export default function MyTimesheetTab() {
 
   // Open requirements for the picker — cached, so switching dates doesn't refetch.
   const openJobsQ = useQuery({ queryKey: ["openJobs"], queryFn: listOpenJobs, staleTime: 10 * 60_000 });
+  // Offered to everyone, not just the benchsales role: a recruiter who spent
+  // an afternoon on the bench should be able to say so, and gating the picker
+  // on the role would make that unloggable for the sake of a tidier form.
+  const benchOptionsQ = useQuery({
+    queryKey: ["benchOptions"],
+    queryFn: listBenchOptions,
+    staleTime: 10 * 60_000,
+  });
 
   // Company holidays — days nobody owes a timesheet for. Read by everyone, set
   // by admins and managers on the Holidays tab.
@@ -106,6 +117,7 @@ export default function MyTimesheetTab() {
   }, []);
   const [workedOn, setWorkedOn] = useState("");
   const [jobs, setJobs] = useState<JobHours[]>([]);
+  const [bench, setBench] = useState<BenchHours[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -121,6 +133,7 @@ export default function MyTimesheetTab() {
     const existing = byDate.get(date);
     setWorkedOn(existing?.workedOn ?? "");
     setJobs(existing?.jobs ?? []);
+    setBench(existing?.bench ?? []);
     // A rollover under an open tab means anything typed was for yesterday, and
     // yesterday is now closed — say so rather than silently moving the date.
     if (rolledOver) {
@@ -134,12 +147,22 @@ export default function MyTimesheetTab() {
   // A holiday is not a short day — nothing was owed — so the shortfall
   // warning below must not fire on one.
   const todayIsHoliday = holidayDates.has(date);
-  const jobTotal = Math.round(jobs.reduce((s, j) => s + (Number(j.hours) || 0), 0) * 100) / 100;
-  // Block saving a requirement row left at zero — it reads as "worked on, no time".
-  const jobsIncomplete = jobs.length > 0 && jobs.some((j) => !(Number(j.hours) > 0));
-  // Date, hours and at least one requirement are all mandatory — hours is
-  // derived from the requirement split, so requiring a job also requires hours.
-  const canSave = !!date && jobs.length > 0 && jobTotal > 0 && !jobsIncomplete;
+  // The day's total is every requirement plus every bench submission. A
+  // recruiter fills the first, a bench sales recruiter the second, and anyone
+  // whose day was both fills both.
+  const jobTotal =
+    Math.round(
+      (jobs.reduce((s, j) => s + (Number(j.hours) || 0), 0) +
+        bench.reduce((s, b) => s + (Number(b.hours) || 0), 0)) *
+        100
+    ) / 100;
+  // Block saving a row left at zero — it reads as "worked on, no time".
+  const jobsIncomplete =
+    jobs.some((j) => !(Number(j.hours) > 0)) || bench.some((b) => !(Number(b.hours) > 0));
+  // Date, hours and at least one requirement or submission are all mandatory —
+  // hours is derived from the split, so requiring a row also requires hours.
+  const canSave =
+    !!date && jobs.length + bench.length > 0 && jobTotal > 0 && !jobsIncomplete;
 
   const submit = async () => {
     if (!canSave) return;
@@ -147,7 +170,7 @@ export default function MyTimesheetTab() {
     setError(null);
     setSaved(false);
     try {
-      await saveTimesheetEntry(date, jobTotal, workedOn, jobs);
+      await saveTimesheetEntry(date, jobTotal, workedOn, jobs, undefined, bench);
       await qc.invalidateQueries({ queryKey: ["myTimesheets"] });
       await qc.invalidateQueries({ queryKey: ["teamTimesheets"] });
       setSaved(true);
@@ -300,7 +323,7 @@ export default function MyTimesheetTab() {
             </label>
             <input type="number" value={jobTotal || ""} placeholder="0" disabled readOnly />
             <span className="muted" style={{ fontSize: "0.78rem" }}>
-              Total from the requirements below — add one to set hours.
+              Total from the requirements and bench submissions below — add one to set hours.
             </span>
           </div>
         </div>
@@ -311,7 +334,14 @@ export default function MyTimesheetTab() {
           loading={openJobsQ.isLoading}
           error={openJobsQ.error ? friendlyError(openJobsQ.error) : null}
           onChange={setJobs}
-          required
+          required={bench.length === 0}
+        />
+        <BenchHoursPicker
+          bench={bench}
+          options={benchOptionsQ.data ?? []}
+          loading={benchOptionsQ.isLoading}
+          error={benchOptionsQ.error ? friendlyError(benchOptionsQ.error) : null}
+          onChange={setBench}
         />
         <div className="field">
           <label>Notes (optional)</label>
@@ -353,7 +383,8 @@ export default function MyTimesheetTab() {
           {saving ? <span className="spinner" /> : "Save"}
         </button>
         <p className="muted" style={{ fontSize: "0.78rem", marginTop: "0.5rem", marginBottom: 0 }}>
-          Date, hours and at least one requirement worked on are all required. A full working day is{" "}
+          Date, hours and at least one requirement or bench submission worked on are all required. A
+          full working day is{" "}
           {EXPECTED_DAILY_HOURS} hours.
         </p>
       </div>
@@ -372,7 +403,7 @@ export default function MyTimesheetTab() {
                   <th>Date</th>
                   <th>Status</th>
                   <th style={{ textAlign: "right" }}>Hours</th>
-                  <th>Requirements</th>
+                  <th>Worked on</th>
                   <th>Notes</th>
                   <th>Filled by</th>
                 </tr>
@@ -393,12 +424,24 @@ export default function MyTimesheetTab() {
                         {e ? d.hours : <span className="muted">—</span>}
                       </td>
                       <td style={{ whiteSpace: "normal" }}>
-                        {e?.jobs?.length ? (
-                          e.jobs.map((j) => (
-                            <span className="pill grey" key={j.jobCode} style={{ marginRight: "0.3rem" }}>
-                              {j.jobCode} · {j.hours}h
-                            </span>
-                          ))
+                        {e?.jobs?.length || e?.bench?.length ? (
+                          <>
+                            {(e?.jobs ?? []).map((j) => (
+                              <span className="pill grey" key={j.jobCode} style={{ marginRight: "0.3rem" }}>
+                                {j.jobCode} · {j.hours}h
+                              </span>
+                            ))}
+                            {(e?.bench ?? []).map((b) => (
+                              <span
+                                className="pill blue"
+                                key={b.subKey}
+                                style={{ marginRight: "0.3rem" }}
+                                title={[b.vendor, b.jobTitle].filter(Boolean).join(" · ")}
+                              >
+                                {b.consultant || "bench"} · {b.hours}h
+                              </span>
+                            ))}
+                          </>
                         ) : (
                           <span className="muted">—</span>
                         )}

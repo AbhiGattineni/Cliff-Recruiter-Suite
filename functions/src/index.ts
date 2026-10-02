@@ -25,6 +25,8 @@ import {
   getOrCreateProfile,
   getProfile,
   setRole,
+  setActive,
+  isRole,
   saveEntry,
   saveEntryOnBehalf,
   todayInZone,
@@ -189,6 +191,15 @@ async function requireProfile(auth: CallableAuth): Promise<UserProfile> {
     throw new HttpsError(
       "failed-precondition",
       "Your profile hasn't been set up yet. Reload the app to finish sign-in."
+    );
+  }
+  // A deactivated account keeps everything it ever filed and can do nothing
+  // more with it. Refused here rather than per-handler so that adding a
+  // callable cannot forget the check.
+  if (!profile.active) {
+    throw new HttpsError(
+      "permission-denied",
+      "This account has been deactivated. Ask an administrator if you think that's wrong."
     );
   }
   return profile;
@@ -1320,11 +1331,31 @@ async function setUserRoleHandler(request: CallableRequest) {
     const targetUid = String(request.data?.uid ?? "");
     const role = request.data?.role;
     if (!targetUid) throw new HttpsError("invalid-argument", "uid is required.");
-    if (role !== "admin" && role !== "manager" && role !== "employee" && role !== "consultant") {
-      throw new HttpsError("invalid-argument", "role must be admin, manager, or employee.");
+    if (!isRole(role)) {
+      throw new HttpsError("invalid-argument", `"${String(role)}" is not a role.`);
     }
     try {
-      const updated = await setRole(targetUid, role as Role);
+      const updated = await setRole(targetUid, role);
+      return { ok: true, user: updated };
+    } catch (e) {
+      throw new HttpsError("failed-precondition", e instanceof Error ? e.message : String(e));
+    }
+}
+
+async function setUserActiveHandler(request: CallableRequest) {
+    const profile = await requireProfile(request.auth);
+    requireRole(profile, ["admin"]);
+    const targetUid = String(request.data?.uid ?? "");
+    if (!targetUid) throw new HttpsError("invalid-argument", "uid is required.");
+    if (typeof request.data?.active !== "boolean") {
+      throw new HttpsError("invalid-argument", "active must be true or false.");
+    }
+    // Locking yourself out is a support call, not a feature.
+    if (targetUid === profile.uid && request.data.active === false) {
+      throw new HttpsError("failed-precondition", "You can't deactivate your own account.");
+    }
+    try {
+      const updated = await setActive(targetUid, request.data.active);
       return { ok: true, user: updated };
     } catch (e) {
       throw new HttpsError("failed-precondition", e instanceof Error ? e.message : String(e));
@@ -1343,8 +1374,8 @@ async function saveTimesheetEntryHandler(request: CallableRequest) {
     const forUid = String(request.data?.forUid ?? "").trim();
     try {
       const entry = forUid
-        ? await saveEntryOnBehalf(profile, forUid, date, workedOn, request.data?.jobs)
-        : await saveEntry(profile, date, hours, workedOn, request.data?.jobs);
+        ? await saveEntryOnBehalf(profile, forUid, date, workedOn, request.data?.jobs, request.data?.bench)
+        : await saveEntry(profile, date, hours, workedOn, request.data?.jobs, request.data?.bench);
       return { ok: true, entry };
     } catch (e) {
       throw new HttpsError("invalid-argument", e instanceof Error ? e.message : String(e));
@@ -1744,6 +1775,8 @@ export const userOps = onCall(
         return ensureUserProfileHandler(request);
       case "setRole":
         return setUserRoleHandler(request);
+      case "setActive":
+        return setUserActiveHandler(request);
       default:
         throw new HttpsError("invalid-argument", `Unknown action "${action}".`);
     }

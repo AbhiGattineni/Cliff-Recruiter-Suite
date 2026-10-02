@@ -2,7 +2,14 @@ import { Fragment, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DateTime } from "luxon";
 import { friendlyError } from "../../lib/errors";
-import { listTeamTimesheets, listLeaveRequests, decideLeaveRequest, Role, TimesheetEntry } from "../../lib/timesheets";
+import {
+  listTeamTimesheets,
+  listLeaveRequests,
+  decideLeaveRequest,
+  Role,
+  ROLE_LABELS,
+} from "../../lib/timesheets";
+import { dayRows, DayRow, leaveLabel } from "../../lib/timesheetDays";
 import { daysBetween, missingDays } from "../../lib/timesheetStats";
 import { listHolidays, holidayDateSet } from "../../lib/holidays";
 import FillOnBehalfModal from "./FillOnBehalfModal";
@@ -57,12 +64,16 @@ export default function TeamDashboardTab({ role }: { role: Role }) {
     if (!tsQ.data) return [];
     const { entries, users } = tsQ.data;
     const approvedLeaves = (leavesQ.data ?? []).filter((l) => l.status === "approved");
-    // Admins aren't tracked here — they're not expected to log hours, so they
-    // shouldn't show up as a name with missing days.
+    // Admins aren't tracked here — they're not expected to log hours — and
+    // neither is anyone deactivated, which is what deactivating is for.
+    // Everything either of them filed is still in `entries` and still counted
+    // everywhere it was before; they just stop appearing as a name with
+    // missing days nobody intends to chase.
     return users
-      .filter((u) => u.role !== "admin")
+      .filter((u) => u.role !== "admin" && u.active)
       .map((u) => {
         const myEntries = entries.filter((e) => e.uid === u.uid).sort((a, b) => b.date.localeCompare(a.date));
+        const myLeaves = (leavesQ.data ?? []).filter((l) => l.uid === u.uid);
         const filledDates = new Set(myEntries.map((e) => e.date));
         const myLeaveDates = new Set<string>();
         approvedLeaves
@@ -70,7 +81,15 @@ export default function TeamDashboardTab({ role }: { role: Role }) {
           .forEach((l) => daysBetween(l.startDate, l.endDate).forEach((d) => myLeaveDates.add(d)));
         const missing = missingDays(from, to, today, filledDates, myLeaveDates, holidayDates);
         const totalHours = myEntries.reduce((s, e) => s + e.hours, 0);
-        return { user: u, filled: filledDates.size, missing, totalHours, entries: myEntries };
+        return {
+          user: u,
+          filled: filledDates.size,
+          missing,
+          totalHours,
+          // One list, days and leave together, so a day off reads as a row
+          // rather than as an absence you have to go and explain.
+          days: dayRows(myEntries, myLeaves).filter((d) => (!from || d.date >= from) && (!to || d.date <= to)),
+        };
       })
       .sort((a, b) => b.missing.length - a.missing.length || a.user.email.localeCompare(b.user.email));
   }, [tsQ.data, leavesQ.data, holidayDates, from, to, today]);
@@ -135,7 +154,7 @@ export default function TeamDashboardTab({ role }: { role: Role }) {
                       >
                         <td style={{ color: "var(--muted)" }}>{open ? "▾" : "▸"}</td>
                         <td style={{ fontWeight: 600 }}>{r.user.displayName || r.user.email}</td>
-                        <td className="muted">{r.user.role}</td>
+                        <td className="muted">{ROLE_LABELS[r.user.role]}</td>
                         <td style={{ textAlign: "right" }}>{r.filled}</td>
                         <td style={{ textAlign: "right" }}>{r.totalHours}</td>
                         <td>
@@ -153,7 +172,7 @@ export default function TeamDashboardTab({ role }: { role: Role }) {
                           <td></td>
                           <td colSpan={5} style={{ background: "var(--row-alt)", padding: "0.6rem 0.75rem" }}>
                             <TeamMemberDetail
-                          entries={r.entries}
+                          days={r.days}
                           missing={r.missing}
                           onFill={(d) =>
                             setFilling({ uid: r.user.uid, name: r.user.displayName || r.user.email, date: d })
@@ -275,11 +294,11 @@ export default function TeamDashboardTab({ role }: { role: Role }) {
 
 /** One person's detail, expanded inline in the Timesheet completion table: which days are missing, and every entry actually filed. */
 function TeamMemberDetail({
-  entries,
+  days,
   missing,
   onFill,
 }: {
-  entries: TimesheetEntry[];
+  days: DayRow[];
   missing: string[];
   onFill: (date: string) => void;
 }) {
@@ -305,41 +324,77 @@ function TeamMemberDetail({
           </span>
         </div>
       )}
-      {entries.length === 0 ? (
-        <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>No timesheet entries in this range.</p>
+      {days.length === 0 ? (
+        <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
+          No timesheets or approved leave in this range.
+        </p>
       ) : (
         <table className="data" style={{ margin: 0 }}>
           <thead>
             <tr>
               <th>Date</th>
               <th style={{ textAlign: "right" }}>Hours</th>
-              <th>Requirement(s)</th>
+              <th>Worked on</th>
               <th>Notes</th>
               <th>Filled by</th>
             </tr>
           </thead>
           <tbody>
-            {entries.map((e) => (
-              <tr key={e.id}>
-                <td style={{ whiteSpace: "nowrap" }}>{e.date}</td>
-                <td style={{ textAlign: "right", fontWeight: 600 }}>{e.hours}h</td>
-                <td style={{ whiteSpace: "normal" }}>
-                  {e.jobs.length
-                    ? e.jobs.map((j) => `${j.jobCode}${j.jobTitle ? ` · ${j.jobTitle}` : ""} (${j.hours}h)`).join(", ")
-                    : "—"}
-                </td>
-                <td style={{ whiteSpace: "normal" }} className="muted">{e.workedOn || "—"}</td>
-                <td style={{ whiteSpace: "nowrap" }}>
-                  {e.filledByName ? (
-                    <span className="pill amber" title={`Added on their behalf by ${e.filledByName}`}>
-                      {e.filledByName}
-                    </span>
-                  ) : (
-                    <span className="muted">Themselves</span>
-                  )}
-                </td>
-              </tr>
-            ))}
+            {days.map((d) => {
+              const e = d.entry;
+              return (
+                <tr key={d.date}>
+                  <td style={{ whiteSpace: "nowrap" }}>{d.date}</td>
+                  <td style={{ textAlign: "right", fontWeight: 600 }}>
+                    {e ? `${d.hours}h` : <span className="muted">—</span>}
+                  </td>
+                  <td style={{ whiteSpace: "normal" }}>
+                    {/* A half day is one row: the leave and the hours it was
+                        taken alongside, rather than two lines to add up. */}
+                    {d.leaveType && (
+                      <span
+                        className="pill grey"
+                        style={{ marginRight: "0.3rem" }}
+                        title={d.leaveReason || undefined}
+                      >
+                        {leaveLabel(d.leaveType)}
+                      </span>
+                    )}
+                    {e?.jobs.map((j) => (
+                      <span className="pill" key={j.jobCode} style={{ marginRight: "0.3rem" }}>
+                        {j.jobCode}
+                        {j.jobTitle ? ` · ${j.jobTitle}` : ""} ({j.hours}h)
+                      </span>
+                    ))}
+                    {e?.bench.map((b) => (
+                      <span
+                        className="pill blue"
+                        key={b.subKey}
+                        style={{ marginRight: "0.3rem" }}
+                        title={[b.vendor, b.jobTitle].filter(Boolean).join(" · ")}
+                      >
+                        {b.consultant || "bench"} ({b.hours}h)
+                      </span>
+                    ))}
+                    {!d.leaveType && !e?.jobs.length && !e?.bench.length && "—"}
+                  </td>
+                  <td style={{ whiteSpace: "normal" }} className="muted">
+                    {e?.workedOn || d.leaveReason || "—"}
+                  </td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    {!e ? (
+                      <span className="muted">—</span>
+                    ) : e.filledByName ? (
+                      <span className="pill amber" title={`Added on their behalf by ${e.filledByName}`}>
+                        {e.filledByName}
+                      </span>
+                    ) : (
+                      <span className="muted">Themselves</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

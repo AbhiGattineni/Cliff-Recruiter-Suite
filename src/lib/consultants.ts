@@ -262,6 +262,8 @@ export async function listConsultantProfiles(): Promise<UserProfile[]> {
       const x = d.data();
       return {
         uid: d.id,
+        active: x.active !== false,
+        deactivatedAt: null,
         email: String(x.email ?? ""),
         displayName: String(x.displayName ?? ""),
         role: "consultant" as const,

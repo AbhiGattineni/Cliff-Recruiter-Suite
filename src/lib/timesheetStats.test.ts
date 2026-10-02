@@ -20,6 +20,7 @@ const entry = (over: Partial<TimesheetEntry>): TimesheetEntry => ({
   uid: "u1",
   email: "guru@cliff-services.com",
   displayName: "Guru Deepthi",
+  bench: [],
   date: "2026-08-04",
   hours: 8,
   jobs: [],
