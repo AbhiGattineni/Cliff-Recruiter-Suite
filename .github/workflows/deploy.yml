@@ -193,13 +193,34 @@ jobs:
           # It is also the only pass that deploys the digest schedule, so its
           # failure matters more than the name "<final-pass>" suggests.
           echo "--- deploying anything left (schedules, triggers)"
-          if ! npx firebase-tools@13 deploy --only functions --project cliff-services \
-                 --non-interactive --force 2>&1 | tee /tmp/final-pass.log; then
-            failed="$failed <final-pass>"
-          fi
-          # `tee` means the pipeline's status is tee's, so check the log itself.
-          if grep -qE "^Error:|HTTP Error:" /tmp/final-pass.log; then
-            case "$failed" in *"<final-pass>"*) ;; *) failed="$failed <final-pass>";; esac
+          final_ok=1
+          # `pipefail` is set, so the `||` sees firebase-tools' status, not tee's.
+          npx firebase-tools@13 deploy --only functions --project cliff-services \
+            --non-interactive --force 2>&1 | tee /tmp/final-pass.log || final_ok=0
+
+          # Which functions it says it could not deploy — and the region decides
+          # whether that matters.
+          #
+          # Everything this codebase declares lives in us-east1. A failure
+          # reported against us-central1 is therefore never something this
+          # deploy asked for: it is firebase-tools tidying up what the region
+          # move left there, and the tidying fails because the thing is already
+          # gone — "Request to .../jobs/firebase-schedule-meetingDigestSchedule-us-central1
+          # had HTTP Error: 404, Job not found." Nothing was asked for that it
+          # did not get, but the whole pass was reported failed, so a run that
+          # shipped the site and every function still went red.
+          #
+          # Anything in a live region, or a failure with no such list at all,
+          # is real and still reddens the build.
+          if [ "$final_ok" -eq 0 ]; then
+            reported=$(sed -n '/^Functions deploy had errors with the following functions:/,/^[[:space:]]*$/p' \
+                         /tmp/final-pass.log)
+            live=$(echo "$reported" | grep -oE '\(us-[a-z0-9-]+\)' | grep -v '(us-central1)' || true)
+            if [ -z "$reported" ] || [ -n "$live" ]; then
+              failed="$failed <final-pass>"
+            else
+              echo "::warning::Final pass failed only on us-central1 — residue from the region move, not this deploy. Hosting and every us-east1 function are unaffected. Deleting the leftover meetingDigestSchedule in us-central1 retires this warning."
+            fi
           fi
 
           if [ -n "$failed" ]; then
