@@ -2,7 +2,8 @@ import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   getBenchSubmissions, joinBench, benchStats, discoverColumns, cell,
-  autoMap, ColumnMap, BenchConsultant, Row,
+  autoMap, filterByDate, filterByStatus, statusCounts,
+  ColumnMap, BenchConsultant, Row,
 } from "../lib/benchSubmissions";
 import { applyColumnFilters, optionsForColumn, ColumnSelections } from "../lib/columnFilter";
 import { friendlyError } from "../lib/errors";
@@ -11,6 +12,7 @@ import Pagination, { usePagination } from "../components/Pagination";
 import { Sort, nextSort, sortRows, sortIndicator } from "../lib/tableSort";
 
 type Tab = "bench" | "submissions";
+type Coverage = "all" | "covered" | "idle";
 
 const STORE = "benchSubmissions:columnMap";
 
@@ -75,6 +77,14 @@ export default function BenchSubmissions() {
   const [benchFilters, setBenchFilters] = useState<ColumnSelections>({});
   const [subFilters, setSubFilters] = useState<ColumnSelections>({});
   const [search, setSearch] = useState("");
+  // Page-level filters. These narrow the submissions *before* the join, so the
+  // tiles, the idle list and both tables all describe the same slice — a date
+  // range that only trimmed the submissions table would leave "No submissions
+  // yet" counting the whole year.
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [statusPick, setStatusPick] = useState<string[]>([]);
+  const [coverage, setCoverage] = useState<Coverage>("all");
   const [benchSort, setBenchSort] = useState<Sort | null>(null);
   const [subSort, setSubSort] = useState<Sort | null>(null);
   // Corrections to the detected column mapping, kept per field so a fixed one
@@ -88,11 +98,30 @@ export default function BenchSubmissions() {
     () => ({ ...autoMap(bench, submissions), ...overrides }),
     [bench, submissions, overrides]
   );
-  const joined = useMemo(() => joinBench(bench, submissions, map), [bench, submissions, map]);
-  const stats = useMemo(
-    () => benchStats(joined, submissions, map.subStatus),
-    [joined, submissions, map.subStatus]
+  // Every status the report offers, counted before the pick is applied — the
+  // chips must not disappear as they are ticked.
+  const allStatuses = useMemo(
+    () => statusCounts(submissions, map.subStatus),
+    [submissions, map.subStatus]
   );
+
+  const visibleSubs = useMemo(
+    () => filterByStatus(filterByDate(submissions, map.subDate, from, to), map.subStatus, statusPick),
+    [submissions, map.subDate, map.subStatus, from, to, statusPick]
+  );
+
+  const joined = useMemo(() => joinBench(bench, visibleSubs, map), [bench, visibleSubs, map]);
+  const stats = useMemo(
+    () => benchStats(joined, visibleSubs, map.subStatus),
+    [joined, visibleSubs, map.subStatus]
+  );
+
+  // The bench tab's own slice: who to show once coverage is chosen.
+  const benchPool = useMemo(() => {
+    if (coverage === "covered") return joined.filter((c) => c.count > 0);
+    if (coverage === "idle") return joined.filter((c) => c.count === 0);
+    return joined;
+  }, [joined, coverage]);
 
   const setField = (field: keyof ColumnMap, value: string) => {
     const next = { ...overrides, [field]: value || null };
@@ -125,18 +154,18 @@ export default function BenchSubmissions() {
   };
 
   const benchRows = useMemo(() => {
-    const filtered = applyColumnFilters(joined, benchFilters, benchCell);
+    const filtered = applyColumnFilters(benchPool, benchFilters, benchCell);
     const searched = filtered.filter((c) => matches(benchTableCols.map((col) => benchCell(c, col))));
     return sortRows(searched, benchSort, benchCell);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [joined, benchFilters, benchTableCols, search, benchSort]);
+  }, [benchPool, benchFilters, benchTableCols, search, benchSort]);
 
   const subRows = useMemo(() => {
-    const filtered = applyColumnFilters(submissions, subFilters, subCell);
+    const filtered = applyColumnFilters(visibleSubs, subFilters, subCell);
     const searched = filtered.filter((r) => matches(subCols.map((col) => r[col])));
     return sortRows(searched, subSort, subCell);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [submissions, subFilters, subCols, search, subSort]);
+  }, [visibleSubs, subFilters, subCols, search, subSort]);
 
   const benchPage = usePagination(benchRows, 25, "benchList");
   const subPage = usePagination(subRows, 25, "benchSubmissions");
@@ -147,10 +176,21 @@ export default function BenchSubmissions() {
     setSearch("");
     setBenchSort(null);
     setSubSort(null);
+    setFrom("");
+    setTo("");
+    setStatusPick([]);
+    setCoverage("all");
   };
   const filterCount =
     Object.values(benchFilters).filter((v) => v?.length).length +
-    Object.values(subFilters).filter((v) => v?.length).length;
+    Object.values(subFilters).filter((v) => v?.length).length +
+    (from ? 1 : 0) +
+    (to ? 1 : 0) +
+    (statusPick.length > 0 ? 1 : 0) +
+    (coverage === "all" ? 0 : 1);
+
+  const toggleStatus = (v: string) =>
+    setStatusPick((p) => (p.includes(v) ? p.filter((x) => x !== v) : [...p, v]));
 
   const benchNameCol = map.benchName;
 
@@ -195,7 +235,7 @@ export default function BenchSubmissions() {
           )}
 
           <div className="card">
-            <details open={stats.covered === 0 && submissions.length > 0}>
+            <details open={stats.covered === 0 && submissions.length > 0 && !from && !to && statusPick.length === 0}>
               <summary style={{ cursor: "pointer", fontSize: "0.85rem" }} className="muted">
                 Column mapping — which column means what
               </summary>
@@ -211,7 +251,8 @@ export default function BenchSubmissions() {
                 <MapField label="Submissions: consultant" value={map.subName} columns={subCols} onChange={(v) => setField("subName", v)} hint="Must name the same person as the bench column" />
                 <MapField label="Submissions: surname" value={map.subLast} columns={subCols} onChange={(v) => setField("subLast", v)} hint="Only if the name is split across two columns" />
                 <MapField label="Submissions: email" value={map.subEmail} columns={subCols} onChange={(v) => setField("subEmail", v)} hint="Optional" />
-                <MapField label="Submissions: status" value={map.subStatus} columns={subCols} onChange={(v) => setField("subStatus", v)} hint="Drives the status tiles" />
+                <MapField label="Submissions: status" value={map.subStatus} columns={subCols} onChange={(v) => setField("subStatus", v)} hint="Drives the status tiles and the status filter" />
+                <MapField label="Submissions: date" value={map.subDate} columns={subCols} onChange={(v) => setField("subDate", v)} hint="Drives the date range filter" />
               </div>
               {Object.keys(overrides).length > 0 && (
                 <button className="btn ghost" style={{ marginTop: "0.6rem" }} onClick={() => { setOverrides({}); writeOverrides({}); }}>
@@ -219,6 +260,90 @@ export default function BenchSubmissions() {
                 </button>
               )}
             </details>
+          </div>
+
+          <div className="card">
+            <p className="sub" style={{ marginTop: 0 }}>
+              Filters{filterCount > 0 ? ` · ${filterCount} active` : ""}
+            </p>
+            <div style={{ display: "flex", gap: "0.9rem", flexWrap: "wrap", alignItems: "flex-end" }}>
+              {map.subDate ? (
+                <>
+                  <div className="field" style={{ margin: 0 }}>
+                    <label>Submitted from</label>
+                    <input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} />
+                  </div>
+                  <div className="field" style={{ margin: 0 }}>
+                    <label>Submitted to</label>
+                    <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} />
+                  </div>
+                </>
+              ) : (
+                <p className="muted" style={{ margin: 0, fontSize: "0.8rem", maxWidth: 260 }}>
+                  No column in the submissions report looks like a date, so there is no range to
+                  filter on. Pick one under the column mapping above.
+                </p>
+              )}
+
+              <div className="field" style={{ margin: 0, minWidth: 190 }}>
+                <label>Bench</label>
+                <select value={coverage} onChange={(e) => setCoverage(e.target.value as Coverage)}>
+                  <option value="all">Everyone on the bench</option>
+                  <option value="covered">Submitted at least once</option>
+                  <option value="idle">No submissions yet</option>
+                </select>
+              </div>
+
+              <div style={{ flex: 1 }} />
+
+              {(filterCount > 0 || search) && (
+                <button className="btn ghost" onClick={clearFilters}>
+                  Clear {filterCount > 0 ? `${filterCount} filter${filterCount > 1 ? "s" : ""}` : "search"}
+                </button>
+              )}
+            </div>
+
+            {allStatuses.length > 0 && (
+              <div style={{ marginTop: "0.75rem" }}>
+                <div className="muted" style={{ fontSize: "0.78rem", marginBottom: "0.35rem" }}>
+                  Status {statusPick.length > 0 ? `· ${statusPick.length} of ${allStatuses.length}` : "· all"}
+                </div>
+                <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                  {allStatuses.map((sc) => {
+                    const on = statusPick.includes(sc.status);
+                    return (
+                      <button
+                        key={sc.status}
+                        type="button"
+                        className={`btn ${on ? "" : "ghost"}`}
+                        style={{ padding: "0.25rem 0.6rem", fontSize: "0.8rem" }}
+                        aria-pressed={on}
+                        onClick={() => toggleStatus(sc.status)}
+                      >
+                        {sc.status} <span className="muted">{sc.count}</span>
+                      </button>
+                    );
+                  })}
+                  {statusPick.length > 0 && (
+                    <button
+                      type="button"
+                      className="btn ghost"
+                      style={{ padding: "0.25rem 0.6rem", fontSize: "0.8rem" }}
+                      onClick={() => setStatusPick([])}
+                    >
+                      All statuses
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {(from || to) && (
+              <p className="muted" style={{ margin: "0.6rem 0 0", fontSize: "0.78rem" }}>
+                Showing {visibleSubs.length} of {submissions.length} submissions. Rows whose date
+                cell is empty or unreadable are left out while a range is set.
+              </p>
+            )}
           </div>
 
           <div className="card">
@@ -246,14 +371,14 @@ export default function BenchSubmissions() {
                 </div>
               ))}
             </div>
-            {stats.covered === 0 && submissions.length > 0 && bench.length > 0 && (
+            {stats.covered === 0 && visibleSubs.length > 0 && bench.length > 0 && (
               <p className="muted" style={{ margin: "0.6rem 0 0", fontSize: "0.85rem" }}>
-                None of the {submissions.length} submissions matched anyone on the bench. That
+                None of the {visibleSubs.length} submissions matched anyone on the bench. That
                 usually means the two consultant columns above name different things — check the
                 mapping.
               </p>
             )}
-            {stats.byStatus.length === 0 && submissions.length > 0 && (
+            {stats.byStatus.length === 0 && visibleSubs.length > 0 && (
               <p className="muted" style={{ margin: "0.6rem 0 0", fontSize: "0.85rem" }}>
                 No column in the submissions report looks like a status, so there is nothing to
                 count by. Every column is still in the Submissions tab.
@@ -304,11 +429,6 @@ export default function BenchSubmissions() {
                 placeholder="Search every column…"
                 style={{ flex: "1 1 220px", minWidth: 180 }}
               />
-              {(filterCount > 0 || search) && (
-                <button className="btn ghost" onClick={clearFilters}>
-                  Clear {filterCount > 0 ? `${filterCount} filter${filterCount > 1 ? "s" : ""}` : "search"}
-                </button>
-              )}
             </div>
 
             {tab === "bench" ? (
@@ -334,7 +454,7 @@ export default function BenchSubmissions() {
                                 </button>
                                 <ColumnFilter
                                   column={c}
-                                  options={optionsForColumn(joined, c, benchFilters, benchCell)}
+                                  options={optionsForColumn(benchPool, c, benchFilters, benchCell)}
                                   selected={benchFilters[c] ?? []}
                                   onChange={(v) => setBenchFilters((f) => ({ ...f, [c]: v }))}
                                 />
@@ -396,7 +516,7 @@ export default function BenchSubmissions() {
                               </button>
                               <ColumnFilter
                                 column={c}
-                                options={optionsForColumn(submissions, c, subFilters, subCell)}
+                                options={optionsForColumn(visibleSubs, c, subFilters, subCell)}
                                 selected={subFilters[c] ?? []}
                                 onChange={(v) => setSubFilters((f) => ({ ...f, [c]: v }))}
                               />
