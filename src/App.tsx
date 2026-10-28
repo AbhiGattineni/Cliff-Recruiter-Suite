@@ -5,6 +5,7 @@ import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Home from "./pages/Home";
+import WorkBoard from "./pages/WorkBoard";
 import ResumeParsing from "./pages/ResumeParsing";
 import ResumeReports from "./pages/ResumeReports";
 import ReportGeneration from "./pages/ReportGeneration";
@@ -75,6 +76,7 @@ export default function App() {
         <Route path="/recruiters" element={<RecruiterPerformance />} />
         <Route path="/submissions" element={<Submissions />} />
         <Route path="/client-tracker" element={<ClientTracker />} />
+        <Route path="/board" element={<WorkBoard />} />
         <Route path="/candidate-pool" element={<CandidatePool />} />
         <Route path="/bench-submissions" element={<BenchSubmissions />} />
         <Route path="/timesheets" element={<Timesheets />} />

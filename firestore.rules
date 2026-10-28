@@ -190,6 +190,49 @@ service cloud.firestore {
     match /signupOtps/{emailKey} {
       allow read, write: if false;
     }
+        // ---- Work Board --------------------------------------------------------
+    // Staff-only, written from the browser like `holidays`.
+    match /boardIssues/{issueId} {
+      allow get, list: if isStaff();
+      allow create: if isStaff()
+        && request.resource.data.reporter == request.auth.token.email
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 200
+        && request.resource.data.status in ["todo", "in_progress", "in_review", "done"]
+        && request.resource.data.type in ["story", "task", "bug", "epic"];
+      allow update: if isStaff()
+        && request.resource.data.key == resource.data.key
+        && request.resource.data.reporter == resource.data.reporter
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 200
+        && request.resource.data.status in ["todo", "in_progress", "in_review", "done"]
+        && request.resource.data.type in ["story", "task", "bug", "epic"];
+      allow delete: if myRole() in ["admin", "manager"]
+        || (isStaff() && resource.data.reporter == request.auth.token.email);
+    }
+
+    // The CLF-n counter. One field, and it may only go up.
+    match /boardMeta/counter {
+      allow get: if isStaff();
+      allow create: if isStaff() && request.resource.data.keys().hasOnly(["next"]) && request.resource.data.next == 2;
+      allow update: if isStaff() && request.resource.data.keys().hasOnly(["next"])
+        && request.resource.data.next == resource.data.next + 1;
+    }
+        // Names + emails of staff, for the Work Board assignee list.
+    match /staffDirectory/{uid} {
+      allow get, list: if isStaff();
+      allow create, update: if isStaff()
+        && (uid == request.auth.uid
+              ? request.resource.data.email == request.auth.token.email.lower()
+              : myRole() in ["admin", "manager"])
+        && request.resource.data.keys().hasOnly(["email", "name", "updatedAt"])
+        && request.resource.data.email is string
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 120;
+      allow delete: if myRole() in ["admin", "manager"];
+    }
 
     // Default deny.
     match /{document=**} {

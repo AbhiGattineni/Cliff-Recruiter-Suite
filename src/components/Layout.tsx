@@ -1,3 +1,4 @@
+import { useStaffDirectorySync } from "../lib/staffDirectory";
 import { useState } from "react";
 import { NavLink, Outlet, Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -8,6 +9,7 @@ import ThemeToggle from "./ThemeToggle";
 
 const NAV = [
   { to: "/", end: true, icon: "🏠", label: "Dashboard" },
+  { to: "/board", icon: "📋", label: "Work Board" },  
   { to: "/resume", icon: "📄", label: "Resume Parsing" },
   { to: "/resume-reports", icon: "🗂️", label: "Resume Reports" },
   { to: "/reports", icon: "📊", label: "Report Generation" },
@@ -26,6 +28,7 @@ const NAV = [
 const isMobile = () => typeof window !== "undefined" && window.matchMedia("(max-width: 768px)").matches;
 
 export default function Layout() {
+  useStaffDirectorySync();  
   const { user, signOut } = useAuth();
   // The rail starts collapsed every session — hovering it slides the labels out
   // (CSS), and ☰ pins it open for people who'd rather it stayed. Pinning isn't
