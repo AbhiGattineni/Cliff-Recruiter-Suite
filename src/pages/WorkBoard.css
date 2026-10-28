@@ -1,0 +1,196 @@
+/* Work Board — uses the app's existing theme variables, so light/dark follow ThemeToggle. */
+
+.wb-toolbar {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .wb-search {
+    flex: 1;
+    min-width: 220px;
+    padding: 0.5rem 0.7rem;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--card-raised);
+    color: var(--ink);
+    font: inherit;
+  }
+  .wb-chips { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+  .wb-chip {
+    border: 1px solid var(--line);
+    background: transparent;
+    color: var(--muted);
+    border-radius: 999px;
+    padding: 0.3rem 0.75rem;
+    font: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+  }
+  .wb-chip.on { background: var(--brand-light); color: var(--brand); border-color: var(--brand); font-weight: 600; }
+  
+  /* ---- Board ---- */
+  .wb-board {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(250px, 1fr));
+    gap: 0.9rem;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+    align-items: start;
+  }
+  .wb-col {
+    background: var(--row-alt);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 0.6rem;
+    min-height: 60vh;
+    display: flex;
+    flex-direction: column;
+    transition: border-color 0.12s, background 0.12s;
+  }
+  .wb-col.drop { border-color: var(--brand); background: var(--brand-light); }
+  .wb-col-head {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.2rem 0.25rem 0.6rem;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    font-weight: 700;
+  }
+  .wb-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .wb-col-title { color: var(--ink-strong); }
+  .wb-count {
+    background: var(--track);
+    color: var(--ink);
+    border-radius: 999px;
+    padding: 0 0.45rem;
+    font-size: 0.72rem;
+  }
+  .wb-points { text-transform: none; letter-spacing: 0; font-weight: 500; }
+  .wb-add {
+    margin-left: auto;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-size: 1.15rem;
+    line-height: 1;
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .wb-add:hover { background: var(--track); color: var(--ink-strong); }
+  .wb-cards { display: flex; flex-direction: column; gap: 0.5rem; flex: 1; }
+  .wb-empty {
+    border: 1.5px dashed var(--line);
+    border-radius: 8px;
+    padding: 1.2rem 0.5rem;
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.82rem;
+  }
+  .wb-drop-line { height: 3px; border-radius: 2px; background: var(--brand); margin: -0.15rem 0; }
+  
+  /* ---- Card ---- */
+  .wb-card {
+    background: var(--card-raised);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--c-blue);
+    border-radius: 8px;
+    padding: 0.6rem 0.65rem 0.5rem;
+    cursor: grab;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+    transition: box-shadow 0.12s, transform 0.12s;
+  }
+  .wb-card:hover { box-shadow: 0 4px 12px rgba(16, 24, 40, 0.12); }
+  .wb-card:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+  .wb-card.dragging { opacity: 0.4; }
+  .wb-card-title { font-size: 0.9rem; font-weight: 500; color: var(--ink-strong); line-height: 1.35; word-break: break-word; }
+  .wb-card-title.done { text-decoration: line-through; color: var(--muted); }
+  .wb-labels { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.4rem; }
+  .wb-label {
+    font-size: 0.68rem;
+    background: var(--brand-light);
+    color: var(--brand);
+    border-radius: 4px;
+    padding: 0 0.35rem;
+    font-weight: 600;
+  }
+  .wb-card-foot { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.5rem; font-size: 0.75rem; }
+  .wb-key { color: var(--muted); font-weight: 600; font-size: 0.75rem; }
+  .wb-due { color: var(--muted); }
+  .wb-due.overdue { color: var(--danger); font-weight: 700; }
+  .wb-prio { font-weight: 800; font-size: 0.9rem; }
+  .wb-sp {
+    background: var(--track);
+    color: var(--ink);
+    border-radius: 999px;
+    min-width: 20px;
+    text-align: center;
+    padding: 0 0.3rem;
+    font-weight: 600;
+  }
+  .wb-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--brand);
+    color: #fff;
+    font-size: 0.66rem;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+  }
+  .wb-avatar.empty { background: var(--track); color: var(--muted); }
+  
+  /* ---- Dialog ---- */
+  .wb-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 12, 35, 0.45);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 6vh 16px;
+    z-index: 1000;
+    overflow-y: auto;
+  }
+  .wb-modal {
+    background: var(--card-raised);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: 0 20px 50px rgba(16, 24, 40, 0.25);
+    width: 100%;
+    max-width: 620px;
+    padding: 1.1rem 1.25rem;
+  }
+  .wb-modal textarea { width: 100%; resize: vertical; font: inherit; }
+  .wb-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.8rem; }
+  .wb-modal-head .wb-key { margin-right: 0.4rem; }
+  .wb-x { border: none; background: transparent; color: var(--muted); font-size: 1.5rem; line-height: 1; cursor: pointer; }
+  .wb-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 0.9rem; }
+  .wb-link {
+    border: none;
+    background: none;
+    padding: 0;
+    margin-top: 0.25rem;
+    color: var(--brand);
+    font: inherit;
+    font-size: 0.78rem;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  .wb-modal-foot { display: flex; gap: 0.5rem; align-items: center; border-top: 1px solid var(--line); padding-top: 0.8rem; }
+  .wb-danger { color: var(--danger); }
+  
+  @media (max-width: 768px) {
+    .wb-board { grid-template-columns: repeat(4, 82vw); scroll-snap-type: x mandatory; }
+    .wb-col { scroll-snap-align: start; min-height: 50vh; }
+    .wb-grid2 { grid-template-columns: 1fr; }
+  }

@@ -353,63 +353,92 @@ interface ActivityAcc {
 }
 
 async function recruiterActivityHandler(request: CallableRequest) {
-    void request; // auth on hold (open mode)
-    const password = CEIPAL_PASSWORD.value();
-    if (!password || password.startsWith("PLACEHOLDER")) {
-      throw new HttpsError("failed-precondition", "Ceipal password is not configured.");
-    }
-    const fromMs = parseIsoDay(String(request.data?.from ?? ""));
-    const toMs = parseIsoDay(String(request.data?.to ?? ""));
-    const inRange = (dayMs: number | null) =>
-      dayMs != null && (fromMs == null || dayMs >= fromMs) && (toMs == null || dayMs <= toMs);
+  void request; // auth on hold (open mode)
+  const password = CEIPAL_PASSWORD.value();
+  if (!password || password.startsWith("PLACEHOLDER")) {
+    throw new HttpsError("failed-precondition", "Ceipal password is not configured.");
+  }
+  const fromMs = parseIsoDay(String(request.data?.from ?? ""));
+  const toMs = parseIsoDay(String(request.data?.to ?? ""));
+  const inRange = (dayMs: number | null) =>
+    dayMs != null && (fromMs == null || dayMs >= fromMs) && (toMs == null || dayMs <= toMs);
 
-    const [pipe, mail, board, adv] = await Promise.all([
-      fetchReport("pipeline_logs", password, 0),
-      fetchReport("mail_merge", password, 0),
-      fetchReport("job_board", password, 0),
-      fetchReport("advanced_search", password, 0),
-    ]);
+  // Each report is read on its own. With Promise.all, one bad report took the
+  // other three down and the browser only ever saw "INTERNAL" — now a failure
+  // is logged by name and the rest of the counters still come back.
+  const names = ["pipeline_logs", "mail_merge", "job_board", "advanced_search"] as const;
+  const settled = await Promise.allSettled(names.map((n) => fetchReport(n, password, 0)));
+  const problems: string[] = [];
+  const reports = settled.map((s, i) => {
+    if (s.status === "fulfilled") return s.value;
+    const msg = s.reason instanceof Error ? s.reason.message : String(s.reason);
+    console.error(`recruiterActivity: report "${names[i]}" failed`, s.reason);
+    problems.push(`${names[i]}: ${msg}`);
+    return null;
+  });
+  if (problems.length === names.length) {
+    throw new HttpsError("unavailable", `All Ceipal activity reports failed — ${problems.join("; ")}`);
+  }
+  const [pipe, mail, board, adv] = reports;
 
-    const by = new Map<string, ActivityAcc>();
-    const acc = (name: unknown): ActivityAcc | null => {
-      const k = activityNameKey(name);
-      if (!k) return null;
-      let a = by.get(k);
-      if (!a) {
-        a = { pipelineUpdates: 0, bulkEmails: 0, diceCredits: 0, monsterCredits: 0, advSearchInternalDb: 0 };
-        by.set(k, a);
-      }
-      return a;
-    };
+  const safeRows = (rep: unknown, name: string): Record<string, unknown>[] => {
+    if (rep == null) return [];
+    try {
+      return rowsOfReport(rep as Parameters<typeof rowsOfReport>[0]) as Record<string, unknown>[];
+    } catch (e) {
+      console.error(`recruiterActivity: report "${name}" could not be read`, e);
+      problems.push(`${name}: unreadable (${e instanceof Error ? e.message : String(e)})`);
+      return [];
+    }
+  };
 
-    for (const r of rowsOfReport(pipe)) {
-      if (!inRange(parseCeipalDay(String(r.StatusChangedOn ?? "")))) continue;
-      const a = acc(r.StatusChangedBy);
-      if (a) a.pipelineUpdates++;
+  const by = new Map<string, ActivityAcc>();
+  const acc = (name: unknown): ActivityAcc | null => {
+    const k = activityNameKey(name);
+    if (!k) return null;
+    let a = by.get(k);
+    if (!a) {
+      a = { pipelineUpdates: 0, bulkEmails: 0, diceCredits: 0, monsterCredits: 0, advSearchInternalDb: 0 };
+      by.set(k, a);
     }
-    for (const r of rowsOfReport(mail)) {
-      if (!inRange(parseCeipalDay(String(r.MailsSentOn ?? "")))) continue;
-      const a = acc(r.MemberName);
-      if (a) a.bulkEmails += Number(r.MailsSent) || 0;
-    }
-    for (const r of rowsOfReport(board)) {
-      if (!inRange(parseCeipalDay(String(r.ImportedOn ?? "")))) continue;
-      const a = acc(r.UserName);
-      if (!a) continue;
-      const cnt = Number(r.Count) || 0;
-      const jb = String(r.JobBoardName ?? "").toLowerCase();
-      if (jb.includes("dice")) a.diceCredits += cnt;
-      else if (jb.includes("monster")) a.monsterCredits += cnt;
-    }
-    // Advanced search report has no date column — running per-user InternalDB total.
-    for (const r of rowsOfReport(adv)) {
-      const a = acc(r.UserName);
-      if (a) a.advSearchInternalDb += Number(r.InternalDB) || 0;
-    }
+    return a;
+  };
 
-    const byRecruiter: Record<string, ActivityAcc> = {};
-    for (const [k, v] of by) byRecruiter[k] = v;
-    return { ok: true, from: request.data?.from ?? null, to: request.data?.to ?? null, byRecruiter, fetchedAt: Date.now() };
+  for (const r of safeRows(pipe, "pipeline_logs")) {
+    if (!inRange(parseCeipalDay(String(r.StatusChangedOn ?? "")))) continue;
+    const a = acc(r.StatusChangedBy);
+    if (a) a.pipelineUpdates++;
+  }
+  for (const r of safeRows(mail, "mail_merge")) {
+    if (!inRange(parseCeipalDay(String(r.MailsSentOn ?? "")))) continue;
+    const a = acc(r.MemberName);
+    if (a) a.bulkEmails += Number(r.MailsSent) || 0;
+  }
+  for (const r of safeRows(board, "job_board")) {
+    if (!inRange(parseCeipalDay(String(r.ImportedOn ?? "")))) continue;
+    const a = acc(r.UserName);
+    if (!a) continue;
+    const cnt = Number(r.Count) || 0;
+    const jb = String(r.JobBoardName ?? "").toLowerCase();
+    if (jb.includes("dice")) a.diceCredits += cnt;
+    else if (jb.includes("monster")) a.monsterCredits += cnt;
+  }
+  // Advanced search report has no date column — running per-user InternalDB total.
+  for (const r of safeRows(adv, "advanced_search")) {
+    const a = acc(r.UserName);
+    if (a) a.advSearchInternalDb += Number(r.InternalDB) || 0;
+  }
+
+  const byRecruiter: Record<string, ActivityAcc> = {};
+  for (const [k, v] of by) byRecruiter[k] = v;
+  return {
+    ok: true,
+    from: request.data?.from ?? null,
+    to: request.data?.to ?? null,
+    byRecruiter,
+    problems, // e.g. ["job_board: Report not found"] — empty when everything loaded
+    fetchedAt: Date.now(),
+  };
 }
 
 // Currently-open jobs (Ceipal "Active Jobs - All" report). Small live snapshot.
