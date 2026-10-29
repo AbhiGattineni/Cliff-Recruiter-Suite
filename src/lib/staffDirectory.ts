@@ -6,9 +6,10 @@
 //
 // How it fills up:
 //   1. Every staff member writes their OWN entry each time they open the portal.
-//   2. When an admin or manager opens the portal, every active staff profile is
-//      copied in and deactivated people are removed, so the list is complete
-//      even for people who have not signed in since this shipped.
+//   2. When an admin or manager opens the portal (or presses "Refresh employee
+//      list" on the Work Board), every active staff profile is copied in and
+//      deactivated people are removed, so the list is complete even for people
+//      who have not signed in since this shipped.
 
 import { useEffect } from "react";
 import {
@@ -16,10 +17,8 @@ import {
   doc,
   getDocs,
   onSnapshot,
-  query,
   serverTimestamp,
   setDoc,
-  where,
   writeBatch,
 } from "firebase/firestore";
 import { db } from "../firebase";
@@ -75,34 +74,59 @@ async function registerSelf(uid: string, email: string, name: string) {
   await setDoc(doc(DIR, uid), { email: email.toLowerCase(), name: name.slice(0, 120), updatedAt: serverTimestamp() });
 }
 
-/** Admin/manager only: mirror active staff profiles into the directory. Writes only what changed. */
-async function syncFromProfiles() {
-  const [profiles, current] = await Promise.all([
-    getDocs(query(collection(db, "userProfiles"), where("role", "in", STAFF_ROLES))),
-    getDocs(DIR),
-  ]);
+export interface SyncReport {
+  added: number;
+  updated: number;
+  removed: number;
+  total: number; // staff now in the directory from profiles
+  skipped: { who: string; reason: string }[];
+}
+
+/**
+ * Admin/manager only: mirror active staff profiles into the directory and say
+ * what was left out and why, so a missing person can be traced to their profile.
+ */
+export async function syncFromProfiles(): Promise<SyncReport> {
+  const [profiles, current] = await Promise.all([getDocs(collection(db, "userProfiles")), getDocs(DIR)]);
   const existing = new Map(current.docs.map((d) => [d.id, d.data()]));
-  const batch = writeBatch(db);
-  let writes = 0;
+  const report: SyncReport = { added: 0, updated: 0, removed: 0, total: 0, skipped: [] };
+  const ops: ((b: ReturnType<typeof writeBatch>) => void)[] = [];
 
   for (const p of profiles.docs) {
     const d = p.data();
-    const email = typeof d.email === "string" ? d.email.toLowerCase() : "";
-    if (!email) continue;
-    const active = d.active !== false; // absent on older profiles means active
+    const email = typeof d.email === "string" ? d.email.trim().toLowerCase() : "";
+    const role = typeof d.role === "string" ? d.role : "";
+    const who = email || pickName(d, "") || `profile ${p.id}`;
     const have = existing.get(p.id);
-    if (!active) {
-      if (have) { batch.delete(doc(DIR, p.id)); writes++; }
+    const drop = () => {
+      if (have) { ops.push((b) => b.delete(doc(DIR, p.id))); report.removed++; }
+    };
+
+    if (role === "consultant") { drop(); continue; } // consultants are not staff; not worth listing
+    if (!STAFF_ROLES.includes(role)) {
+      report.skipped.push({ who, reason: role ? `role is "${role}" — needs admin, manager, employee or benchsales` : "no role assigned yet" });
+      drop();
       continue;
     }
+    if (d.active === false) { report.skipped.push({ who, reason: "deactivated" }); drop(); continue; }
+    if (!email) { report.skipped.push({ who, reason: "profile has no email saved — they will be added when they next open the portal" }); continue; }
+
+    report.total++;
     const name = pickName(d, email);
-    if (!have || have.email !== email || have.name !== name) {
-      batch.set(doc(DIR, p.id), { email, name, updatedAt: serverTimestamp() });
-      writes++;
+    if (!have) { ops.push((b) => b.set(doc(DIR, p.id), { email, name, updatedAt: serverTimestamp() })); report.added++; }
+    else if (have.email !== email || have.name !== name) {
+      ops.push((b) => b.set(doc(DIR, p.id), { email, name, updatedAt: serverTimestamp() }));
+      report.updated++;
     }
-    if (writes >= 450) break; // stay under the 500-op batch limit; the next load picks up the rest
   }
-  if (writes) await batch.commit();
+
+  // Firestore batches cap at 500 writes, so commit in chunks.
+  for (let i = 0; i < ops.length; i += 400) {
+    const batch = writeBatch(db);
+    ops.slice(i, i + 400).forEach((op) => op(batch));
+    await batch.commit();
+  }
+  return report;
 }
 
 /**
@@ -120,8 +144,10 @@ export function useStaffDirectorySync() {
     if (!uid || !email || !role || !STAFF_ROLES.includes(role)) return;
     const profileData = (profile ?? {}) as unknown as Record<string, unknown>;
     const name = user?.displayName?.trim() || pickName(profileData, email);
-    registerSelf(uid, email, name).catch(() => {});
-    if (role === "admin" || role === "manager") syncFromProfiles().catch(() => {});
+    registerSelf(uid, email, name).catch((e) => console.warn("staffDirectory: could not register self", e));
+    if (role === "admin" || role === "manager") {
+      syncFromProfiles().catch((e) => console.warn("staffDirectory: sync from profiles failed", e));
+    }
     // Once per sign-in, not on every profile object change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uid, email, role]);
