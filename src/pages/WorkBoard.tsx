@@ -18,7 +18,7 @@ import {
   subscribeIssues,
   updateIssue,
 } from "../lib/board";
-import { StaffMember, subscribeDirectory } from "../lib/staffDirectory";
+import { StaffMember, SyncReport, subscribeDirectory, syncFromProfiles } from "../lib/staffDirectory";
 import "./WorkBoard.css";
 
 type Dialog = { mode: "create"; status: IssueStatus } | { mode: "edit"; issue: Issue } | null;
@@ -34,8 +34,25 @@ const fallbackName = (email: string) =>
 type Person = { email: string; name: string; inDirectory: boolean };
 
 export default function WorkBoard() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const me = (user?.email ?? "").toLowerCase();
+  const myRole = (profile as unknown as { role?: string } | null)?.role ?? "";
+  const canSync = myRole === "admin" || myRole === "manager";
+  const [syncing, setSyncing] = useState(false);
+  const [syncReport, setSyncReport] = useState<SyncReport | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const runSync = async () => {
+    setSyncing(true);
+    setSyncError(null);
+    try {
+      setSyncReport(await syncFromProfiles());
+    } catch (e) {
+      setSyncReport(null);
+      setSyncError(friendlyError(e));
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const [issues, setIssues] = useState<Issue[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -166,12 +183,43 @@ export default function WorkBoard() {
             Team stories, tasks and bugs. Drag a card to change its status or position; click it to edit.
           </p>
         </div>
-        <button className="btn" onClick={() => setDialog({ mode: "create", status: "todo" })}>
-          + Create issue
-        </button>
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          {canSync && (
+            <button className="btn secondary" onClick={runSync} disabled={syncing} title="Copy every active staff profile into the assignee list">
+              {syncing ? <span className="spinner dark" /> : "↻"} Refresh employee list
+            </button>
+          )}
+          <button className="btn" onClick={() => setDialog({ mode: "create", status: "todo" })}>
+            + Create issue
+          </button>
+        </div>
       </div>
 
       {error && <div className="alert error">{error}</div>}
+      {syncError && <div className="alert error">Couldn&#39;t refresh the employee list: {syncError}</div>}
+      {syncReport && (
+        <div className="card" style={{ position: "relative" }}>
+          <button className="wb-x" style={{ position: "absolute", top: 8, right: 10 }} onClick={() => setSyncReport(null)} aria-label="Dismiss">×</button>
+          <strong>Employee list refreshed — {syncReport.total} staff available to assign.</strong>
+          <span className="muted" style={{ marginLeft: 6 }}>
+            ({syncReport.added} added, {syncReport.updated} updated, {syncReport.removed} removed)
+          </span>
+          {syncReport.skipped.length > 0 && (
+            <>
+              <p style={{ margin: "0.6rem 0 0.3rem" }}>Not in the list ({syncReport.skipped.length}):</p>
+              <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
+                {syncReport.skipped.map((x) => (
+                  <li key={x.who + x.reason}><strong>{x.who}</strong> <span className="muted">— {x.reason}</span></li>
+                ))}
+              </ul>
+              <p className="muted" style={{ margin: "0.5rem 0 0", fontSize: "0.82rem" }}>
+                Fix their role or status in user management, then refresh again. You can still assign them a ticket now with
+                “Someone else — type email” in the Assignee list.
+              </p>
+            </>
+          )}
+        </div>
+      )}
 
       <div className="card wb-toolbar">
         <input
@@ -385,6 +433,8 @@ function IssueDialog({
     labels: initial?.labels ?? [],
   }));
   const [labelText, setLabelText] = useState((initial?.labels ?? []).join(", "));
+  // Typing an email by hand, for someone not (yet) in the staff directory.
+  const [otherMode, setOtherMode] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
@@ -405,6 +455,7 @@ function IssueDialog({
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!draft.title.trim()) { setErr("Give the issue a title."); return; }
+    if (draft.assignee && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.assignee)) { setErr("The assignee needs a full email address."); return; }
     setBusy(true);
     setErr(null);
     try {
@@ -461,14 +512,36 @@ function IssueDialog({
         <div className="wb-grid2">
           <div className="field">
             <label>Assignee</label>
-            <select value={draft.assignee ?? ""} onChange={(e) => set("assignee", e.target.value || null)}>
-              <option value="">Unassigned</option>
-              {people.filter((p) => p.inDirectory || p.email === draft.assignee || p.email === me).map((p) => (
-                <option key={p.email} value={p.email}>
-                  {p.name} — {p.email}{p.email === me ? " (me)" : ""}
-                </option>
-              ))}
-            </select>
+            {otherMode ? (
+              <>
+                <input
+                  type="email"
+                  autoFocus
+                  value={draft.assignee ?? ""}
+                  onChange={(e) => set("assignee", e.target.value.trim() || null)}
+                  placeholder="name@cliff-services.com"
+                />
+                <button type="button" className="wb-link" style={{ marginRight: 10 }} onClick={() => setOtherMode(false)}>
+                  ← Back to the employee list
+                </button>
+              </>
+            ) : (
+              <select
+                value={draft.assignee ?? ""}
+                onChange={(e) => {
+                  if (e.target.value === "__other__") { setOtherMode(true); set("assignee", null); return; }
+                  set("assignee", e.target.value || null);
+                }}
+              >
+                <option value="">Unassigned</option>
+                {people.filter((p) => p.inDirectory || p.email === draft.assignee || p.email === me).map((p) => (
+                  <option key={p.email} value={p.email}>
+                    {p.name} — {p.email}{p.email === me ? " (me)" : ""}
+                  </option>
+                ))}
+                <option value="__other__">Someone else — type email…</option>
+              </select>
+            )}
             {me && draft.assignee !== me && (
               <button type="button" className="wb-link" onClick={() => set("assignee", me)}>Assign to me</button>
             )}
