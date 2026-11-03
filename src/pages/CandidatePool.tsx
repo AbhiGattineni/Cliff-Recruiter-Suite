@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCandidatePool, matchCandidatesToJd, keywordMatchRoles, PoolCandidate } from "../lib/candidatePool";
 import { getLlmUsageSummary } from "../lib/resume";
@@ -35,6 +35,19 @@ const fromInput = (v: string) => (v ? parseDay(v) : null);
 const toInputDate = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
+/** Splits "java, python; aws" into separate terms, dropping blanks and duplicates (case-insensitive). */
+function mergeTerms(existing: string[], raw: string): string[] {
+  const out = [...existing];
+  const seen = new Set(existing.map((t) => t.toLowerCase()));
+  for (const part of raw.split(/[,;\n\t]+/)) {
+    const t = part.trim().slice(0, 60);
+    if (!t || seen.has(t.toLowerCase())) continue;
+    seen.add(t.toLowerCase());
+    out.push(t);
+  }
+  return out.slice(0, 20);
+}
+
 /** Distinct values of one field, with counts, sorted by most common. */
 function facet(rows: PoolCandidate[], pick: (c: PoolCandidate) => string[], labelOf: (raw: string) => string = (x) => x): FilterOption[] {
   const m = new Map<string, { label: string; count: number }>();
@@ -52,7 +65,9 @@ function facet(rows: PoolCandidate[], pick: (c: PoolCandidate) => string[], labe
 }
 
 type Filters = {
-  search: string;
+  search: string; // the text still being typed — applied live as one more term
+  terms: string[]; // committed search terms, shown as chips in the box
+  termMode: "any" | "all"; // a candidate must match any one term, or every term
   locations: string[];
   roles: string[];
   clients: string[];
@@ -62,13 +77,20 @@ type Filters = {
   to: string;
   minSubs: string;
 };
-const EMPTY: Filters = { search: "", locations: [], roles: [], clients: [], statuses: [], recruiters: [], from: "", to: "", minSubs: "" };
+const EMPTY: Filters = { search: "", terms: [], termMode: "any", locations: [], roles: [], clients: [], statuses: [], recruiters: [], from: "", to: "", minSubs: "" };
 const STORE_KEY = "candidatePool.filters";
 
 function loadFilters(): Filters {
   try {
     const raw = sessionStorage.getItem(STORE_KEY);
-    return raw ? { ...EMPTY, ...JSON.parse(raw) } : EMPTY;
+    if (!raw) return EMPTY;
+    const saved = { ...EMPTY, ...JSON.parse(raw) } as Filters;
+    // Older saves had no terms/termMode; anything malformed falls back to empty.
+    return {
+      ...saved,
+      terms: Array.isArray(saved.terms) ? saved.terms.filter((t) => typeof t === "string") : [],
+      termMode: saved.termMode === "all" ? "all" : "any",
+    };
   } catch {
     return EMPTY;
   }
@@ -133,8 +155,7 @@ export default function CandidatePool() {
 
   // Step 2: the filter bar.
   const filtered = useMemo<PoolCandidate[]>(() => {
-    const q = f.search.trim().toLowerCase();
-    const qDigits = digits(q);
+    const terms = [...f.terms, f.search.trim()].map((t) => t.toLowerCase()).filter(Boolean);
     const locs = new Set(f.locations);
     const roles = new Set(f.roles);
     const clients = new Set(f.clients);
@@ -145,10 +166,16 @@ export default function CandidatePool() {
     const minSubs = f.minSubs ? Number(f.minSubs) : 0;
 
     return jdMatched.filter((c) => {
-      if (q) {
-        const text = `${c.name} ${c.email} ${c.latestRole} ${c.roles.join(" ")}`.toLowerCase();
-        const phoneHit = qDigits.length >= 3 && digits(c.mobile || "").includes(qDigits);
-        if (!text.includes(q) && !phoneHit) return false;
+      if (terms.length) {
+        const text = `${c.name} ${c.email} ${c.latestRole} ${c.roles.join(" ")} ${c.location} ${c.latestClient} ${c.status} ${c.latestRecruiter}`.toLowerCase();
+        const phone = digits(c.mobile || "");
+        const hit = (t: string) => {
+          if (text.includes(t)) return true;
+          const td = digits(t);
+          return td.length >= 3 && td.length === t.replace(/[\s()+.-]/g, "").length && phone.includes(td);
+        };
+        const ok = f.termMode === "all" ? terms.every(hit) : terms.some(hit);
+        if (!ok) return false;
       }
       if (locs.size && !locs.has(keyOf(normLocation(c.location || "")))) return false;
       if (roles.size) {
@@ -183,7 +210,7 @@ export default function CandidatePool() {
   }, [filterSig]);
 
   const filterCount =
-    (f.search.trim() ? 1 : 0) +
+    (f.search.trim() || f.terms.length ? 1 : 0) +
     [f.locations, f.roles, f.clients, f.statuses, f.recruiters].filter((a) => a.length > 0).length +
     (f.from || f.to ? 1 : 0) +
     (f.minSubs ? 1 : 0);
@@ -208,7 +235,42 @@ export default function CandidatePool() {
     const text = vals.length <= 2 ? vals.map((v) => labelFor(opts, v)).join(", ") : `${vals.length} selected`;
     chips.push({ label: `${name}: ${text}`, clear: () => setFilter(key, []) });
   };
-  if (f.search.trim()) chips.push({ label: `Search: "${f.search.trim()}"`, clear: () => setFilter("search", "") });
+  {
+    const all = [...f.terms, ...(f.search.trim() ? [f.search.trim()] : [])];
+    if (all.length) {
+      const joiner = f.termMode === "all" ? " AND " : " OR ";
+      chips.push({
+        label: `Search: ${all.map((t) => `"${t}"`).join(joiner)}`,
+        clear: () => setF((c) => ({ ...c, terms: [], search: "" })),
+      });
+    }
+  }
+
+  // ---- search box handlers ----
+  const commitDraft = () => {
+    if (!f.search.trim()) return;
+    setF((c) => ({ ...c, terms: mergeTerms(c.terms, c.search), search: "" }));
+  };
+  const onSearchChange = (v: string) => {
+    // Typing or pasting a comma turns everything before it into chips.
+    const cut = Math.max(v.lastIndexOf(","), v.lastIndexOf(";"));
+    if (cut >= 0) {
+      setF((c) => ({ ...c, terms: mergeTerms(c.terms, v.slice(0, cut)), search: v.slice(cut + 1).trimStart() }));
+    } else {
+      setFilter("search", v);
+    }
+  };
+  const onSearchKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitDraft();
+    } else if (e.key === "Backspace" && !f.search && f.terms.length) {
+      setFilter("terms", f.terms.slice(0, -1));
+    }
+  };
+  const removeTerm = (t: string) => setFilter("terms", f.terms.filter((x) => x !== t));
+  const termTotal = f.terms.length + (f.search.trim() ? 1 : 0);
+  const searchRef = useRef<HTMLInputElement>(null);
   listChip("Location", "locations", options.locations);
   listChip("Role", "roles", options.roles);
   listChip("Client", "clients", options.clients);
@@ -312,13 +374,75 @@ export default function CandidatePool() {
       {/* Filters */}
       <div className="card">
         <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
-          <input
-            className="ms-search"
-            style={{ flex: "1 1 260px", margin: 0, padding: "0.5rem 0.7rem" }}
-            placeholder="🔍  Search name, email, phone or role…"
-            value={f.search}
-            onChange={(e) => setFilter("search", e.target.value)}
-          />
+          <div
+            onClick={() => searchRef.current?.focus()}
+            style={{
+              flex: "1 1 320px",
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: "0.3rem",
+              minHeight: 38,
+              padding: "0.25rem 0.5rem",
+              border: "1px solid var(--line)",
+              borderRadius: 8,
+              background: "var(--card-raised)",
+              cursor: "text",
+            }}
+          >
+            <span aria-hidden style={{ opacity: 0.6, marginRight: 2 }}>🔍</span>
+            {f.terms.map((t) => (
+              <span
+                key={t}
+                className="pill"
+                style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "var(--brand-light)", color: "var(--brand)", fontWeight: 600 }}
+              >
+                {t}
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); removeTerm(t); }}
+                  aria-label={`Remove ${t}`}
+                  style={{ border: "none", background: "transparent", color: "inherit", cursor: "pointer", padding: 0, fontSize: "0.95rem", lineHeight: 1 }}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            <input
+              ref={searchRef}
+              value={f.search}
+              onChange={(e) => onSearchChange(e.target.value)}
+              onKeyDown={onSearchKey}
+              onBlur={commitDraft}
+              placeholder={f.terms.length ? "Add another term…" : "Search name, email, phone, role, location… — press Enter or comma to add more"}
+              aria-label="Search terms"
+              style={{ flex: "1 1 160px", minWidth: 120, border: "none", outline: "none", background: "transparent", color: "var(--ink)", font: "inherit", padding: "0.25rem 0" }}
+            />
+          </div>
+          {termTotal >= 2 && (
+            <div role="group" aria-label="How search terms combine" style={{ display: "inline-flex", border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden" }}>
+              {(["any", "all"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setFilter("termMode", m)}
+                  title={m === "any" ? "Show candidates matching at least one term" : "Show candidates matching every term"}
+                  style={{
+                    border: "none",
+                    padding: "0.4rem 0.7rem",
+                    font: "inherit",
+                    fontSize: "0.82rem",
+                    cursor: "pointer",
+                    background: f.termMode === m ? "var(--brand)" : "transparent",
+                    color: f.termMode === m ? "#fff" : "var(--muted)",
+                    fontWeight: f.termMode === m ? 700 : 500,
+                  }}
+                >
+                  {m === "any" ? "Match any" : "Match all"}
+                </button>
+              ))}
+            </div>
+          )}
           <MultiSelectFilter label="Location" options={options.locations} selected={f.locations} onChange={(v) => setFilter("locations", v)} />
           <MultiSelectFilter label="Role" options={options.roles} selected={f.roles} onChange={(v) => setFilter("roles", v)} />
           <MultiSelectFilter label="Client" options={options.clients} selected={f.clients} onChange={(v) => setFilter("clients", v)} />
