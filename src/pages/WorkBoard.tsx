@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react";
+import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useAuth } from "../context/AuthContext";
 import { friendlyError } from "../lib/errors";
 import {
@@ -19,6 +19,7 @@ import {
   updateIssue,
 } from "../lib/board";
 import { StaffMember, SyncReport, subscribeDirectory, syncFromProfiles } from "../lib/staffDirectory";
+import WorkBoardActivity from "./WorkBoardActivity";
 import "./WorkBoard.css";
 
 type Dialog = { mode: "create"; status: IssueStatus } | { mode: "edit"; issue: Issue } | null;
@@ -149,7 +150,7 @@ export default function WorkBoard() {
     const before = issues;
     setIssues(issues.map((i) => (i.id === id ? { ...i, status, order } : i)).sort((a, b) => a.order - b.order));
     try {
-      await moveIssue(id, status, order);
+      await moveIssue(id, status, order, moving.status, user?.email ?? "");
     } catch (e) {
       setIssues(before);
       setError(friendlyError(e));
@@ -163,7 +164,7 @@ export default function WorkBoard() {
       await createIssue(draft, user?.email ?? "", endOrder(draft.status));
     } else {
       const moved = draft.status !== dialog.issue.status;
-      await updateIssue(dialog.issue.id, draft, moved ? endOrder(draft.status, dialog.issue.id) : undefined);
+      await updateIssue(dialog.issue.id, draft, dialog.issue, user?.email ?? "", moved ? endOrder(draft.status, dialog.issue.id) : undefined);
     }
     setDialog(null);
   };
@@ -330,6 +331,9 @@ export default function WorkBoard() {
           defaultStatus={dialog.mode === "create" ? dialog.status : dialog.issue.status}
           people={people}
           me={me}
+          actor={user?.email ?? ""}
+          canModerate={canSync}
+          nameOf={nameOf}
           onSave={save}
           onDelete={dialog.mode === "edit" ? () => remove(dialog.issue) : undefined}
           onClose={() => setDialog(null)}
@@ -391,6 +395,7 @@ function IssueCard({
         )}
         <span style={{ flex: 1 }} />
         <span className="wb-prio" style={{ color: p.color }} title={`${p.label} priority`}>{p.icon}</span>
+        {issue.commentCount > 0 && <span className="wb-cc" title={`${issue.commentCount} comment${issue.commentCount === 1 ? "" : "s"}`}>💬 {issue.commentCount}</span>}
         {issue.storyPoints != null && <span className="wb-sp" title="Story points">{issue.storyPoints}</span>}
         {issue.assignee ? (
           <span className="wb-avatar" title={`${nameOf(issue.assignee)} (${issue.assignee})`}>{initials(nameOf(issue.assignee))}</span>
@@ -404,11 +409,76 @@ function IssueCard({
 
 // ---------------------------------------------------------------------------
 
+/** A mailto: link that opens the person's mail app with the ticket and how to reach it. */
+function notifyLink(draft: IssueDraft, initial: Issue | null, people: Person[]): string {
+  const to = draft.assignee ?? "";
+  const person = people.find((p) => p.email === to);
+  const first = (person?.name ?? fallbackName(to)).split(" ")[0];
+  const boardUrl = `${window.location.origin}/board`;
+  const ticket = `${initial ? `${initial.key}: ` : ""}${draft.title.trim() || "(untitled)"}`;
+  const subject = `Work Board ticket assigned to you — ${ticket}`;
+  const lines = [
+    `Hi ${first},`,
+    "",
+    "I've assigned you a ticket on our Recruiter Suite Work Board:",
+    "",
+    `  ${ticket}`,
+    `  Type: ${TYPE_META[draft.type].label} · Priority: ${PRIORITY_META[draft.priority].label}${draft.dueDate ? ` · Due: ${draft.dueDate}` : ""}`,
+    ...(draft.description.trim() ? ["", draft.description.trim().slice(0, 1200)] : []),
+    "",
+    "To see it:",
+    `1. Open ${boardUrl}`,
+    "2. Sign in with your Cliff Services work email.",
+    "3. Click \"Only my issues\" to see the tickets assigned to you. Drag a card to update its status.",
+    "",
+    "If this is your first time signing in, you may not see the Work Board until your access is set up. Reply to this email and I'll sort it out.",
+    "",
+    "Thanks!",
+  ];
+  return `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join("\n"))}`;
+}
+
+/** A textarea that grows with its content (up to max-height in CSS), so long text is never in a tiny scroll box. */
+const AutoGrow = forwardRef<HTMLTextAreaElement, {
+  id?: string;
+  className?: string;
+  value: string;
+  maxLength?: number;
+  rows?: number;
+  placeholder?: string;
+  onChange: (v: string) => void;
+  onKeyDown?: (e: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
+}>(function AutoGrow({ onChange, value, ...rest }, ref) {
+  const inner = useRef<HTMLTextAreaElement | null>(null);
+  const fit = () => {
+    const el = inner.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + 2}px`;
+  };
+  useLayoutEffect(fit, [value]);
+  return (
+    <textarea
+      {...rest}
+      value={value}
+      ref={(el) => {
+        inner.current = el;
+        if (typeof ref === "function") ref(el);
+        else if (ref) ref.current = el;
+      }}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
+});
+
 function IssueDialog({
   initial,
   defaultStatus,
   people,
   me,
+  actor,
+  canModerate,
+  nameOf,
   onSave,
   onDelete,
   onClose,
@@ -417,6 +487,9 @@ function IssueDialog({
   defaultStatus: IssueStatus;
   people: Person[];
   me: string;
+  actor: string;
+  canModerate: boolean;
+  nameOf: (email: string) => string;
   onSave: (d: IssueDraft) => Promise<void>;
   onDelete?: () => Promise<void>;
   onClose: () => void;
@@ -437,7 +510,7 @@ function IssueDialog({
   const [otherMode, setOtherMode] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const titleRef = useRef<HTMLInputElement>(null);
+  const titleRef = useRef<HTMLTextAreaElement>(null);
 
   // Live board updates re-render the parent, so onClose is read through a ref:
   // otherwise this effect would re-run and pull focus back to the title.
@@ -474,7 +547,7 @@ function IssueDialog({
 
   return (
     <div className="wb-modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <form className="wb-modal" onSubmit={submit} role="dialog" aria-modal="true" aria-label={initial ? `Edit ${initial.key}` : "Create issue"}>
+      <form className={`wb-modal${initial ? " wide" : ""}`} onSubmit={submit} role="dialog" aria-modal="true" aria-label={initial ? `Edit ${initial.key}` : "Create issue"}>
         <div className="wb-modal-head">
           <h3 style={{ margin: 0 }}>
             {initial ? <><span className="wb-key">{initial.key}</span> Edit issue</> : "Create issue"}
@@ -499,14 +572,32 @@ function IssueDialog({
           </div>
         </div>
 
-        <div className="field">
-          <label>Title *</label>
-          <input ref={titleRef} value={draft.title} maxLength={200} onChange={(e) => set("title", e.target.value)} placeholder="e.g. Add bench report export to Saved Reports" />
-        </div>
+        {/* Jira-style summary: a big heading you type straight into, which grows onto a
+            second line instead of scrolling sideways. Enter doesn't add a newline. */}
+        <label className="wb-sr" htmlFor="wb-title">Summary</label>
+        <AutoGrow
+          id="wb-title"
+          ref={titleRef}
+          className="wb-title-input"
+          value={draft.title}
+          maxLength={200}
+          rows={1}
+          onChange={(v) => set("title", v.replace(/\n/g, " "))}
+          onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
+          placeholder="What needs to be done?"
+        />
 
-        <div className="field">
-          <label>Description</label>
-          <textarea rows={5} value={draft.description} onChange={(e) => set("description", e.target.value)} placeholder="Details, acceptance criteria, links…" />
+        <div className="field" style={{ marginTop: "0.9rem" }}>
+          <label htmlFor="wb-desc">Description</label>
+          <AutoGrow
+            id="wb-desc"
+            className="wb-desc-input"
+            value={draft.description}
+            maxLength={10000}
+            rows={6}
+            onChange={(v) => set("description", v)}
+            placeholder={"Add a description…\n\nWhat's the goal? Acceptance criteria, steps to reproduce, links."}
+          />
         </div>
 
         <div className="wb-grid2">
@@ -534,13 +625,20 @@ function IssueDialog({
                 }}
               >
                 <option value="">Unassigned</option>
-                {people.filter((p) => p.inDirectory || p.email === draft.assignee || p.email === me).map((p) => (
+                {/* Everyone in the directory, plus anyone already given a ticket by
+                    typed email — so a new joiner only has to be typed in once. */}
+                {people.map((p) => (
                   <option key={p.email} value={p.email}>
-                    {p.name} — {p.email}{p.email === me ? " (me)" : ""}
+                    {p.name} — {p.email}{p.email === me ? " (me)" : !p.inDirectory ? " (not signed in yet)" : ""}
                   </option>
                 ))}
                 <option value="__other__">Someone else — type email…</option>
               </select>
+            )}
+            {draft.assignee && draft.assignee !== me && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.assignee) && (
+              <a className="wb-link" style={{ display: "inline-block", marginRight: 10 }} href={notifyLink(draft, initial, people)}>
+                ✉ Email them about this ticket
+              </a>
             )}
             {me && draft.assignee !== me && (
               <button type="button" className="wb-link" onClick={() => set("assignee", me)}>Assign to me</button>
@@ -588,6 +686,9 @@ function IssueDialog({
             {busy ? <span className="spinner" /> : initial ? "Save" : "Create"}
           </button>
         </div>
+
+        {/* Comments and history save on their own — they don't wait for the Save button. */}
+        {initial && <WorkBoardActivity issueId={initial.id} actor={actor} canModerate={canModerate} nameOf={nameOf} />}
       </form>
     </div>
   );
