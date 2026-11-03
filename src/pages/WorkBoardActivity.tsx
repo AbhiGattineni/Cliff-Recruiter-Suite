@@ -40,6 +40,12 @@ function ago(ts: Timestamp | null): string {
   return ts.toDate().toLocaleDateString();
 }
 const fullDate = (ts: Timestamp | null) => (ts ? ts.toDate().toLocaleString() : "");
+/** "Nov 3, 2026, 12:41 PM · 5m ago" — the exact time, plus how long ago at a glance. */
+const stamp = (ts: Timestamp | null): string => {
+  if (!ts) return "Just now";
+  const when = ts.toDate().toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  return `${when} · ${ago(ts)}`;
+};
 
 const FIELD_LABEL: Record<string, string> = {
   title: "Title",
@@ -204,8 +210,8 @@ export default function WorkBoardActivity({
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div className="wb-comment-head">
                         <strong>{display(c.author)}</strong>
-                        <span className="muted" title={fullDate(c.createdAt)}>{ago(c.createdAt)}</span>
-                        {c.editedAt && <span className="muted" title={`Edited ${fullDate(c.editedAt)}`}>(edited)</span>}
+                        <span className="muted" title={fullDate(c.createdAt)}>{stamp(c.createdAt)}</span>
+                        {c.editedAt && <span className="muted" title={fullDate(c.editedAt)}>· edited {stamp(c.editedAt)}</span>}
                       </div>
                       {editingId === c.id ? (
                         <>
@@ -271,7 +277,7 @@ export default function WorkBoardActivity({
                     <div key={i}><strong>{display(h.actor)}</strong> {changeLine(c)}</div>
                   ))
                 )}
-                <div className="muted" style={{ fontSize: "0.75rem" }} title={fullDate(h.createdAt)}>{ago(h.createdAt)}</div>
+                <div className="wb-hist-time" title={fullDate(h.createdAt)}>🕒 {stamp(h.createdAt)}</div>
               </div>
             </li>
           ))}

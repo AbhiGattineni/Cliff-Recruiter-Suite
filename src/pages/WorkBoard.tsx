@@ -574,7 +574,7 @@ function IssueDialog({
 
         {/* Jira-style summary: a big heading you type straight into, which grows onto a
             second line instead of scrolling sideways. Enter doesn't add a newline. */}
-        <label className="wb-sr" htmlFor="wb-title">Summary</label>
+        <label className="wb-field-label" htmlFor="wb-title">Title <span className="wb-req">*</span></label>
         <AutoGrow
           id="wb-title"
           ref={titleRef}
