@@ -27,7 +27,7 @@
     // Timeout after 10000" -- which names the symptom and not the cause.
     "predeploy": ["npm --prefix \"$RESOURCE_DIR\" run build"],
     "source": "functions",
-    "runtime": "nodejs20"
+    "runtime": "nodejs22"
   },
   "firestore": {
     "rules": "firestore.rules"
