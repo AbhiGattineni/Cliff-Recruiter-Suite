@@ -233,6 +233,40 @@ service cloud.firestore {
         && request.resource.data.name.size() <= 120;
       allow delete: if myRole() in ["admin", "manager"];
     }
+        // Work Board comments: staff read; you write and edit your own;
+    // admins/managers can delete any.
+    match /boardIssues/{issueId}/comments/{commentId} {
+      allow get, list: if isStaff();
+      allow create: if isStaff()
+        && request.resource.data.keys().hasOnly(["text", "author", "createdAt"])
+        && request.resource.data.author == request.auth.token.email
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 5000
+        && request.resource.data.createdAt == request.time;
+      allow update: if isStaff()
+        && resource.data.author == request.auth.token.email
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["text", "editedAt"])
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 5000
+        && request.resource.data.editedAt == request.time;
+      allow delete: if isStaff()
+        && (resource.data.author == request.auth.token.email || myRole() in ["admin", "manager"]);
+    }
+
+    // Work Board history log: staff read; written by the person making the
+    // change; can never be edited or deleted.
+    match /boardIssues/{issueId}/activity/{entryId} {
+      allow get, list: if isStaff();
+      allow create: if isStaff()
+        && request.resource.data.keys().hasOnly(["actor", "action", "changes", "createdAt"])
+        && request.resource.data.actor == request.auth.token.email
+        && request.resource.data.action in ["created", "updated", "moved", "commented", "comment_edited", "comment_deleted"]
+        && request.resource.data.changes is list
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
 
     // Default deny.
     match /{document=**} {
