@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCandidatePool, matchCandidatesToJd, keywordMatchRoles, PoolCandidate } from "../lib/candidatePool";
 import { getLlmUsageSummary } from "../lib/resume";
@@ -7,6 +7,7 @@ import { friendlyError } from "../lib/errors";
 import LlmUsagePanel from "../components/LlmUsagePanel";
 import Pagination, { usePagination } from "../components/Pagination";
 import MultiSelectFilter, { FilterOption } from "../components/MultiSelectFilter";
+import TopCandidates, { type TopPrefill } from "./TopCandidates";
 
 const dateOnly = (s: string) => (s ? s.split(/\s+/)[0] : "—");
 
@@ -124,6 +125,21 @@ export default function CandidatePool() {
 
   // Filters survive moving to another page and back within the session.
   const [f, setF] = useState<Filters>(loadFilters);
+
+  // Tabs: the full pool, or the team's hand-picked Top candidates.
+  const [tab, setTab] = useState<"all" | "top">(() => {
+    try { return sessionStorage.getItem("candidatePool.tab") === "top" ? "top" : "all"; } catch { return "all"; }
+  });
+  useEffect(() => {
+    try { sessionStorage.setItem("candidatePool.tab", tab); } catch { /* storage off — fine */ }
+  }, [tab]);
+  const [topCount, setTopCount] = useState<number | null>(null);
+  const [topPrefill, setTopPrefill] = useState<TopPrefill>(null);
+  const clearTopPrefill = useCallback(() => setTopPrefill(null), []);
+  const starCandidate = (c: PoolCandidate) => {
+    setTopPrefill({ name: c.name, role: c.latestRole, email: c.email, phone: c.mobile, submittedBy: c.latestRecruiter });
+    setTab("top");
+  };
   const setFilter = <K extends keyof Filters>(k: K, v: Filters[K]) => setF((cur) => ({ ...cur, [k]: v }));
   useEffect(() => {
     try { sessionStorage.setItem(STORE_KEY, JSON.stringify(f)); } catch { /* storage off — fine */ }
@@ -371,6 +387,22 @@ export default function CandidatePool() {
         {matchInfo && !matchError && <p className="muted" style={{ margin: "0.5rem 0 0", fontSize: "0.85rem" }}>{matchInfo}</p>}
       </div>
 
+      {/* Tabs — above the filters */}
+      <div className="cp-tabs" role="tablist" aria-label="Candidate lists">
+        <button type="button" role="tab" aria-selected={tab === "all"} className={`cp-tab${tab === "all" ? " on" : ""}`} onClick={() => setTab("all")}>
+          👥 All candidates <span className="cp-tab-count">{candidates.length}</span>
+        </button>
+        <button type="button" role="tab" aria-selected={tab === "top"} className={`cp-tab${tab === "top" ? " on" : ""}`} onClick={() => setTab("top")}>
+          ⭐ Top candidates {topCount != null && <span className="cp-tab-count">{topCount}</span>}
+        </button>
+      </div>
+
+      {/* Mounted even when hidden, so the tab count stays live and switching back is instant. */}
+      <div hidden={tab !== "top"}>
+        <TopCandidates prefill={topPrefill} onPrefillUsed={clearTopPrefill} onCountChange={setTopCount} />
+      </div>
+
+      <div hidden={tab !== "all"}>
       {/* Filters */}
       <div className="card">
         <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
@@ -541,6 +573,7 @@ export default function CandidatePool() {
                     <th>Status</th>
                     <th style={{ textAlign: "right" }}>Subs</th>
                     <th>Last submitted</th>
+                    <th style={{ width: 40 }} aria-label="Add to Top candidates" />
                   </tr>
                 </thead>
                 <tbody>
@@ -556,11 +589,16 @@ export default function CandidatePool() {
                       <td style={{ whiteSpace: "normal" }}>{c.status || "—"}</td>
                       <td style={{ textAlign: "right" }}>{c.count}</td>
                       <td style={{ whiteSpace: "nowrap" }}>{dateOnly(c.latestSubmittedOn)}</td>
+                      <td>
+                        <button type="button" className="cp-star" title="Add to Top candidates" aria-label={`Add ${c.name} to Top candidates`} onClick={() => starCandidate(c)}>
+                          ☆
+                        </button>
+                      </td>
                     </tr>
                   ))}
                   {filtered.length === 0 && (
                     <tr>
-                      <td colSpan={10} style={{ textAlign: "center", padding: "1.5rem", color: "var(--muted)" }}>
+                      <td colSpan={11} style={{ textAlign: "center", padding: "1.5rem", color: "var(--muted)" }}>
                         {filterCount > 0 ? (
                           <>
                             No candidates match these filters.{" "}
@@ -578,6 +616,7 @@ export default function CandidatePool() {
             <Pagination page={page} pageCount={pageCount} total={total} pageSize={pageSize} onPage={setPage} onPageSize={setPageSize} />
           </>
         )}
+      </div>
       </div>
 
       <LlmUsagePanel summary={usageQ.data} />
