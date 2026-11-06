@@ -1,0 +1,141 @@
+/* Candidate Pool tabs + Top candidates. Uses the app's theme variables, so dark mode follows the toggle. */
+
+.cp-tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 2px solid var(--line);
+  margin: 0.25rem 0 1rem;
+}
+.cp-tab {
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 0.6rem 1rem;
+  margin-bottom: -2px;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.cp-tab:hover { color: var(--ink-strong); }
+.cp-tab.on { color: var(--brand); border-bottom-color: var(--brand); }
+.cp-tab-count {
+  background: var(--track);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 0 0.5rem;
+  font-size: 0.75rem;
+}
+.cp-tab.on .cp-tab-count { background: var(--brand-light); color: var(--brand); }
+
+.cp-star {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--muted);
+  padding: 0.15rem 0.3rem;
+  border-radius: 6px;
+}
+.cp-star:hover { color: #f59e0b; background: var(--track); }
+
+.tc-toolbar { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.5rem; }
+.tc-search {
+  flex: 1 1 260px;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card-raised);
+  color: var(--ink);
+  font: inherit;
+}
+.tc-link {
+  border: none;
+  background: none;
+  padding: 0;
+  margin-right: 0.75rem;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--brand);
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.tc-link:hover { text-decoration: underline; }
+.tc-link.danger { color: var(--danger); }
+.tc-notes { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+.tc-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 12, 35, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 6vh 16px;
+  z-index: 1000;
+  overflow-y: auto;
+}
+.tc-modal {
+  background: var(--card-raised);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 20px 50px rgba(16, 24, 40, 0.25);
+  width: 100%;
+  max-width: 640px;
+  padding: 1.1rem 1.25rem;
+}
+.tc-modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.8rem; }
+.tc-x { border: none; background: transparent; color: var(--muted); font-size: 1.5rem; line-height: 1; cursor: pointer; }
+.tc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.9rem 1rem; margin-bottom: 0.9rem; }
+
+/* Every form control in the dialog gets the same look, whatever its type. */
+.tc-span2 { grid-column: 1 / -1; }
+.tc-field { display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; }
+.tc-field > span { font-size: 0.85rem; font-weight: 600; color: var(--ink-strong); }
+.tc-field > span em { color: var(--danger); font-style: normal; }
+.tc-input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 42px;
+  padding: 0 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card-raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.92rem;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+select.tc-input { cursor: pointer; }
+textarea.tc-input { height: auto; min-height: 90px; padding: 0.6rem 0.75rem; resize: vertical; line-height: 1.45; }
+.tc-input::placeholder { color: var(--muted); }
+.tc-input:hover { border-color: var(--muted); }
+.tc-input:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-light); }
+
+.tc-file {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  height: 42px;
+  padding: 0 0.35rem 0 0.35rem;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: var(--card-raised);
+  min-width: 0;
+}
+.tc-file-btn { padding: 0.3rem 0.7rem; font-size: 0.85rem; white-space: nowrap; }
+.tc-file-name { flex: 1; min-width: 0; font-size: 0.82rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tc-modal-foot { display: flex; gap: 0.5rem; align-items: center; border-top: 1px solid var(--line); padding-top: 0.8rem; margin-top: 1rem; }
+
+@media (max-width: 640px) {
+  .tc-grid { grid-template-columns: 1fr; }
+}

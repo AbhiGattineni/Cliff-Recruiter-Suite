@@ -1,11 +1,28 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+
+    // Anyone signed in with a Cliff Services work email.
+    function isCliffStaff() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email.lower().matches('.*@cliff-services[.]com');
+    }
+
     // Uploaded resumes / report source files: only the signed-in owner.
     match /uploads/{userId}/{allPaths=**} {
       allow read, write: if request.auth != null && request.auth.uid == userId
                          && request.resource.size < 15 * 1024 * 1024;
     }
+
+    // Resumes for the Top candidates shortlist (Candidate Pool tab).
+    match /topCandidates/{candidateId}/{fileName} {
+      allow read, delete: if isCliffStaff();
+      allow create: if isCliffStaff()
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('application/(pdf|msword|vnd[.]openxmlformats-officedocument[.]wordprocessingml[.]document|octet-stream)');
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }
