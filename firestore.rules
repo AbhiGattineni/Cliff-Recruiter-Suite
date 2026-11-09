@@ -285,6 +285,10 @@ service cloud.firestore {
       allow delete: if isStaff()
         && (resource.data.addedBy == request.auth.token.email || myRole() in ["admin", "manager"]);
     }
+        // Notification email settings (leave + Work Board). Holds a mailbox password: admins only.
+    match /appSettings/notifyEmail {
+      allow get, write: if myRole() == "admin";
+    }
 
     // Default deny.
     match /{document=**} {

@@ -13,6 +13,7 @@ import { readMailConfig, mailConfigured, mailMissing, mailProvider } from "./mai
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { notifyLeaveRequested, notifyLeaveDecided, notifyBoardHandler, notifyTestHandler } from "./notify.js";
 
 import { fetchReport, probeTotal, reportUrl, ReportKey } from "./ceipal.js";
 import { readCache, readCacheMeta, writeCache, cacheEnvelope } from "./ceipalCache.js";
@@ -1419,6 +1420,7 @@ async function requestLeaveHandler(request: CallableRequest) {
     const reason = String(request.data?.reason ?? "");
     try {
       const leave = await createLeaveRequest(profile, leaveType, startDate, endDate, reason);
+      await notifyLeaveRequested(leave);
       return { ok: true, leave };
     } catch (e) {
       throw new HttpsError("invalid-argument", e instanceof Error ? e.message : String(e));
@@ -1436,6 +1438,7 @@ async function decideLeaveRequestHandler(request: CallableRequest) {
     }
     try {
       const leave = await decideLeave(profile, id, decision, note);
+      await notifyLeaveDecided(leave);
       return { ok: true, leave };
     } catch (e) {
       throw new HttpsError("failed-precondition", e instanceof Error ? e.message : String(e));
@@ -1783,6 +1786,10 @@ export const timesheetOps = onCall(
         return requestLeaveHandler(request);
       case "decideLeave":
         return decideLeaveRequestHandler(request);
+      case "notifyBoard":
+          return notifyBoardHandler(request);
+      case "notifyTest":
+          return notifyTestHandler(request);
       default:
         throw new HttpsError("invalid-argument", `Unknown action "${action}".`);
     }
