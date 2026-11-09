@@ -7,6 +7,7 @@ import RoleManagement from "../components/RoleManagement";
 import EmailJsSettings from "../components/EmailJsSettings";
 import DigestSettings from "../components/DigestSettings";
 import { useAuth } from "../context/AuthContext";
+import NotificationEmailSettings from "../components/NotificationEmailSettings";
 
 export default function Preferences() {
   const { profile } = useAuth();
@@ -43,6 +44,8 @@ export default function Preferences() {
           AI is currently <strong>{useAI ? "ON" : "OFF"}</strong>. This setting is saved on this device.
         </p>
       </div>
+
+      <NotificationEmailSettings />
 
       <EmailJsSettings />
 

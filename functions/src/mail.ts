@@ -203,7 +203,7 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-async function sendViaEmailJs(msg: MailMessage, cfg: EmailJsConfig): Promise<void> {
+export async function sendViaEmailJs(msg: MailMessage, cfg: EmailJsConfig): Promise<void> {
   // One request per recipient, rather than one request with the rest bcc'd.
   //
   // Bcc would be cheaper against the monthly request allowance, but it depends

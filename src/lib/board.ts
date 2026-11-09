@@ -22,7 +22,8 @@ import {
   writeBatch,
   Timestamp,
 } from "firebase/firestore";
-import { db } from "../firebase";
+import { httpsCallable } from "firebase/functions";
+import { db, functions } from "../firebase";
 
 export type IssueType = "story" | "task" | "bug" | "epic";
 export type IssueStatus = "todo" | "in_progress" | "in_review" | "done";
@@ -164,6 +165,7 @@ export function subscribeIssues(onData: (issues: Issue[]) => void, onError: (e: 
 /** Creates an issue with the next CLF-n key. The counter and the issue are written in one transaction. */
 export async function createIssue(draft: IssueDraft, reporter: string, order: number): Promise<string> {
   const ref = doc(ISSUES);
+  const createdLog = doc(activityCol(ref.id));
   await runTransaction(db, async (tx) => {
     const snap = await tx.get(COUNTER);
     const n = snap.exists() ? Number(snap.data().next) || 1 : 1;
@@ -177,8 +179,9 @@ export async function createIssue(draft: IssueDraft, reporter: string, order: nu
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
-    tx.set(doc(activityCol(ref.id)), { actor: reporter, action: "created", changes: [], createdAt: serverTimestamp() });
+    tx.set(createdLog, { actor: reporter, action: "created", changes: [], createdAt: serverTimestamp() });
   });
+  notifyBoard(ref.id, createdLog.id);
   return ref.id;
 }
 
@@ -194,18 +197,19 @@ export async function updateIssue(id: string, draft: IssueDraft, before: Issue, 
     ...(order != null ? { order } : {}),
     updatedAt: serverTimestamp(),
   });
-  if (changes.length) {
-    batch.set(doc(activityCol(id)), { actor, action: "updated", changes, createdAt: serverTimestamp() });
-  }
+  const log = changes.length ? doc(activityCol(id)) : null;
+  if (log) batch.set(log, { actor, action: "updated", changes, createdAt: serverTimestamp() });
   await batch.commit();
+  if (log) notifyBoard(id, log.id);
 }
 
 /** A drag-and-drop move. Changing column is logged; reordering within a column is not. */
 export async function moveIssue(id: string, status: IssueStatus, order: number, fromStatus: IssueStatus, actor: string): Promise<void> {
   const batch = writeBatch(db);
   batch.update(doc(ISSUES, id), { status, order, updatedAt: serverTimestamp() });
-  if (fromStatus !== status) {
-    batch.set(doc(activityCol(id)), {
+  const log = fromStatus !== status ? doc(activityCol(id)) : null;
+  if (log) {
+    batch.set(log, {
       actor,
       action: "moved",
       changes: [{ field: "status", from: fromStatus, to: status }],
@@ -213,6 +217,20 @@ export async function moveIssue(id: string, status: IssueStatus, order: number, 
     });
   }
   await batch.commit();
+  if (log) notifyBoard(id, log.id);
+}
+
+// ---- Email notifications ------------------------------------------------------
+
+/**
+ * Asks the server to email the people involved about a history entry just
+ * written. Fire-and-forget: the server reads the entry back and decides who to
+ * tell (and whether email is switched on at all), and a failed email must never
+ * look like a failed save.
+ */
+function notifyBoard(issueId: string, activityId: string): void {
+  const call = httpsCallable<{ action: string; issueId: string; activityId: string }, unknown>(functions, "timesheetOps");
+  call({ action: "notifyBoard", issueId, activityId }).catch((e) => console.warn("Work Board email not sent:", e));
 }
 
 // ---- History -----------------------------------------------------------------
@@ -313,8 +331,10 @@ export async function addComment(issueId: string, text: string, author: string):
   const batch = writeBatch(db);
   batch.set(doc(commentsCol(issueId)), { text: body, author, createdAt: serverTimestamp() });
   batch.update(doc(ISSUES, issueId), { commentCount: increment(1), updatedAt: serverTimestamp() });
-  batch.set(...logEntry(issueId, author, "commented", [{ field: "comment", from: null, to: snippet(body) }]));
+  const log = logEntry(issueId, author, "commented", [{ field: "comment", from: null, to: snippet(body) }]);
+  batch.set(...log);
   await batch.commit();
+  notifyBoard(issueId, log[0].id);
 }
 
 /** Edits your own comment; History keeps the old and new wording. */
@@ -323,8 +343,10 @@ export async function editComment(issueId: string, comment: IssueComment, text: 
   if (!body || body === comment.text) return;
   const batch = writeBatch(db);
   batch.update(doc(commentsCol(issueId), comment.id), { text: body, editedAt: serverTimestamp() });
-  batch.set(...logEntry(issueId, actor, "comment_edited", [{ field: "comment", from: snippet(comment.text), to: snippet(body) }]));
+  const log = logEntry(issueId, actor, "comment_edited", [{ field: "comment", from: snippet(comment.text), to: snippet(body) }]);
+  batch.set(...log);
   await batch.commit();
+  notifyBoard(issueId, log[0].id);
 }
 
 /** Deletes a comment. History keeps what it said and whose it was, so nothing disappears silently. */
@@ -332,8 +354,10 @@ export async function deleteComment(issueId: string, comment: IssueComment, acto
   const batch = writeBatch(db);
   batch.delete(doc(commentsCol(issueId), comment.id));
   batch.update(doc(ISSUES, issueId), { commentCount: increment(-1) });
-  batch.set(...logEntry(issueId, actor, "comment_deleted", [{ field: comment.author, from: snippet(comment.text), to: null }]));
+  const log = logEntry(issueId, actor, "comment_deleted", [{ field: comment.author, from: snippet(comment.text), to: null }]);
+  batch.set(...log);
   await batch.commit();
+  notifyBoard(issueId, log[0].id);
 }
 
 export function deleteIssue(id: string): Promise<void> {
