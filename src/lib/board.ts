@@ -23,7 +23,8 @@ import {
   Timestamp,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
-import { db, functions } from "../firebase";
+import { deleteObject, getDownloadURL, getStorage, ref as storageRef, uploadBytes } from "firebase/storage";
+import { app, db, functions } from "../firebase";
 
 export type IssueType = "story" | "task" | "bug" | "epic";
 export type IssueStatus = "todo" | "in_progress" | "in_review" | "done";
@@ -44,6 +45,7 @@ export interface Issue {
   labels: string[];
   order: number;
   commentCount: number;
+  attachmentCount: number;
   createdAt: Timestamp | null;
   updatedAt: Timestamp | null;
 }
@@ -65,8 +67,15 @@ export interface ActivityChange {
 }
 
 /** An entry in an issue's history — boardIssues/{id}/activity. Written once, never edited. */
-export type ActivityAction = "created" | "updated" | "moved" | "commented" | "comment_edited" | "comment_deleted";
-export const ACTIVITY_ACTIONS: ActivityAction[] = ["created", "updated", "moved", "commented", "comment_edited", "comment_deleted"];
+export type ActivityAction =
+  | "created" | "updated" | "moved"
+  | "commented" | "comment_edited" | "comment_deleted"
+  | "attachment_added" | "attachment_deleted";
+export const ACTIVITY_ACTIONS: ActivityAction[] = [
+  "created", "updated", "moved",
+  "commented", "comment_edited", "comment_deleted",
+  "attachment_added", "attachment_deleted",
+];
 
 export interface IssueActivity {
   id: string;
@@ -133,6 +142,7 @@ function fromDoc(id: string, d: Record<string, unknown>): Issue {
     labels: Array.isArray(d.labels) ? d.labels.filter((l): l is string => typeof l === "string") : [],
     order: typeof d.order === "number" ? d.order : 0,
     commentCount: typeof d.commentCount === "number" ? Math.max(0, d.commentCount) : 0,
+    attachmentCount: typeof d.attachmentCount === "number" ? Math.max(0, d.attachmentCount) : 0,
     createdAt: d.createdAt instanceof Timestamp ? d.createdAt : null,
     updatedAt: d.updatedAt instanceof Timestamp ? d.updatedAt : null,
   };
@@ -176,6 +186,7 @@ export async function createIssue(draft: IssueDraft, reporter: string, order: nu
       reporter,
       order,
       commentCount: 0,
+      attachmentCount: 0,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -370,4 +381,103 @@ export function orderBetween(prev?: number, next?: number): number {
   if (prev == null) return next! - ORDER_STEP;
   if (next == null) return prev + ORDER_STEP;
   return (prev + next) / 2;
+}
+
+// ---- Photos -------------------------------------------------------------------
+//
+// The image itself lives in Firebase Storage under boardIssues/{issueId}/; a
+// small record of it lives in boardIssues/{issueId}/attachments, so the ticket
+// can list its photos without touching Storage, and the card can show a count.
+
+export interface IssueAttachment {
+  id: string;
+  name: string;
+  url: string; // download URL, stored at upload so thumbnails need no extra lookups
+  path: string; // Storage path, for deleting
+  size: number;
+  contentType: string;
+  uploadedBy: string;
+  createdAt: Timestamp | null;
+}
+
+export const PHOTO_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+export const PHOTO_ACCEPT = "image/png,image/jpeg,image/gif,image/webp";
+const PHOTO_TYPES = PHOTO_ACCEPT.split(",");
+
+/** Why a file can't be attached, or null when it can. */
+export function photoProblem(f: File): string | null {
+  if (!PHOTO_TYPES.includes(f.type)) return `"${f.name}" isn't a photo. Use PNG, JPG, GIF or WebP.`;
+  if (f.size > PHOTO_MAX_BYTES) return `"${f.name}" is larger than 10 MB.`;
+  return null;
+}
+
+const attachmentsCol = (issueId: string) => collection(db, "boardIssues", issueId, "attachments");
+const storage = () => getStorage(app);
+
+/** Live photos on one issue, oldest first. */
+export function subscribeAttachments(issueId: string, onData: (a: IssueAttachment[]) => void, onError: (e: Error) => void): () => void {
+  return onSnapshot(
+    query(attachmentsCol(issueId), orderBy("createdAt")),
+    (snap) =>
+      onData(
+        snap.docs.map((d) => {
+          const x = d.data();
+          return {
+            id: d.id,
+            name: typeof x.name === "string" ? x.name : "photo",
+            url: typeof x.url === "string" ? x.url : "",
+            path: typeof x.path === "string" ? x.path : "",
+            size: Number(x.size) || 0,
+            contentType: typeof x.contentType === "string" ? x.contentType : "",
+            uploadedBy: typeof x.uploadedBy === "string" ? x.uploadedBy : "",
+            createdAt: x.createdAt instanceof Timestamp ? x.createdAt : null,
+          };
+        })
+      ),
+    onError
+  );
+}
+
+/** Uploads a photo, records it on the issue and in History. The file goes up first, so a record never points at nothing. */
+export async function uploadAttachment(issueId: string, file: File, actor: string): Promise<void> {
+  const problem = photoProblem(file);
+  if (problem) throw new Error(problem);
+  const safe = (file.name || "screenshot.png").replace(/[^\w.\-]+/g, "_").slice(-100);
+  const path = `boardIssues/${issueId}/${Date.now()}-${safe}`;
+  const ref = storageRef(storage(), path);
+  await uploadBytes(ref, file, { contentType: file.type });
+  const url = await getDownloadURL(ref);
+
+  const batch = writeBatch(db);
+  batch.set(doc(attachmentsCol(issueId)), {
+    name: (file.name || "screenshot.png").slice(0, 200),
+    url,
+    path,
+    size: file.size,
+    contentType: file.type,
+    uploadedBy: actor,
+    createdAt: serverTimestamp(),
+  });
+  batch.update(doc(ISSUES, issueId), { attachmentCount: increment(1), updatedAt: serverTimestamp() });
+  const log = logEntry(issueId, actor, "attachment_added", [{ field: "attachment", from: null, to: file.name.slice(0, 200) || "screenshot" }]);
+  batch.set(...log);
+  try {
+    await batch.commit();
+  } catch (e) {
+    await deleteObject(ref).catch(() => {}); // don't leave an orphaned file behind
+    throw e;
+  }
+  notifyBoard(issueId, log[0].id);
+}
+
+/** Removes a photo. History keeps its name and who uploaded it. */
+export async function deleteAttachment(issueId: string, a: IssueAttachment, actor: string): Promise<void> {
+  const batch = writeBatch(db);
+  batch.delete(doc(attachmentsCol(issueId), a.id));
+  batch.update(doc(ISSUES, issueId), { attachmentCount: increment(-1), updatedAt: serverTimestamp() });
+  const log = logEntry(issueId, actor, "attachment_deleted", [{ field: "attachment", from: a.name, to: null }]);
+  batch.set(...log);
+  await batch.commit();
+  notifyBoard(issueId, log[0].id);
+  if (a.path) await deleteObject(storageRef(storage(), a.path)).catch(() => {});
 }

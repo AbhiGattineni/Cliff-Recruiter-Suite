@@ -17,9 +17,11 @@ import {
   orderBetween,
   subscribeIssues,
   updateIssue,
+  uploadAttachment,
 } from "../lib/board";
 import { StaffMember, SyncReport, subscribeDirectory, syncFromProfiles } from "../lib/staffDirectory";
 import WorkBoardActivity from "./WorkBoardActivity";
+import WorkBoardPhotos from "./WorkBoardPhotos";
 import "./WorkBoard.css";
 
 type Dialog = { mode: "create"; status: IssueStatus } | { mode: "edit"; issue: Issue } | null;
@@ -158,10 +160,21 @@ export default function WorkBoard() {
   };
 
   // ---- dialog save/delete ----
-  const save = async (draft: IssueDraft) => {
+  const save = async (draft: IssueDraft, photos: File[]) => {
     if (!dialog) return;
     if (dialog.mode === "create") {
-      await createIssue(draft, user?.email ?? "", endOrder(draft.status));
+      const id = await createIssue(draft, user?.email ?? "", endOrder(draft.status));
+      // Photos picked before the ticket existed go up now that it has an ID. The
+      // ticket is already saved, so a failed photo is reported, not retried as a new ticket.
+      const failed: string[] = [];
+      for (const f of photos) {
+        try {
+          await uploadAttachment(id, f, user?.email ?? "");
+        } catch (e) {
+          failed.push(`${f.name}: ${friendlyError(e)}`);
+        }
+      }
+      if (failed.length) setError(`The ticket was created, but ${failed.length} photo${failed.length === 1 ? "" : "s"} didn't upload — ${failed.join("; ")}. Open the ticket to add them again.`);
     } else {
       const moved = draft.status !== dialog.issue.status;
       await updateIssue(dialog.issue.id, draft, dialog.issue, user?.email ?? "", moved ? endOrder(draft.status, dialog.issue.id) : undefined);
@@ -237,7 +250,7 @@ export default function WorkBoard() {
         <div className="field" style={{ margin: 0 }}>
           <select value={["all", "me", "unassigned"].includes(assigneeFilter) ? "" : assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value || "all")}>
             <option value="">Any assignee</option>
-            {people.map((p) => <option key={p.email} value={p.email}>{p.name}</option>)}
+            {people.map((p) => <option key={p.email} value={p.email}>{p.name} — {p.email}</option>)}
           </select>
         </div>
         <div className="field" style={{ margin: 0 }}>
@@ -395,6 +408,7 @@ function IssueCard({
         )}
         <span style={{ flex: 1 }} />
         <span className="wb-prio" style={{ color: p.color }} title={`${p.label} priority`}>{p.icon}</span>
+        {issue.attachmentCount > 0 && <span className="wb-cc" title={`${issue.attachmentCount} photo${issue.attachmentCount === 1 ? "" : "s"}`}>📎 {issue.attachmentCount}</span>}
         {issue.commentCount > 0 && <span className="wb-cc" title={`${issue.commentCount} comment${issue.commentCount === 1 ? "" : "s"}`}>💬 {issue.commentCount}</span>}
         {issue.storyPoints != null && <span className="wb-sp" title="Story points">{issue.storyPoints}</span>}
         {issue.assignee ? (
@@ -490,7 +504,7 @@ function IssueDialog({
   actor: string;
   canModerate: boolean;
   nameOf: (email: string) => string;
-  onSave: (d: IssueDraft) => Promise<void>;
+  onSave: (d: IssueDraft, photos: File[]) => Promise<void>;
   onDelete?: () => Promise<void>;
   onClose: () => void;
 }) {
@@ -506,6 +520,8 @@ function IssueDialog({
     labels: initial?.labels ?? [],
   }));
   const [labelText, setLabelText] = useState((initial?.labels ?? []).join(", "));
+  // Photos added to a ticket that hasn't been created yet.
+  const [pendingPhotos, setPendingPhotos] = useState<File[]>([]);
   // Typing an email by hand, for someone not (yet) in the staff directory.
   const [otherMode, setOtherMode] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -532,7 +548,7 @@ function IssueDialog({
     setBusy(true);
     setErr(null);
     try {
-      await onSave({ ...draft, labels: labelText.split(",") });
+      await onSave({ ...draft, labels: labelText.split(",") }, pendingPhotos);
     } catch (e2) {
       setErr(friendlyError(e2));
       setBusy(false);
@@ -599,6 +615,15 @@ function IssueDialog({
             placeholder={"Add a description…\n\nWhat's the goal? Acceptance criteria, steps to reproduce, links."}
           />
         </div>
+
+        <WorkBoardPhotos
+          issueId={initial?.id ?? null}
+          actor={actor}
+          canModerate={canModerate}
+          nameOf={nameOf}
+          pending={pendingPhotos}
+          onPendingChange={setPendingPhotos}
+        />
 
         <div className="wb-grid2">
           <div className="field">

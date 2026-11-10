@@ -25,6 +25,7 @@ type Tab = "comments" | "history";
 
 const ACTION_ICON: Record<string, string> = {
   created: "✨", updated: "✏️", moved: "➡️", commented: "💬", comment_edited: "📝", comment_deleted: "🗑️",
+  attachment_added: "📷", attachment_deleted: "🗑️",
 };
 
 const initials = (name: string) =>
@@ -266,6 +267,10 @@ export default function WorkBoardActivity({
                       <span className="muted">After</span>{quote(h.changes[0]?.to ?? null)}
                     </div>
                   </div>
+                ) : h.action === "attachment_added" ? (
+                  <div><strong>{display(h.actor)}</strong> added a <strong>photo</strong> <span className="muted">{h.changes[0]?.to ?? ""}</span></div>
+                ) : h.action === "attachment_deleted" ? (
+                  <div><strong>{display(h.actor)}</strong> removed a <strong>photo</strong> <span className="muted" style={{ textDecoration: "line-through" }}>{h.changes[0]?.from ?? ""}</span></div>
                 ) : h.action === "comment_deleted" ? (
                   <div>
                     <strong>{display(h.actor)}</strong> deleted {h.changes[0]?.field && h.changes[0].field.toLowerCase() !== h.actor.toLowerCase()
