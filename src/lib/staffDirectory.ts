@@ -43,10 +43,22 @@ const nameFromEmail = (email: string) =>
 
 // userProfiles was written before this existed, so look for a name under the
 // usual field names and fall back to one derived from the email address.
+/**
+ * A usable person's name, or "" when the value is blank or is really an email.
+ *
+ * Accounts made with email + password have no display name, and the server
+ * stores the email in its place — so "a name" is often an address, which made
+ * the assignee list read "ravi@cliff-services.com — ravi@cliff-services.com".
+ */
+function realName(v: unknown): string {
+  const t = typeof v === "string" ? v.trim() : "";
+  return t && !t.includes("@") ? t.slice(0, 120) : "";
+}
+
 function pickName(d: Record<string, unknown>, email: string): string {
   for (const k of ["displayName", "name", "fullName"]) {
-    const v = d[k];
-    if (typeof v === "string" && v.trim()) return v.trim().slice(0, 120);
+    const n = realName(d[k]);
+    if (n) return n;
   }
   return nameFromEmail(email);
 }
@@ -61,7 +73,8 @@ export function subscribeDirectory(onData: (staff: StaffMember[]) => void, onErr
           .map((d) => {
             const x = d.data();
             const email = typeof x.email === "string" ? x.email.toLowerCase() : "";
-            return { uid: d.id, email, name: typeof x.name === "string" && x.name ? x.name : nameFromEmail(email) };
+            // realName also repairs entries already saved with an email as the name.
+            return { uid: d.id, email, name: realName(x.name) || nameFromEmail(email) };
           })
           .filter((s) => s.email)
           .sort((a, b) => a.name.localeCompare(b.name))
@@ -143,7 +156,7 @@ export function useStaffDirectorySync() {
   useEffect(() => {
     if (!uid || !email || !role || !STAFF_ROLES.includes(role)) return;
     const profileData = (profile ?? {}) as unknown as Record<string, unknown>;
-    const name = user?.displayName?.trim() || pickName(profileData, email);
+    const name = realName(user?.displayName) || pickName(profileData, email);
     registerSelf(uid, email, name).catch((e) => console.warn("staffDirectory: could not register self", e));
     if (role === "admin" || role === "manager") {
       syncFromProfiles().catch((e) => console.warn("staffDirectory: sync from profiles failed", e));

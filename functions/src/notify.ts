@@ -302,6 +302,10 @@ function describe(action: string, changes: Change[], actor: string): string[] {
       return [`${actor} edited a comment:`, `Before: “${s(c0?.from)}”`, `After: “${s(c0?.to)}”`];
     case "comment_deleted":
       return [`${actor} deleted a comment:`, `“${s(c0?.from)}”`];
+    case "attachment_added":
+      return [`${actor} added a photo: ${s(c0?.to)}`];
+    case "attachment_deleted":
+      return [`${actor} removed a photo: ${s(c0?.from)}`];
     default:
       return changes.map((c) =>
         c.field === "description"

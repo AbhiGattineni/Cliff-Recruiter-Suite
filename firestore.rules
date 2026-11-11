@@ -190,7 +190,8 @@ service cloud.firestore {
     match /signupOtps/{emailKey} {
       allow read, write: if false;
     }
-        // ---- Work Board --------------------------------------------------------
+
+    // ---- Work Board --------------------------------------------------------
     // Staff-only, written from the browser like `holidays`.
     match /boardIssues/{issueId} {
       allow get, list: if isStaff();
@@ -220,7 +221,8 @@ service cloud.firestore {
       allow update: if isStaff() && request.resource.data.keys().hasOnly(["next"])
         && request.resource.data.next == resource.data.next + 1;
     }
-        // Names + emails of staff, for the Work Board assignee list.
+
+    // Names + emails of staff, for the Work Board assignee list.
     match /staffDirectory/{uid} {
       allow get, list: if isStaff();
       allow create, update: if isStaff()
@@ -233,7 +235,8 @@ service cloud.firestore {
         && request.resource.data.name.size() <= 120;
       allow delete: if myRole() in ["admin", "manager"];
     }
-        // Work Board comments: staff read; you write and edit your own;
+
+    // Work Board comments: staff read; you write and edit your own;
     // admins/managers can delete any.
     match /boardIssues/{issueId}/comments/{commentId} {
       allow get, list: if isStaff();
@@ -262,12 +265,31 @@ service cloud.firestore {
       allow create: if isStaff()
         && request.resource.data.keys().hasOnly(["actor", "action", "changes", "createdAt"])
         && request.resource.data.actor == request.auth.token.email
-        && request.resource.data.action in ["created", "updated", "moved", "commented", "comment_edited", "comment_deleted"]
+        && request.resource.data.action in ["created", "updated", "moved", "commented", "comment_edited", "comment_deleted", "attachment_added", "attachment_deleted"]
         && request.resource.data.changes is list
         && request.resource.data.createdAt == request.time;
       allow update, delete: if false;
     }
-        // Top candidates shortlist (Candidate Pool tab).
+
+    // Photos on Work Board tickets. The image is in Storage (storage.rules);
+    // this is the record of it. You remove your own; admins/managers any.
+    match /boardIssues/{issueId}/attachments/{attachmentId} {
+      allow get, list: if isStaff();
+      allow create: if isStaff()
+        && request.resource.data.keys().hasOnly(["name", "url", "path", "size", "contentType", "uploadedBy", "createdAt"])
+        && request.resource.data.uploadedBy == request.auth.token.email
+        && request.resource.data.path is string
+        && request.resource.data.path.matches('boardIssues/' + issueId + '/.+')
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 200
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if isStaff()
+        && (resource.data.uploadedBy == request.auth.token.email || myRole() in ["admin", "manager"]);
+    }
+
+    // ---- Candidate Pool ----------------------------------------------------
+    // Top candidates shortlist (Candidate Pool tab).
     match /topCandidates/{id} {
       allow get, list: if isStaff();
       allow create: if isStaff()
@@ -285,7 +307,35 @@ service cloud.firestore {
       allow delete: if isStaff()
         && (resource.data.addedBy == request.auth.token.email || myRole() in ["admin", "manager"]);
     }
-        // Notification email settings (leave + Work Board). Holds a mailbox password: admins only.
+
+    // Comments on Candidate Pool candidates. The parent document is a small
+    // per-candidate summary (name + comment count) that the table listens to.
+    match /candidateComments/{candidateKey} {
+      allow get, list: if isStaff();
+      allow create, update: if isStaff()
+        && request.resource.data.keys().hasOnly(["name", "count", "lastAt"]);
+
+      match /comments/{commentId} {
+        allow get, list: if isStaff();
+        allow create: if isStaff()
+          && request.resource.data.keys().hasOnly(["text", "author", "createdAt"])
+          && request.resource.data.author == request.auth.token.email
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 3000
+          && request.resource.data.createdAt == request.time;
+        allow update: if isStaff()
+          && resource.data.author == request.auth.token.email
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["text", "editedAt"])
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 3000;
+        allow delete: if isStaff()
+          && (resource.data.author == request.auth.token.email || myRole() in ["admin", "manager"]);
+      }
+    }
+
+    // Notification email settings (leave + Work Board). Holds a mailbox password: admins only.
     match /appSettings/notifyEmail {
       allow get, write: if myRole() == "admin";
     }
