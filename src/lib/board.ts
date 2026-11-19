@@ -48,6 +48,8 @@ export interface Issue {
   attachmentCount: number;
   createdAt: Timestamp | null;
   updatedAt: Timestamp | null;
+  /** When the ticket last changed column. Null on tickets moved before this was recorded. */
+  statusSince: Timestamp | null;
 }
 
 /** A comment on an issue — boardIssues/{id}/comments. */
@@ -145,7 +147,33 @@ function fromDoc(id: string, d: Record<string, unknown>): Issue {
     attachmentCount: typeof d.attachmentCount === "number" ? Math.max(0, d.attachmentCount) : 0,
     createdAt: d.createdAt instanceof Timestamp ? d.createdAt : null,
     updatedAt: d.updatedAt instanceof Timestamp ? d.updatedAt : null,
+    statusSince: d.statusSince instanceof Timestamp ? d.statusSince : null,
   };
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const dayStart = (ms: number) => {
+  const d = new Date(ms);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+};
+
+/**
+ * How many days the ticket has been where it is, counting the first day as 1.
+ *
+ * - To Do counts from when the ticket was created, so a ticket sent back to
+ *   To Do carries on from its earlier To Do + In Progress days.
+ * - In Progress and In Review count from when it entered that column, so they
+ *   start again at 1 on every move.
+ * - Done shows nothing.
+ *
+ * Tickets that changed column before this was recorded have no `statusSince`;
+ * for those the last update stands in until they're next moved.
+ */
+export function daysInStatus(issue: Issue, now = Date.now()): number | null {
+  if (issue.status === "done") return null;
+  const from = issue.status === "todo" ? issue.createdAt : issue.statusSince ?? issue.updatedAt ?? issue.createdAt;
+  if (!from) return null;
+  return Math.max(1, Math.round((dayStart(now) - dayStart(from.toMillis())) / DAY_MS) + 1);
 }
 
 // Firestore rejects `undefined`, so every optional field becomes null here.
@@ -189,6 +217,7 @@ export async function createIssue(draft: IssueDraft, reporter: string, order: nu
       attachmentCount: 0,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
+      statusSince: serverTimestamp(),
     });
     tx.set(createdLog, { actor: reporter, action: "created", changes: [], createdAt: serverTimestamp() });
   });
@@ -206,6 +235,7 @@ export async function updateIssue(id: string, draft: IssueDraft, before: Issue, 
   batch.update(doc(ISSUES, id), {
     ...clean(draft),
     ...(order != null ? { order } : {}),
+    ...(draft.status !== before.status ? { statusSince: serverTimestamp() } : {}),
     updatedAt: serverTimestamp(),
   });
   const log = changes.length ? doc(activityCol(id)) : null;
@@ -217,7 +247,12 @@ export async function updateIssue(id: string, draft: IssueDraft, before: Issue, 
 /** A drag-and-drop move. Changing column is logged; reordering within a column is not. */
 export async function moveIssue(id: string, status: IssueStatus, order: number, fromStatus: IssueStatus, actor: string): Promise<void> {
   const batch = writeBatch(db);
-  batch.update(doc(ISSUES, id), { status, order, updatedAt: serverTimestamp() });
+  batch.update(doc(ISSUES, id), {
+    status,
+    order,
+    ...(fromStatus !== status ? { statusSince: serverTimestamp() } : {}),
+    updatedAt: serverTimestamp(),
+  });
   const log = fromStatus !== status ? doc(activityCol(id)) : null;
   if (log) {
     batch.set(log, {
@@ -312,7 +347,7 @@ export const COMMENT_MAX = 5000;
 /** Live comments on one issue, oldest first (reads like a conversation). */
 export function subscribeComments(issueId: string, onData: (c: IssueComment[]) => void, onError: (e: Error) => void): () => void {
   return onSnapshot(
-    query(commentsCol(issueId), orderBy("createdAt")),
+    query(commentsCol(issueId), orderBy("createdAt", "desc")), // newest first
     (snap) =>
       onData(
         snap.docs.map((d) => {
