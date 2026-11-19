@@ -3,6 +3,7 @@ import { useAuth } from "../context/AuthContext";
 import { friendlyError } from "../lib/errors";
 import {
   COLUMNS,
+  daysInStatus,
   PRIORITY_META,
   STORY_POINTS,
   TYPE_META,
@@ -378,6 +379,8 @@ function IssueCard({
   const t = TYPE_META[issue.type];
   const p = PRIORITY_META[issue.priority];
   const overdue = !!issue.dueDate && issue.status !== "done" && issue.dueDate < today();
+  const days = daysInStatus(issue);
+  const column = COLUMNS.find((c) => c.key === issue.status)?.label ?? "";
   return (
     <article
       className={`wb-card${dragging ? " dragging" : ""}`}
@@ -405,6 +408,9 @@ function IssueCard({
           <span className={`wb-due${overdue ? " overdue" : ""}`} title={overdue ? "Overdue" : "Due date"}>
             📅 {issue.dueDate.slice(5).replace("-", "/")}
           </span>
+        )}
+        {days != null && (
+          <span className="wb-age" title={`${days} day${days === 1 ? "" : "s"} in ${column}`}>⏱ {days}d</span>
         )}
         <span style={{ flex: 1 }} />
         <span className="wb-prio" style={{ color: p.color }} title={`${p.label} priority`}>{p.icon}</span>

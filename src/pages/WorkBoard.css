@@ -192,6 +192,7 @@
 /* ---- Comments & history ---- */
 .wb-modal.wide { max-width: 760px; }
 .wb-cc { color: var(--muted); font-size: 0.72rem; }
+.wb-age { color: var(--muted); font-size: 0.72rem; white-space: nowrap; }
 .wb-activity { border-top: 1px solid var(--line); margin-top: 1rem; padding-top: 0.6rem; }
 .wb-tabs { display: flex; gap: 0.25rem; margin-bottom: 0.75rem; }
 .wb-tabs button {

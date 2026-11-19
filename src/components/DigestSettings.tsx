@@ -6,6 +6,8 @@
 
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { db } from "../firebase";
 import { useAuth } from "../context/AuthContext";
 import { errorDetail } from "../lib/errors";
 import {
@@ -18,6 +20,19 @@ import {
   EMPTY_SETTINGS,
   DigestPreview,
 } from "../lib/digestSettings";
+
+// Which extra sections go in the digest. Kept in their own settings document
+// (appSettings/digestSections), so saving the recipient list can never reset them.
+type SectionKey = "leaves" | "timesheets" | "requirements" | "submissions" | "bench";
+const SECTIONS: { key: SectionKey; label: string; what: string }[] = [
+  { key: "leaves", label: "Leaves", what: "who's on leave, requests waiting for a decision, the week ahead" },
+  { key: "timesheets", label: "Timesheets", what: "filled vs expected, hours logged, who hasn't filled" },
+  { key: "requirements", label: "Requirements", what: "posted that day, and open ones with no submissions yet" },
+  { key: "submissions", label: "Submissions", what: "every profile sent that day, with recruiter and status" },
+  { key: "bench", label: "Bench sales", what: "each bench sales recruiter and how many bench submissions they made — red if none" },
+];
+const ALL_ON: Record<SectionKey, boolean> = { leaves: true, timesheets: true, requirements: true, submissions: true, bench: true };
+const SECTIONS_REF = doc(db, "appSettings", "digestSections");
 
 /**
  * An eye, drawn rather than typed.
@@ -56,6 +71,38 @@ export default function DigestSettings() {
   const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [preview, setPreview] = useState<DigestPreview | null>(null);
+  const [sections, setSections] = useState<Record<SectionKey, boolean>>(ALL_ON);
+  const [savingSection, setSavingSection] = useState(false);
+
+  useEffect(() => {
+    getDoc(SECTIONS_REF)
+      .then((snap) => {
+        const d = snap.data() ?? {};
+        setSections({
+          leaves: d.leaves !== false,
+          timesheets: d.timesheets !== false,
+          requirements: d.requirements !== false,
+          submissions: d.submissions !== false,
+          bench: d.bench !== false,
+        });
+      })
+      .catch(() => { /* unreadable → all on, which is also what the server assumes */ });
+  }, []);
+
+  const toggleSection = async (k: SectionKey) => {
+    const next = { ...sections, [k]: !sections[k] };
+    setSections(next);
+    setSavingSection(true);
+    setError(null);
+    try {
+      await setDoc(SECTIONS_REF, { ...next, updatedAt: serverTimestamp() });
+    } catch (e) {
+      setSections(sections);
+      setError(e);
+    } finally {
+      setSavingSection(false);
+    }
+  };
 
   // Seed the form once the stored value lands, and not on every render after.
   useEffect(() => {
@@ -138,7 +185,8 @@ export default function DigestSettings() {
       <div className="sub">
         A brief of the day&#39;s recorded meetings, plus the desk&#39;s numbers — open requirements,
         what each recruiter submitted, and how much of that landed within 3, 6 and 9 hours of a
-        requirement being posted. Emailed at 10:30pm and again at 9am the next morning with the same
+        requirement being posted — and, if switched on below, the day&#39;s leaves, timesheets,
+        requirements, submissions and bench sales. Emailed at 10:30pm and again at 9am the next morning with the same
         content, for anyone who missed the late one. A day with no meetings still gets the activity
         table, so silence always means &ldquo;nothing was recorded&rdquo; rather than &ldquo;the job
         is broken&rdquo;.
@@ -217,6 +265,33 @@ export default function DigestSettings() {
         Anyone on this list receives summaries of what was said in meetings, whether or not they
         can open the Meetings tab. Add addresses accordingly.
       </p>
+
+      <div style={{ marginTop: "1rem" }}>
+        <div style={{ fontWeight: 600 }}>Also include</div>
+        <div className="muted" style={{ fontSize: "0.82rem", marginBottom: "0.5rem" }}>
+          Added after the recruiter numbers. Long lists are cut off at a sensible length so the email always sends.
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
+          {SECTIONS.map((sec) => (
+            <label key={sec.key} style={{ display: "flex", gap: "0.55rem", alignItems: "flex-start", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={sections[sec.key]}
+                disabled={savingSection}
+                onChange={() => void toggleSection(sec.key)}
+                style={{ marginTop: 3 }}
+              />
+              <span>
+                <strong style={{ fontWeight: 600 }}>{sec.label}</strong>
+                <span className="muted" style={{ fontSize: "0.82rem" }}> — {sec.what}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        <p className="muted" style={{ fontSize: "0.8rem", margin: "0.6rem 0 0" }}>
+          Leave and timesheet details go to everyone on the recipient list, the same as the meeting summaries.
+        </p>
+      </div>
 
       <div className="btn-row" style={{ marginTop: "0.9rem" }}>
         <button

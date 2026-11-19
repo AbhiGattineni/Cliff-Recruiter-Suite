@@ -159,6 +159,16 @@ service cloud.firestore {
         && request.resource.data.enabled is bool;
       allow delete: if false;
     }
+    // Which extra sections the digest includes. Staff can read; admins change.
+    match /appSettings/digestSections {
+      allow get: if isStaff();
+     allow create, update: if myRole() == "admin"
+  && request.resource.data.keys().hasOnly(["leaves", "timesheets", "requirements", "submissions", "bench", "updatedAt"])
+  && request.resource.data.leaves is bool && request.resource.data.timesheets is bool
+  && request.resource.data.requirements is bool && request.resource.data.submissions is bool
+  && request.resource.data.bench is bool;
+      allow delete: if false;
+    }
 
     // The EmailJS credentials, private key included.
     //
