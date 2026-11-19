@@ -151,7 +151,7 @@ function samePerson(a: string, b: string): boolean {
  */
 function teamRows(a: Activity): { name: string; count: number }[] {
   const names: string[] = [];
-  for (const n of [...listRecruiterNames(a.submissionRows), ...(a.staff ?? [])]) {
+  for (const n of [...listRecruiterNames(a.submissionRows ?? []), ...(a.staff ?? [])]) {
     if (!names.some((m) => samePerson(m, n))) names.push(n);
   }
   const submitters = a.stats.recruiters.filter((r) => !r.idle && r.submissions > 0);
