@@ -9,19 +9,16 @@ import { getFirestore } from "firebase-admin/firestore";
 import { listMeetings, getMeeting, Meeting } from "./fireflies.js";
 import { briefMeetings, BriefSource, MeetingBrief, LlmConfig } from "./llm.js";
 import { sendMail, MailConfig } from "./mail.js";
+import { buildExtras, DigestExtras, NO_EXTRAS } from "./digestExtras.js";
 import { fetchReport, probeTotal } from "./ceipal.js";
 import { readCache, readCacheMeta, writeCache } from "./ceipalCache.js";
 import {
   buildStats,
+  listRecruiterNames,
   bandOf,
   pct,
   DigestStats,
-  RecruiterRow,
   Band,
-  SPEED_WINDOWS,
-  ROSTER_DAYS,
-  BAND_GOOD,
-  BAND_OK,
 } from "./recruiterStats.js";
 
 /** Where the recipient list lives. Managed by admins in Preferences. */
@@ -100,6 +97,70 @@ export interface Activity {
    * confident "0". A count nobody read must not render as a number.
    */
   activeOk: boolean;
+  /** The raw rows behind the numbers, so the extra sections reuse this pull instead of a second one. */
+  submissionRows: Record<string, unknown>[];
+  activeRows: Record<string, unknown>[];
+  /** Every active recruiter in the portal, so people who sent nothing still get a "No" row. */
+  staff?: string[];
+}
+
+// ---- The team roster ---------------------------------------------------------
+
+/** Roles listed in "By recruiter": bench sales recruiters only. */
+const RECRUITER_ROLES = ["benchsales"];
+
+const nameFromEmail = (email: string) =>
+  email.split("@")[0].split(/[._-]+/).filter(Boolean).map((p) => p[0].toUpperCase() + p.slice(1)).join(" ");
+
+/** Active recruiters' names from the portal. Accounts whose "name" is really an email get one built from it. */
+export async function loadStaffNames(): Promise<string[]> {
+  try {
+    const snap = await getFirestore().collection("userProfiles").where("role", "in", RECRUITER_ROLES).get();
+    const names = snap.docs
+      .filter((d) => d.data().active !== false)
+      .map((d) => {
+        const x = d.data();
+        const dn = String(x.displayName ?? "").trim();
+        return dn && !dn.includes("@") ? dn : nameFromEmail(String(x.email || dn || ""));
+      })
+      .filter(Boolean);
+    return [...new Set(names)];
+  } catch {
+    return [];
+  }
+}
+
+const nameTokens = (n: string) => n.toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter(Boolean);
+
+/** Same person? Equal names, or every word of the shorter name appears in the longer one ("Ravi Kumar" ~ "Ravi Kumar Reddy"). */
+function samePerson(a: string, b: string): boolean {
+  const x = nameTokens(a);
+  const y = nameTokens(b);
+  if (!x.length || !y.length) return false;
+  if (x.join(" ") === y.join(" ")) return true;
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  return short.length >= 2 && short.every((t) => long.includes(t));
+}
+
+/**
+ * One row per recruiter: Yes + count, or No.
+ *
+ * The names are everyone Ceipal has ever recorded as "Submitted by" — whatever
+ * the date — plus every bench sales recruiter in the portal. The portal spelling
+ * is folded into Ceipal's when they're the same person, so nobody is listed twice.
+ */
+function teamRows(a: Activity): { name: string; count: number }[] {
+  const names: string[] = [];
+  for (const n of [...listRecruiterNames(a.submissionRows ?? []), ...(a.staff ?? [])]) {
+    if (!names.some((m) => samePerson(m, n))) names.push(n);
+  }
+  const submitters = a.stats.recruiters.filter((r) => !r.idle && r.submissions > 0);
+  return names
+    .map((name) => {
+      const hit = submitters.find((r) => samePerson(r.name, name));
+      return { name, count: hit ? hit.submissions : 0 };
+    })
+    .sort((p, q) => q.count - p.count || p.name.localeCompare(q.name));
 }
 
 /**
@@ -115,6 +176,9 @@ export interface Activity {
  * table is an addition to it, and a Ceipal outage should cost the section, not
  * the mail.
  */
+/** A saved Ceipal copy older than this is pulled again rather than reused. */
+const CACHE_MAX_AGE_MS = 20 * 60 * 60 * 1000;
+
 export async function loadActivity(ceipalPassword: string, dayISO: string): Promise<Activity> {
   const configured = !!ceipalPassword && !ceipalPassword.startsWith("PLACEHOLDER");
 
@@ -125,18 +189,24 @@ export async function loadActivity(ceipalPassword: string, dayISO: string): Prom
 
   try {
     const meta = await readCacheMeta("submissions");
+    // A daily email must describe the day, so a saved copy from before today is
+    // pulled again whatever the row-count probe says. The probe only compares
+    // Ceipal's total, and a total that happens not to move — or a probe that
+    // fails — once left this digest reading a four-day-old copy without a word.
+    const tooOld = !!meta && meta.fetchedAt > 0 && Date.now() - meta.fetchedAt > CACHE_MAX_AGE_MS;
     let unchanged = false;
-    if (meta && meta.recordCount > 0 && configured) {
+    if (meta && meta.recordCount > 0 && configured && !tooOld) {
       try {
         unchanged = (await probeTotal("submissions", ceipalPassword)) === (meta.totalAvailable || meta.recordCount);
-      } catch {
-        // A failed probe is not evidence the cache is stale, and it is the
-        // cheaper assumption: serve what we have.
+      } catch (e) {
+        // Still serve what we have, but say why — silence here is what hid the
+        // stale data before.
         unchanged = true;
+        problem = `Couldn't check Ceipal for new submissions (${e instanceof Error ? e.message : String(e)}), so the last saved copy was used.`;
       }
     }
 
-    if (meta && meta.recordCount > 0 && (unchanged || !configured)) {
+    if (meta && meta.recordCount > 0 && (!configured || (unchanged && !tooOld))) {
       const cached = await readCache("submissions");
       if (cached && cached.rows.length > 0) {
         submissionRows = cached.rows as Record<string, unknown>[];
@@ -158,7 +228,7 @@ export async function loadActivity(ceipalPassword: string, dayISO: string): Prom
       fetchedAt = Date.now();
     }
   } catch (e) {
-    problem = e instanceof Error ? e.message : String(e);
+    problem = `Ceipal didn't answer (${e instanceof Error ? e.message : String(e)}), so the last saved copy was used.`;
     // Anything stale beats nothing.
     try {
       const cached = await readCache("submissions");
@@ -215,10 +285,12 @@ export async function loadActivity(ceipalPassword: string, dayISO: string): Prom
       fetchedAt: 0,
       activeOk: false,
       problem: problem ?? (configured ? "Ceipal returned nothing." : "Ceipal isn't configured."),
+      submissionRows: [],
+      activeRows: [],
     };
   }
 
-  return { stats: buildStats(submissionRows, activeRows, dayISO), source, fetchedAt, problem, activeOk };
+  return { stats: buildStats(submissionRows, activeRows, dayISO), source, fetchedAt, problem, activeOk, submissionRows, activeRows };
 }
 
 // ---- Colours ---------------------------------------------------------------
@@ -234,11 +306,6 @@ const BAND_STYLE: Record<Band, { bg: string; border: string; ink: string }> = {
   bad: { bg: "#fdeaea", border: "#f3c9c9", ink: "#99201f" },
   none: { bg: "#f1f3f6", border: "#dfe3ea", ink: "#5b6577" },
 };
-
-function pill(text: string, band: Band): string {
-  const c = BAND_STYLE[band];
-  return `<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:${c.bg};border:1px solid ${c.border};color:${c.ink};font-size:12px;font-weight:600;white-space:nowrap">${esc(text)}</span>`;
-}
 
 function statCard(label: string, value: string, band: Band = "none"): string {
   const c = BAND_STYLE[band];
@@ -263,59 +330,16 @@ export function renderActivityHtml(a: Activity, dayLabel: string): string {
       </p>`;
   }
 
-  const measurable = s.requirementsAnswered - s.answeredUnknown;
-  const speedPct = pct(s.answeredWithin[SPEED_WINDOWS.length - 1], measurable);
-
-  const widest = SPEED_WINDOWS[SPEED_WINDOWS.length - 1];
-
-  // Exactly one row in this ladder is coloured: the widest window, which is the
-  // only figure the legend sets a threshold for.
-  //
-  // Colouring the others went wrong twice. Banding 3h and 6h by "above zero"
-  // put a green pill next to 22% — praise for the worst number in the table.
-  // Banding "slower than 9h" by its inverse put an AMBER pill next to 33%,
-  // which reads as a verdict on 33 rather than on the 67 it stands for. A pill
-  // whose colour and number disagree is worse than no pill, so the unscored
-  // rows carry the percentage plainly and are read against the one that is
-  // scored.
-  const ladder = SPEED_WINDOWS.map((w, i) => {
-    const n = s.answeredWithin[i];
-    const p = pct(n, measurable);
-    const scored = w === widest;
-    return `<tr>
-      <td ${TD}>Answered within <strong>${w}h</strong> of posting</td>
-      <td ${TD} align="right"><strong>${n}</strong> <span style="color:#5b6577">of ${measurable}</span></td>
-      <td ${TD} align="right">${pill(p == null ? "n/a" : `${p}%`, scored ? bandOf(p) : "none")}</td>
-    </tr>`;
-  }).join("");
-
-  const latePct = pct(s.answeredLater, measurable);
-
-  // Everyone on the roster gets a row, including the people who sent nothing —
-  // that is the line this table exists to show. Idle rows are greyed and carry
-  // a dash rather than a run of zeroes, so the eye skips to them as a group
-  // instead of reading them as scores.
-  const rows = s.recruiters
-    .map((r: RecruiterRow) => {
-      if (r.idle) {
-        return `<tr>
-        <td ${TD} style="padding:6px 8px;font-size:13px;color:#5b6577;border-bottom:1px solid #eef1f5">${esc(r.name)}</td>
-        <td ${TD} align="right" colspan="4" style="padding:6px 8px;font-size:13px;color:#5b6577;border-bottom:1px solid #eef1f5">nothing submitted</td>
-        <td ${TD} align="right">${pill("—", "bad")}</td>
-      </tr>`;
-      }
-      return `<tr>
-        <td ${TD}><strong>${esc(r.name)}</strong></td>
-        <td ${TD} align="right">${r.submissions}</td>
-        <td ${TD} align="right">${r.requirements}</td>
-        <td ${TD} align="right">${r.onActive}</td>
-        <td ${TD} align="right">${r.within[0]} / ${r.within[1]} / ${r.within[2]}</td>
-        <td ${TD} align="right">${pill(r.speed == null ? "n/a" : `${r.speed}%`, bandOf(r.speed))}</td>
-      </tr>`;
-    })
+  // Every recruiter on the team gets a row, including the people who sent
+  // nothing — that is the line this table exists to show. Yes rows first.
+  const team = teamRows(a);
+  const rows = team
+    .map((r) =>
+      r.count === 0
+        ? `<tr><td ${TD}>${esc(r.name)}</td><td ${TD} align="right"><span style="color:#99201f;font-weight:600">No</span></td></tr>`
+        : `<tr><td ${TD}><strong>${esc(r.name)}</strong></td><td ${TD} align="right"><span style="color:#1b5e34;font-weight:600">Yes</span> &mdash; <strong>${r.count}</strong></td></tr>`
+    )
     .join("");
-
-  const idle = s.recruiters.filter((r) => r.idle).length;
 
   const when =
     a.fetchedAt > 0
@@ -343,46 +367,20 @@ export function renderActivityHtml(a: Activity, dayLabel: string): string {
     </tr>
   </table>
 
-  <p style="margin:12px 0 4px;font-size:13px;color:#1f2933">
-    <strong>${s.requirementsAnswered}</strong> requirement${s.requirementsAnswered === 1 ? "" : "s"} got their first profile today${
-      speedPct == null ? "" : `, ${speedPct}% of them inside ${widest} hours of being posted`
-    }.
-  </p>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">${ladder}
-    <tr>
-      <td ${TD}>Slower than <strong>${widest}h</strong></td>
-      <td ${TD} align="right"><strong>${s.answeredLater}</strong> <span style="color:#5b6577">of ${measurable}</span></td>
-      <td ${TD} align="right">${pill(latePct == null ? "n/a" : `${latePct}%`, "none")}</td>
-    </tr>
-  </table>
-  ${
-    s.answeredUnknown > 0
-      ? `<p style="margin:6px 0 0;font-size:12px;color:#5b6577">${s.answeredUnknown} requirement${s.answeredUnknown === 1 ? " carries" : "s carry"} no posting time in Ceipal, so ${s.answeredUnknown === 1 ? "it is" : "they are"} left out of the percentages above rather than counted as slow.</p>`
-      : ""
-  }
-
-  <h4 style="margin:20px 0 6px;font-size:13px;color:#0b1220">By recruiter</h4>
+  <h4 style="margin:20px 0 6px;font-size:13px;color:#0b1220">Recruiters</h4>
   ${
     rows
       ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
     <tr>
       <th ${TH}>Recruiter</th>
-      <th ${TH} align="right">Subs</th>
-      <th ${TH} align="right">Reqs</th>
-      <th ${TH} align="right">On open</th>
-      <th ${TH} align="right">&le;3/6/9h</th>
-      <th ${TH} align="right">Speed</th>
+      <th ${TH} align="right">Submitted?</th>
     </tr>${rows}
   </table>`
-      : `<p style="font-size:13px;color:#5b6577;margin:0">Nobody submitted a profile on ${esc(dayLabel)}.</p>`
+      : `<p style="font-size:13px;color:#5b6577;margin:0">No recruiter names were found in Ceipal&rsquo;s submissions report.</p>`
   }
 
-  ${s.rejectedInternally > 0 ? `<p style="margin:8px 0 0;font-size:12px;color:#5b6577">${s.rejectedInternally} profile${s.rejectedInternally === 1 ? " was" : "s were"} rejected internally and ${s.rejectedInternally === 1 ? "is" : "are"} not counted as submissions — they never reached a client.</p>` : ""}
-
   <p style="margin:10px 0 0;font-size:11px;color:#5b6577">
-    Green from ${BAND_GOOD}%, amber from ${BAND_OK}%, red below — a starting position, not an agreed target.
-    &ldquo;Speed&rdquo; is the share of a person&rsquo;s requirements answered within ${widest} hours of posting.
-    Everyone who submitted a profile in the last ${ROSTER_DAYS} days gets a row${idle > 0 ? `, which is why ${idle} of them show &ldquo;nothing submitted&rdquo;` : ""}.
+    Every recruiter in Ceipal&rsquo;s submissions report is listed, plus the portal&rsquo;s bench sales recruiters; &ldquo;No&rdquo; means nothing was submitted on ${esc(dayLabel)}.
     ${esc(when)}.${a.problem ? ` Note: ${esc(a.problem)}` : ""}
   </p>`;
 }
@@ -392,31 +390,17 @@ export function renderActivityText(a: Activity, dayLabel: string): string {
   if (a.source === "none") {
     return `Recruiter activity — no figures this time (${a.problem ?? "Ceipal report unreadable"}).`;
   }
-  const measurable = s.requirementsAnswered - s.answeredUnknown;
   const lines = [
     `Recruiter activity — ${dayLabel}`,
     `- Open requirements: ${a.activeOk ? s.activeRequirements : "unknown (could not be read)"}`,
     `- Submissions today: ${s.submissions}${a.activeOk ? ` (${s.submissionsOnActive} on open requirements)` : ""}`,
-    `- Requirements first answered today: ${s.requirementsAnswered}`,
-    ...SPEED_WINDOWS.map((w, i) => {
-      const p = pct(s.answeredWithin[i], measurable);
-      return `    within ${w}h of posting: ${s.answeredWithin[i]}${p == null ? "" : ` (${p}%)`}`;
-    }),
-    `    slower than ${SPEED_WINDOWS[SPEED_WINDOWS.length - 1]}h: ${s.answeredLater}`,
+    "",
+    "Recruiters (submitted?):",
   ];
-  if (s.answeredUnknown > 0) lines.push(`    no posting time recorded: ${s.answeredUnknown} (left out of the percentages)`);
-  lines.push("", "By recruiter (submissions / requirements / on open / <=3h,6h,9h / speed):");
-  if (s.recruiters.length === 0) lines.push("  (nobody submitted a profile)");
-  for (const r of s.recruiters) {
-    lines.push(
-      r.idle
-        ? `  ${r.name}: nothing submitted`
-        : `  ${r.name}: ${r.submissions} / ${r.requirements} / ${r.onActive} / ${r.within.join(",")} / ${r.speed == null ? "n/a" : `${r.speed}%`}`
-    );
-  }
-  if (s.rejectedInternally > 0) {
-    lines.push("", `${s.rejectedInternally} profile(s) rejected internally, not counted as submissions.`);
-  }
+  const team = teamRows(a);
+  if (team.length === 0) lines.push("  (no recruiter names found in Ceipal)");
+  for (const r of team) lines.push(`  ${r.name}: ${r.count ? `Yes — ${r.count}` : "No"}`);
+  if (a.problem) lines.push("", `Note: ${a.problem}`);
   return lines.join("\n");
 }
 
@@ -434,14 +418,15 @@ export interface DigestContent {
  * for the desk, and the activity table is the half of this mail that does not
  * depend on anyone having recorded anything.
  */
-function emptyDigest(dayLabel: string, activity: Activity): DigestContent {
+function emptyDigest(dayLabel: string, activity: Activity, extras: DigestExtras = NO_EXTRAS): DigestContent {
   const line = `No meetings were recorded on ${dayLabel}.`;
   return {
     subject: `Meeting digest — ${dayLabel} — no meetings`,
     meetingCount: 0,
-    text: `${renderActivityText(activity, dayLabel)}\n\n${line}\n\nThis note is sent daily so that silence means "nothing was recorded", not "the digest is broken".`,
+    text: `${renderActivityText(activity, dayLabel)}${extras.text}\n\n${line}\n\nThis note is sent daily so that silence means "nothing was recorded", not "the digest is broken".`,
     html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:640px;color:#1f2933">
       ${renderActivityHtml(activity, dayLabel)}
+      ${extras.html}
       <hr style="border:none;border-top:1px solid #dfe3ea;margin:26px 0 0">
       <p style="font-size:15px;margin-top:22px">${esc(line)}</p>
       <p style="font-size:12px;color:#5b6577">This note is sent daily so that silence means &ldquo;nothing was recorded&rdquo;, not &ldquo;the digest is broken&rdquo;.</p>
@@ -456,7 +441,8 @@ export function render(
   truncated: number,
   model: string,
   zone: string,
-  activity: Activity
+  activity: Activity,
+  extras: DigestExtras = NO_EXTRAS
 ): DigestContent {
   const rows = meetings
     .map((m) => {
@@ -482,6 +468,7 @@ export function render(
     <h2 style="margin:0 0 4px;font-size:18px;color:#0b1220">Meeting digest</h2>
     <p style="margin:0 0 16px;color:#5b6577;font-size:13px">${esc(dayLabel)} &middot; ${meetings.length} meeting${meetings.length === 1 ? "" : "s"}</p>
     ${renderActivityHtml(activity, dayLabel)}
+    ${extras.html}
     <hr style="border:none;border-top:1px solid #dfe3ea;margin:26px 0 0">
     <h3 style="margin:22px 0 6px;font-size:15px;color:#0b1220">What was discussed</h3>
     ${truncated > 0 ? `<p style="background:#fdf1dc;border:1px solid #f0dcb4;border-radius:6px;padding:8px 10px;font-size:13px;color:#8a6100">${truncated} transcript${truncated === 1 ? " was" : "s were"} too long to include in full; the brief covers what fitted.</p>` : ""}
@@ -497,7 +484,7 @@ export function render(
 
   const text = [
     `Meeting digest — ${dayLabel} — ${meetings.length} meeting(s)`,
-    `\n${renderActivityText(activity, dayLabel)}`,
+    `\n${renderActivityText(activity, dayLabel)}${extras.text}`,
     "\nWhat was discussed\n",
     truncated > 0 ? `(${truncated} transcript(s) were truncated to fit.)` : "",
     brief.overview,
@@ -547,15 +534,24 @@ export interface BuildOpts {
  */
 export async function buildDigest(opts: BuildOpts): Promise<DigestContent> {
   // In parallel: they share no state, and the Ceipal pull is the slow one.
-  const [activity, meetings] = await Promise.all([
+  const [activity, meetings, staff] = await Promise.all([
     loadActivity(opts.ceipalPassword, opts.dayISO),
     opts.firefliesKey
       ? listMeetings(opts.firefliesKey, SCAN_LIMIT).catch(() => [] as Meeting[])
       : Promise.resolve([] as Meeting[]),
+    loadStaffNames(),
   ]);
+  activity.staff = staff;
+
+  // Leaves, timesheets, requirements and submissions. Never throws: a section
+  // that can't be read says so in the mail instead of costing the whole digest.
+  const extras = await buildExtras(opts.dayISO, opts.zone, activity.submissionRows, activity.activeRows, activity.activeOk, {
+    ceipalPassword: opts.ceipalPassword,
+    staff,
+  });
 
   const todays = onDay(meetings, opts.dayISO, opts.zone);
-  if (todays.length === 0) return emptyDigest(opts.dayLabel, activity);
+  if (todays.length === 0) return emptyDigest(opts.dayLabel, activity, extras);
 
   const sources: BriefSource[] = [];
   for (const m of todays) {
@@ -581,8 +577,24 @@ export async function buildDigest(opts: BuildOpts): Promise<DigestContent> {
     }
   }
 
-  const { brief, truncated } = await briefMeetings(sources, opts.llm);
-  return render(opts.dayLabel, todays, brief, truncated, opts.llm.model, opts.zone, activity);
+  // The AI brief is a nice-to-have. If the model can't be reached (out of
+  // credits, down, a bad key), send the email anyway with Fireflies' own
+  // per-meeting summaries, and say why at the top of that section.
+  try {
+    const { brief, truncated } = await briefMeetings(sources, opts.llm);
+    return render(opts.dayLabel, todays, brief, truncated, opts.llm.model, opts.zone, activity, extras);
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e);
+    const short = /\b402\b|credit|subscribe/i.test(why) ? "the AI service is out of credits" : why.slice(0, 160);
+    const fallback: MeetingBrief = {
+      overview: `The AI summary couldn't be written today (${short}), so these are Fireflies' own summaries of each meeting.`,
+      themes: sources.map((x) => `${x.title}: ${x.summary?.trim() || "no summary from Fireflies"}`),
+      decisions: [],
+      actionItems: [],
+      risks: [],
+    };
+    return render(opts.dayLabel, todays, fallback, 0, "Fireflies", opts.zone, activity, extras);
+  }
 }
 
 /**

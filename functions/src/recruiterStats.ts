@@ -435,3 +435,116 @@ export function buildStats(
 
   return stats;
 }
+
+// ---- The day's submissions, as a list ----------------------------------------
+
+export interface SubmissionLine {
+  candidate: string;
+  jobTitle: string;
+  jobCode: string;
+  client: string;
+  recruiter: string;
+  status: string;
+  submittedOn: DateTime;
+  /** Extra columns, filled when the report carries them; "" otherwise. */
+  email: string;
+  phone: string;
+  location: string;
+  payRate: string;
+  workAuth: string;
+}
+
+/**
+ * Extra columns for the digest's submission list, matched on the exact header
+ * only. Kept apart from SUB_ALIASES so adding a field here can never change
+ * which column buildStats reads its numbers from.
+ */
+const DETAIL_HEADERS: Record<"email" | "phone" | "location" | "payRate" | "workAuth", string[]> = {
+  email: ["applicantemail", "emailaddress", "email", "candidateemail", "applicantemailaddress"],
+  phone: ["mobilenumber", "applicantmobile", "applicantmobilenumber", "mobile", "phone", "phonenumber", "contactnumber"],
+  location: ["applicantlocation", "candidatelocation", "currentlocation", "location", "city"],
+  payRate: ["payrate", "payratesalary", "candidatepayrate", "billrate", "rate", "expectedrate"],
+  workAuth: ["workauthorization", "workauthorisation", "visastatus", "visa", "workpermit", "authorization"],
+};
+
+function detailOf(raw: Record<string, unknown>, keyFor: Record<string, string>): Pick<SubmissionLine, "email" | "phone" | "location" | "payRate" | "workAuth"> {
+  const get = (f: keyof typeof DETAIL_HEADERS) => (keyFor[f] ? String(raw[keyFor[f]] ?? "").trim() : "");
+  return { email: get("email"), phone: get("phone"), location: get("location"), payRate: get("payRate"), workAuth: get("workAuth") };
+}
+
+/**
+ * Every profile that went out on `dayISO`, one line per candidate per
+ * requirement — folded the same way buildStats counts them, so the list and the
+ * "Submissions today" number always agree.
+ */
+export function listSubmissions(submissionRows: Record<string, unknown>[], dayISO: string): SubmissionLine[] {
+  const events = toFields(submissionRows, SUB_ALIASES);
+  // Which raw header holds each extra column (first exact match wins).
+  const keyFor: Record<string, string> = {};
+  if (submissionRows.length) {
+    const norm = Object.keys(submissionRows[0]).map((k) => [normHeader(k), k] as const);
+    for (const [field, names] of Object.entries(DETAIL_HEADERS)) {
+      for (const want of names) {
+        const hit = norm.find(([n]) => n === want);
+        if (hit) { keyFor[field] = hit[1]; break; }
+      }
+    }
+  }
+
+  interface Acc {
+    line: Omit<SubmissionLine, "submittedOn"> & { submittedOn: DateTime | null };
+    statuses: Set<string>;
+  }
+  const byKey = new Map<string, Acc>();
+  events.forEach((e, i) => {
+    const code = keyOf(e.jobCode ?? "");
+    const cand = keyOf(e.applicantName ?? "");
+    if (!code || !cand) return;
+    const k = `${code}|${cand}`;
+    const detail = detailOf(submissionRows[i], keyFor);
+    let a = byKey.get(k);
+    if (!a) {
+      a = {
+        line: {
+          candidate: (e.applicantName ?? "").trim(),
+          jobTitle: (e.jobTitle ?? "").trim(),
+          jobCode: (e.jobCode ?? "").trim(),
+          client: (e.client ?? "").trim(),
+          recruiter: (e.submittedBy ?? "").trim(),
+          status: (e.submissionStatus ?? "").trim(),
+          submittedOn: null,
+          ...detail,
+        },
+        statuses: new Set(),
+      };
+      byKey.set(k, a);
+    }
+    // Fill any detail an earlier row left blank.
+    for (const f of Object.keys(DETAIL_HEADERS) as (keyof typeof DETAIL_HEADERS)[]) {
+      if (!a.line[f] && detail[f]) a.line[f] = detail[f];
+    }
+    a.statuses.add(normHeader(e.submissionStatus));
+    // Ceipal lists status changes in order, so the last row seen is the latest status.
+    if ((e.submissionStatus ?? "").trim()) a.line.status = (e.submissionStatus ?? "").trim();
+    const ts = parseTs(e.submittedOn);
+    if (ts && (!a.line.submittedOn || ts < a.line.submittedOn)) {
+      a.line.submittedOn = ts;
+      if (e.submittedBy) a.line.recruiter = e.submittedBy.trim();
+    }
+  });
+  return [...byKey.values()]
+    .filter((a) => a.line.submittedOn && a.line.submittedOn.toFormat("yyyy-MM-dd") === dayISO && wentOut(a.statuses))
+    .map((a) => a.line as SubmissionLine)
+    .sort((x, y) => x.recruiter.localeCompare(y.recruiter) || x.submittedOn.toMillis() - y.submittedOn.toMillis());
+}
+
+/** Every distinct "Submitted by" name in the submissions report, any date. Ceipal's own spelling. */
+export function listRecruiterNames(submissionRows: Record<string, unknown>[]): string[] {
+  const seen = new Map<string, string>();
+  for (const e of toFields(submissionRows, SUB_ALIASES)) {
+    const name = (e.submittedBy ?? "").trim();
+    const k = keyOf(name);
+    if (k && !seen.has(k)) seen.set(k, name);
+  }
+  return [...seen.values()];
+}
