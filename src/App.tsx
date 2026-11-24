@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
+import CeipalApiTest from "./pages/CeipalApiTest";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
@@ -80,6 +81,7 @@ export default function App() {
         <Route path="/timesheets" element={<Timesheets />} />
         <Route path="/consultants" element={<Consultants />} />
         <Route path="/meetings" element={<Meetings />} />
+        <Route path="/ceipal-test" element={<CeipalApiTest />} />
         <Route path="/preferences" element={<Preferences />} />
       </Route>
       <Route path="*" element={<Navigate to={isConsultant ? "/portal" : "/"} replace />} />

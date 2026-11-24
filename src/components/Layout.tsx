@@ -20,6 +20,7 @@ const NAV = [
   { to: "/timesheets", icon: "⏱️", label: "Timesheets" },
   { to: "/consultants", icon: "🧾", label: "Consultants" },
   { to: "/meetings", icon: "🎙️", label: "Meetings" },
+  { to: "/ceipal-test", icon: "🔌", label: "Ceipal API Test" },
   { to: "/preferences", icon: "⚙️", label: "Preferences" },
 ];
 

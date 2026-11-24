@@ -14,7 +14,7 @@ import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
-import { fetchReport, probeTotal, reportUrl, ReportKey } from "./ceipal.js";
+import { fetchReport, probeTotal, reportUrl, ReportKey, diagnoseReport } from "./ceipal.js";
 import { readCache, readCacheMeta, writeCache, cacheEnvelope } from "./ceipalCache.js";
 import { assessResume, matchRolesToJd, assessPortfolio, planAskQuery, narrateAskResult, briefMeetings, BriefSource } from "./llm.js";
 import { searchUsers, buildPortfolio, parseGithubUsername } from "./github.js";
@@ -1792,6 +1792,33 @@ export const userOps = onCall(
  * widest timeout and memory of the four, which costs the lighter reads a little
  * more headroom each and saves three whole services.
  */
+/**
+ * Probe one Ceipal report URL and report exactly what Ceipal said.
+ *
+ * The URL comes from the client, so it is checked against a strict pattern first:
+ * without that this would be an open server-side fetch proxy. Only Ceipal's own
+ * report-data path on the expected host is accepted, and only the report id and
+ * query string are variable.
+ */
+const CEIPAL_REPORT_URL_RE =
+  /^https:\/\/atsbi\.ceipal\.com\/api\/report-details\/get-report-data\/[A-Za-z0-9_-]+(\?[A-Za-z0-9_=&-]*)?$/;
+
+async function ceipalDiagnoseHandler(request: CallableRequest) {
+  const url = String(request.data?.url ?? "").trim();
+  if (!CEIPAL_REPORT_URL_RE.test(url)) {
+    throw new HttpsError(
+      "invalid-argument",
+      "url must be a Ceipal report-data URL on atsbi.ceipal.com."
+    );
+  }
+  const password = CEIPAL_PASSWORD.value();
+  if (!password || password.startsWith("PLACEHOLDER")) {
+    throw new HttpsError("failed-precondition", "CEIPAL_PASSWORD is not configured.");
+  }
+  const result = await diagnoseReport(url, password);
+  return { ok: true, data: result };
+}
+
 export const ceipalData = onCall(
   { ...commonOpts, secrets: [CEIPAL_PASSWORD], timeoutSeconds: 540, memory: "512MiB" },
   async (request) => {
@@ -1799,6 +1826,8 @@ export const ceipalData = onCall(
     switch (action) {
       case "report":
         return ceipalReportHandler(request);
+      case "diagnose":
+        return ceipalDiagnoseHandler(request);
       case "recruiterActivity":
         return recruiterActivityHandler(request);
       case "activeJobs":

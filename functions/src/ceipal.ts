@@ -125,6 +125,101 @@ async function fetchPage(url: string, password: string): Promise<Record<string, 
   return checkPayload(await res.json()) as Record<string, unknown>;
 }
 
+export interface Diagnosis {
+  authOk: boolean;
+  authStatus: number;
+  /** Which JSON field the token came out of, so a tenant that names it oddly is visible. */
+  tokenField: string | null;
+  /** First 8 chars only. Enough to tell a real token from a pasted apiKey, never the token. */
+  tokenPrefix: string | null;
+  reportStatus: number | null;
+  /** Truncated response body, so Ceipal's own error text reaches the operator. */
+  reportBody: string | null;
+  recordCount: number | null;
+  rowsReturned: number | null;
+  error: string | null;
+}
+
+/**
+ * Single-shot probe of one report URL: mint a token, then GET one row.
+ * Built for "is this endpoint actually reachable with our credentials", so it
+ * reports Ceipal's own status codes and error text rather than throwing them away.
+ * Never returns the password or the full token.
+ */
+export async function diagnoseReport(url: string, password: string): Promise<Diagnosis> {
+  const out: Diagnosis = {
+    authOk: false, authStatus: 0, tokenField: null, tokenPrefix: null,
+    reportStatus: null, reportBody: null, recordCount: null, rowsReturned: null, error: null,
+  };
+
+  // Auth leg. Bypasses the module token cache so the probe always tests a fresh mint.
+  let token = "";
+  try {
+    const authUrl = env("CEIPAL_AUTH_URL", "https://api.ceipal.com/v2/createAuthtoken/");
+    const res = await fetch(authUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: env("CEIPAL_EMAIL"), password, apiKey: env("CEIPAL_API_KEY") }),
+    });
+    out.authStatus = res.status;
+    const text = await res.text().catch(() => "");
+    if (!res.ok) {
+      out.error = `Auth failed (${res.status}): ${text.slice(0, 300)}`;
+      return out;
+    }
+    let data: unknown = null;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      out.error = `Auth returned non-JSON: ${text.slice(0, 200)}`;
+      return out;
+    }
+    const o = (data ?? {}) as Record<string, unknown>;
+    for (const k of ["access_token", "token", "accessToken", "authtoken", "auth_token"]) {
+      if (typeof o[k] === "string" && (o[k] as string).length > 0) {
+        token = o[k] as string;
+        out.tokenField = k;
+        break;
+      }
+    }
+    if (!token) {
+      out.error = `Auth succeeded but no token field found. Keys: ${Object.keys(o).join(", ")}`;
+      return out;
+    }
+    out.authOk = true;
+    out.tokenPrefix = token.slice(0, 8);
+  } catch (e) {
+    out.error = `Auth request threw: ${(e as Error).message}`;
+    return out;
+  }
+
+  // Report leg. One row is enough to prove access.
+  try {
+    const sep = url.includes("?") ? "&" : "?";
+    const res = await fetch(`${url}${sep}limit=1&page=1`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+    });
+    out.reportStatus = res.status;
+    const text = await res.text().catch(() => "");
+    out.reportBody = text.slice(0, 600);
+    if (res.ok) {
+      try {
+        const json = JSON.parse(text) as Record<string, unknown>;
+        out.recordCount = Number(json.record_count) || 0;
+        out.rowsReturned = Array.isArray(json.result) ? json.result.length : 0;
+      } catch {
+        out.error = "Report returned 200 but the body was not JSON.";
+      }
+    } else {
+      out.error = `Report fetch failed (${res.status}).`;
+    }
+  } catch (e) {
+    out.error = `Report request threw: ${(e as Error).message}`;
+  }
+  return out;
+}
+
 /**
  * Cheap freshness probe: fetch only page 1 (limit=1) and return Ceipal's current
  * record_count (the report's total available). One fast request, no full pull.
